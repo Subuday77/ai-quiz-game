@@ -1,3 +1,8 @@
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from define_ai_provider import LLMClient
+
 LANGUAGE_DICT = {
     1: "English",
     2: "Russian",
@@ -142,6 +147,11 @@ MESSAGE = "message"
 
 MAX_RETRIES = 5
 
-def client():
+
+def client() -> "LLMClient":
+    """
+    Lazily create the configured LLM client.
+    :return: Configured LLMClient instance.
+    """
     from define_ai_provider import get_client
     return get_client()

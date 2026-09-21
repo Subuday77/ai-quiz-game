@@ -1,5 +1,6 @@
 import os
 from types import SimpleNamespace
+from typing import Any
 
 import boto3
 from openai import OpenAI
@@ -12,7 +13,15 @@ PROVIDER = os.getenv(LLM_PROVIDER, OPENAI).lower()
 
 
 class LLMClient:
-    def __init__(self, provider: str):
+    def __init__(self, provider: str) -> None:
+        """
+        Initialize a provider-specific LLM client.
+        :param provider: Provider identifier to configure: openai, nvidia, or bedrock.
+        :return: None.
+        Raise:
+            ValueError: If the provider is not supported.
+            KeyError: If a required environment variable is missing.
+        """
         self.provider = provider
         self.responses = self
 
@@ -46,7 +55,17 @@ class LLMClient:
             max_output_tokens=500,
             reasoning=None,
             temperature=None,
-    ):
+    ) -> Any:
+        """
+        Create an LLM response through the configured provider.
+        :param model: Optional model argument kept for API compatibility.
+        :param instructions: System instructions for the model.
+        :param input: User input sent to the model.
+        :param max_output_tokens: Maximum number of output tokens to request.
+        :param reasoning: Optional reasoning configuration for providers that support it.
+        :param temperature: Optional sampling temperature.
+        :return: Response object with an output_text attribute or provider-native response.
+        """
         if self.provider == OPENAI:
             return self.client.responses.create(
                 model=self.model,
@@ -122,6 +141,11 @@ class LLMClient:
 
 
 def normalize_output(text: str) -> str:
+    """
+    Normalize model output by removing optional Markdown code fences.
+    :param text: Raw text returned by the model.
+    :return: Cleaned text content.
+    """
     text = text.strip()
 
     if text.startswith("```"):
@@ -139,5 +163,9 @@ def normalize_output(text: str) -> str:
     return text
 
 
-def get_client():
+def get_client() -> LLMClient:
+    """
+    Build an LLM client from the configured provider environment value.
+    :return: Configured LLMClient instance.
+    """
     return LLMClient(provider=PROVIDER)

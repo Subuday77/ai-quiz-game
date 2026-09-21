@@ -1,5 +1,6 @@
 import json
 import random
+from typing import Any
 
 import colorama
 from dotenv import load_dotenv, find_dotenv
@@ -11,7 +12,12 @@ from consts import (client, QUESTION_PROMPT, LANGUAGE_DICT, QUESTION, ANSWERS, D
                     QUESTION_CATEGORIES)
 
 
-def main(players_name: str):
+def main(players_name: str) -> None:
+    """
+    Run the quiz game for the selected player.
+    :param players_name: Name of the player shown in the greeting.
+    :return: None.
+    """
     print(f'Hi, {players_name}')
     print('Let\'s play a game!')
     language = language_select()
@@ -39,7 +45,11 @@ def main(players_name: str):
         exit(1)
 
 
-def language_select():
+def language_select() -> str:
+    """
+    Ask the player to choose a supported question language.
+    :return: Selected language name.
+    """
     while True:
         print("Choose language.")
 
@@ -58,7 +68,16 @@ def language_select():
         print("Invalid choice. Try again.")
 
 
-def create_question(complexity: int, language: str, category: str):
+def create_question(complexity: int, language: str, category: str) -> dict[str, Any]:
+    """
+    Generate one quiz question using the configured LLM provider.
+    :param complexity: Difficulty level from 0 to 15.
+    :param language: Language to use for the generated question.
+    :param category: Topic category for the generated question.
+    :return: Question data with difficulty, question text, answers, and correct answer.
+    Raise:
+        ValueError: If complexity is outside the supported range.
+    """
     if not 0 <= complexity <= 15:
         raise ValueError("Complexity must be between 0 and 15")
 
@@ -80,7 +99,12 @@ def create_question(complexity: int, language: str, category: str):
     return json.loads(response.output_text)
 
 
-def ask_question(question_object):
+def ask_question(question_object: dict[str, Any]) -> tuple[bool, int]:
+    """
+    Display a question, read the player's answer, and calculate the next difficulty.
+    :param question_object: Question data returned by create_question.
+    :return: Tuple with answer correctness and resulting difficulty level.
+    """
     complexity = question_object[DIFFICULTY]
     question = question_object[QUESTION]
     answers = question_object[ANSWERS]
