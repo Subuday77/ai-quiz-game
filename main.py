@@ -110,7 +110,7 @@ def ask_question(question_object: dict[str, Any]) -> tuple[bool, int]:
     answers = question_object[ANSWERS]
     correct_answer = question_object[CORRECT_ANSWER]
 
-    print(colorama.Fore.BLUE)
+    print(colorama.Fore.LIGHTMAGENTA_EX)
     print(f"QUESTION {complexity + 1}:")
     print(question)
     print("=" * 20)
