@@ -146,6 +146,7 @@ OUTPUT = "output"
 MESSAGE = "message"
 
 MAX_RETRIES = 5
+MAX_DIFFICULTY = 15
 
 
 def client() -> "LLMClient":

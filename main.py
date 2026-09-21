@@ -1,5 +1,6 @@
 import json
 import random
+import sys
 from typing import Any
 
 import colorama
@@ -9,7 +10,7 @@ load_dotenv(find_dotenv())
 colorama.init()
 
 from consts import (client, QUESTION_PROMPT, LANGUAGE_DICT, QUESTION, ANSWERS, DIFFICULTY, CORRECT_ANSWER,
-                    QUESTION_CATEGORIES)
+                    QUESTION_CATEGORIES, MAX_DIFFICULTY)
 
 
 def main(players_name: str) -> None:
@@ -22,27 +23,28 @@ def main(players_name: str) -> None:
     print('Let\'s play a game!')
     language = language_select()
     complexity = 0
+    category_index = 0
     categories = QUESTION_CATEGORIES.copy()
     random.shuffle(categories)
-    random.shuffle(categories)
-    question = create_question(complexity, language, categories[0])
+    question = create_question(complexity, language, categories[category_index])
     # print(question)
     result = True
     while result:
         result, complexity = ask_question(question)
-        if complexity > 15 or not result:
+        if complexity > MAX_DIFFICULTY or not result:
             break
-        categories.pop(0)
-        question = create_question(complexity, language, categories[0])
-    if complexity > 15:
+        categories.pop(category_index)
+        category_index = random.randrange(len(categories))
+        question = create_question(complexity, language, categories[category_index])
+    if complexity > MAX_DIFFICULTY:
         print(colorama.Fore.LIGHTGREEN_EX)
         print('Congratulations! You have completed the game.' + colorama.Fore.RESET)
-        exit(0)
+        sys.exit(0)
     else:
         print(colorama.Fore.YELLOW)
         print(f'Unfortunately, you lose this time.')
         print('Next time try harder.')
-        exit(1)
+        sys.exit(1)
 
 
 def language_select() -> str:
