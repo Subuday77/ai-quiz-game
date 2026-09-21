@@ -2,13 +2,14 @@
 
 A command-line trivia game inspired by "Who Wants to Be a Millionaire?".
 
-The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends when the player answers incorrectly or completes all 16 difficulty levels.
+The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends when the player answers incorrectly or completes the configured maximum difficulty.
 
 ## Features
 
 - Interactive terminal quiz flow.
 - Language selection for generated questions.
-- Difficulty levels from 0 to 15.
+- Difficulty levels from 0 to `MAX_DIFFICULTY`.
+- Runtime tuning through `config.py`.
 - Randomized question categories without repetition within a single game.
 - Four-answer multiple-choice format.
 - Configurable LLM provider:
@@ -20,12 +21,13 @@ The app generates multiple-choice questions with an LLM, increases the difficult
 
 ```text
 .
-├── main.py                 # Game loop and question flow
-├── define_ai_provider.py   # LLM provider adapter
-├── consts.py               # Prompts, constants, categories, provider keys
-├── requirements.txt        # Python dependencies
-├── .env.example            # Example environment configuration
-└── .gitignore
++-- main.py                 # Game loop and question flow
++-- define_ai_provider.py   # LLM provider adapter
++-- consts.py               # Prompts, constants, categories, provider keys
++-- config.py               # Game and LLM request tuning
++-- requirements.txt        # Python dependencies
++-- .env.example            # Example environment configuration
++-- .gitignore
 ```
 
 ## Requirements
@@ -92,6 +94,20 @@ AWS_REGION=us-east-1
 BEDROCK_MODEL_ID=your-bedrock-model-id
 ```
 
+## Game Settings
+
+Game and LLM request settings live in `config.py`:
+
+```python
+MAX_OUTPUT_TOKENS = 500
+MAX_DIFFICULTY = 15
+TEMPERATURE = 1.0
+```
+
+- `MAX_OUTPUT_TOKENS` controls the maximum output size requested from the LLM.
+- `MAX_DIFFICULTY` controls the final difficulty level required to complete the game.
+- `TEMPERATURE` controls response randomness for question generation.
+
 ## Run
 
 Start the game:
@@ -100,7 +116,7 @@ Start the game:
 python main.py
 ```
 
-The game asks for your name and then lets you choose the language for the questions. Each correct answer advances the difficulty level. One incorrect answer ends the game.
+The game asks for your name and then lets you choose the language for the questions. Each correct answer advances the difficulty level and selects another unused category. One incorrect answer ends the game.
 
 ## Example
 
@@ -132,6 +148,13 @@ Correct!
 
 ## Environment Notes
 
-Do not commit `.env`; it contains secrets and should remain ignored by `.gitignore`.
+Do not commit `.env`; it contains secrets and is ignored by `.gitignore`.
 
 Use `.env.example` as the shared template for required configuration.
+
+## Main Files
+
+- `main.py` handles player input, language selection, question creation, category selection, and answer checking.
+- `define_ai_provider.py` provides a common client interface for OpenAI, NVIDIA, and Bedrock.
+- `consts.py` stores the quiz prompt, supported languages, question categories, and shared constants.
+- `config.py` stores adjustable runtime values for output length, maximum difficulty, and temperature.

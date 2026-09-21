@@ -10,7 +10,8 @@ load_dotenv(find_dotenv())
 colorama.init()
 
 from consts import (client, QUESTION_PROMPT, LANGUAGE_DICT, QUESTION, ANSWERS, DIFFICULTY, CORRECT_ANSWER,
-                    QUESTION_CATEGORIES, MAX_DIFFICULTY)
+                    QUESTION_CATEGORIES)
+from config import MAX_DIFFICULTY, MAX_OUTPUT_TOKENS, TEMPERATURE
 
 
 def main(players_name: str) -> None:
@@ -80,8 +81,8 @@ def create_question(complexity: int, language: str, category: str) -> dict[str, 
     Raise:
         ValueError: If complexity is outside the supported range.
     """
-    if not 0 <= complexity <= 15:
-        raise ValueError("Complexity must be between 0 and 15")
+    if not 0 <= complexity <= MAX_DIFFICULTY:
+        raise ValueError(f"Complexity must be between 0 and {MAX_DIFFICULTY}")
 
     response = client().responses.create(
 
@@ -90,12 +91,12 @@ def create_question(complexity: int, language: str, category: str) -> dict[str, 
         input=f"Generate a question with difficulty level {complexity}. "
               f"Topic: {category}. "
               f"Use {language} to choose a language of question.",
-        max_output_tokens=500,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
 
         reasoning={
             "effort": "none"
         },
-        temperature=1.0
+        temperature=TEMPERATURE
     )
     # print(repr(response.output_text))
     return json.loads(response.output_text)
