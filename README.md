@@ -1,171 +1,82 @@
 # AI Quiz Game
 
-A command-line trivia game inspired by "Who Wants to Be a Millionaire?".
+A Python + Angular AI-generated trivia game (15 main questions plus a secret 16th).
 
-The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends on a wrong main-round answer or after 15 main questions and an optional secret 16th bonus question.
+Development continues in the **feature/quiz-web-foundation** branch. Do not merge it into master until local verification.
 
-## Features
+## Current local prototype
 
-- Interactive terminal quiz flow.
-- Language selection for generated questions.
-- 15 main questions (difficulty 0–14) and a bonus question (difficulty 15) unlocked after a perfect run without hints.
-- Runtime tuning through `config.py`.
-- Randomized question categories without repetition within a single game.
-- Four-answer multiple-choice format.
-- Configurable LLM provider:
-  - OpenAI
-  - NVIDIA OpenAI-compatible API
-  - AWS Bedrock
+- Python FastAPI backend, Angular standalone frontend, and an Angular dev-server proxy to /api.
+- AI question generation via the existing OpenAI / NVIDIA / Bedrock adapter.
+- Pydantic validation: one question, four nonempty distinct choices (A–D), a valid answer key, and the expected difficulty. Invalid AI-generated data is retried at most 3 times.
+- Server-side game state and correct-answer verification. The current question response does **not** contain the correct answer. Answer submissions are single-use.
+- 15 levels (difficulty 0–14): bronze at 5, silver at 10, gold at 15. A no-hint run unlocks a secret difficulty-15 question with a platinum award on success.
+- No persistence yet: stars and games reset when the server restarts. The console version still works.
 
-## Project Structure
+## Repository layout
 
-```text
-.
-+-- main.py                 # Game loop and question flow
-+-- define_ai_provider.py   # LLM provider adapter
-+-- consts.py               # Prompts, constants, categories, provider keys
-+-- config.py               # Game and LLM request tuning
-+-- requirements.txt        # Python dependencies
-+-- .env.example            # Example environment configuration
-+-- .gitignore
-```
+~~~text
+ai-quiz-game/
+├── backend/
+│   ├── api.py                    # FastAPI endpoints and temporary sessions
+│   ├── question_schema.py        # Pydantic validation + public response
+│   ├── game_logic.py             # Independent game rules
+│   ├── question_generator.py     # Calls the configured AI provider
+│   ├── define_ai_provider.py     # OpenAI / NVIDIA / Bedrock adapter
+│   ├── main.py                   # Original terminal game
+│   ├── consts.py / config.py
+│   ├── requirements.txt
+│   └── tests/
+├── frontend/                     # Angular application
+├── docs/ROADMAP.md
+├── docs/LOCAL_DEVELOPMENT.md
+└── .env.example
+~~~
 
-## Requirements
+## Start locally using VS Code (Windows PowerShell)
 
-- Python 3.10 or newer
-- An API key or credentials for one supported LLM provider
+Prerequisites: Python 3.10+, Node.js 22.12+ or compatible Angular-supported LTS, npm.
 
-Install dependencies:
+**Terminal 1 — Python backend:**
 
-```bash
-pip install -r requirements.txt
-```
+~~~powershell
+git switch feature/quiz-web-foundation
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item ..\.env.example .env
+~~~
 
-## Configuration
+Edit backend/.env: set LLM_PROVIDER, the selected provider's API key and model ID (for example NVIDIA_API_KEY and NVIDIA_MODEL_ID). Never commit secrets.
 
-Create a local `.env` file from the example.
-
-### Windows PowerShell
-
-```powershell
-Copy-Item .env.example .env
-```
-
-### macOS / Linux / Git Bash
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env` and set the provider you want to use:
-
-```env
-LLM_PROVIDER=openai
-```
-
-Supported values:
-
-- `openai`
-- `nvidia`
-- `bedrock`
-
-Set the required credentials for the selected provider.
-
-### OpenAI
-
-```env
-OPENAI_API_KEY=your-key-here
-OPENAI_MODEL_ID=your-model-id
-```
-
-### NVIDIA
-
-```env
-NVIDIA_API_KEY=your-key-here
-NVIDIA_MODEL_ID=your-model-id
-```
-
-### AWS Bedrock
-
-```env
-AWS_ACCESS_KEY_ID=your-key-here
-AWS_SECRET_ACCESS_KEY=your-secret-here
-AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=your-bedrock-model-id
-```
-
-## Game Settings
-
-Game and LLM request settings live in `config.py`:
-
-```python
-MAX_OUTPUT_TOKENS = 500
-MAX_DIFFICULTY = 15
-TEMPERATURE = 1.0
-```
-
-- `MAX_OUTPUT_TOKENS` controls the maximum output size requested from the LLM.
-- `MAX_DIFFICULTY` controls the highest generated difficulty level (15 is reserved for the bonus question).
-- `TEMPERATURE` controls response randomness for question generation.
-
-## Run
-
-Start the game:
-
-```bash
-python main.py
-```
-
-The game asks for your name and then lets you choose the language for the questions. Each correct answer advances the difficulty level and selects another unused category. One incorrect answer ends the game.
-
-## Example
-
-```text
-Hello, what is your name?
-Alex
-Hi, Alex
-Let's play a game!
-
-Choose language.
-1 English
-2 Russian
-3 Hebrew
-...
-
-Selected language: English
-
-QUESTION 1:
-Which planet is known as the Red Planet?
-====================
-A. Venus
-B. Mars
-C. Jupiter
-D. Mercury
-
-B
-Correct!
-```
-
-## Environment Notes
-
-Do not commit `.env`; it contains secrets and is ignored by `.gitignore`.
-
-Use `.env.example` as the shared template for required configuration.
-
-## Main Files
-
-- `main.py` handles player input, language selection, question creation, category selection, and answer checking.
-- `define_ai_provider.py` provides a common client interface for OpenAI, NVIDIA, and Bedrock.
-- `consts.py` stores the quiz prompt, supported languages, question categories, and shared constants.
-- `config.py` stores adjustable runtime values for output length, maximum difficulty, and temperature.
-
-## Refactoring and tests
-
-The ongoing web-app roadmap is documented in [docs/ROADMAP.md](docs/ROADMAP.md).
-The CLI now uses the independent `game_logic.py` engine and `question_generator.py` adapter.
-The current CLI has no hint actions, so a perfect 15-answer run unlocks question 16.
-Run the logic unit tests without API keys:
-
-```bash
+~~~powershell
 python -m unittest discover -s tests -v
-```
+python -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
+~~~
+
+Test API: http://127.0.0.1:8000/docs and http://127.0.0.1:8000/api/health
+
+**Terminal 2 — Angular:**
+
+~~~powershell
+cd frontend
+npm install
+npm start
+~~~
+
+Open http://127.0.0.1:4200 — Angular requests /api on port 4200 and its proxy forwards to FastAPI at port 8000. You do not need to configure CORS for this local setup.
+
+If PowerShell blocks activation scripts, either configure process-local execution policy or run commands using the .venv Python executable directly.
+
+## Learn how it works
+
+- [Local run guide](docs/LOCAL_DEVELOPMENT.md)
+- [How the API and frontend communicate](docs/ARCHITECTURE.md)
+- [Roadmap and requirements](docs/ROADMAP.md)
+
+## Known limits before production
+
+This is a *local prototype*, not a deployed public service. In-memory sessions, no login, no database, no spending limits/rate limits, no persistent achievements and no paid hint actions yet. The existing AI provider integration has **not** been verified with a real API key in this iteration. Angular's full dependency installation/build must be verified on a connected development machine.
+
+Local test suite does not use an AI API key. The user-facing question language selector does not yet translate the interface; interface localization is planned separately.

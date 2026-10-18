@@ -57,6 +57,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(generated.call_count, 3)
 
+    @patch("api.create_question")
+    def test_perfect_run_unlocks_platinum_on_question_16(self, generated):
+        generated.side_effect = lambda difficulty, language, category: {
+            **QUESTION, "difficulty": difficulty,
+        }
+        awards = []
+        for number in range(1, 17):
+            question = self.client.get(f"/api/games/{self.id}/question")
+            self.assertEqual(question.status_code, 200)
+            self.assertEqual(question.json()["number"], number)
+            self.assertEqual(question.json()["bonus"], number == 16)
+            result = self.client.post(f"/api/games/{self.id}/answer", json={
+                "question_id": question.json()["question_id"], "answer": "B",
+            })
+            self.assertEqual(result.status_code, 200)
+            if result.json()["achievement"]:
+                awards.append(result.json()["achievement"])
+        self.assertEqual(awards, ["bronze", "silver", "gold", "platinum"])
+        self.assertEqual(result.json()["phase"], "completed")
+        self.assertEqual(generated.call_count, 16)
+        self.assertEqual(self.client.get(f"/api/games/{self.id}/question").status_code, 409)
+
+    @patch("api.create_question", side_effect=RuntimeError("Provider down"))
+    def test_provider_error_is_not_retried(self, generated):
+        result = self.client.get(f"/api/games/{self.id}/question")
+        self.assertEqual(result.status_code, 503)
+        generated.assert_called_once()
+
     def test_reject_unsupported_language(self):
         result = self.client.post("/api/games", json={"language": "Klingon"})
         self.assertEqual(result.status_code, 422)
