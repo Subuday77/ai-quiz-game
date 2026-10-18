@@ -46,9 +46,85 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .star-item.platinum .star-icon { color: #a9f1f5; }
 
 .primary { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
-.button-spinner { width: 15px; height: 15px; flex: 0 0 15px; border: 2px solid #20233a4d; border-top-color: #20233a; border-radius: 50%; animation: button-spin .75s linear infinite; }
-@keyframes button-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .button-spinner { animation: none; border-top-color: transparent; } }
+/* Adapted from the selected CSS Loaders two-gears animation, recolored for this UI.
+   The spinner is intentionally OUTSIDE the button, so button width stays stable. */
+.question-actions { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.gear-loader {
+  --size: 1px;
+  --gear-hole: #232747;
+  --gear-primary: #8ce9ef;
+  --gear-secondary: #bca5ff;
+  position: relative;
+  display: inline-block;
+  width: calc(60 * var(--size));
+  height: calc(40 * var(--size));
+  flex: 0 0 calc(60 * var(--size));
+  margin-top: 14px;
+}
+.gear-loader::before,
+.gear-loader::after {
+  content: '';
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+}
+.gear-loader::before {
+  top: 0;
+  left: 0;
+  width: calc(36 * var(--size));
+  height: calc(36 * var(--size));
+  background-color: var(--gear-primary);
+  background-image:
+    radial-gradient(circle calc(8 * var(--size)) at 50% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 50% 0, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 0 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 100% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 50% 100%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 83.33% 13.89%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 83.33% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 13.89% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 13.89% 13.89%, var(--gear-hole) 100%, transparent 0);
+  animation: gear-turn 2.1s linear infinite;
+}
+.gear-loader::after {
+  top: calc(15 * var(--size));
+  left: calc(35 * var(--size));
+  width: calc(24 * var(--size));
+  height: calc(24 * var(--size));
+  background-color: var(--gear-secondary);
+  background-image:
+    radial-gradient(circle calc(5 * var(--size)) at 50% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 50% 0, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 0 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 100% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 50% 100%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 83.33% 12.5%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 83.33% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 12.5% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 12.5% 12.5%, var(--gear-hole) 100%, transparent 0);
+  animation: gear-turn 2.8s linear infinite reverse;
+}
+@keyframes gear-turn {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gear-loader::before,
+  .gear-loader::after { animation: none; }
+}
 @media (max-width: 640px) {
   .brand { margin-bottom: 20px; }
   .star-dashboard { grid-template-columns: 1fr; gap: 8px; }

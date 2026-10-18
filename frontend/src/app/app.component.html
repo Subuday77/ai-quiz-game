@@ -42,10 +42,11 @@
       <select id="language" [(ngModel)]="selectedLanguage">
         <option *ngFor="let language of languages" [value]="language">{{ language }}</option>
       </select>
-      <button class="primary" (click)="startGame()" [disabled]="loading">
-        <span *ngIf="loading" class="button-spinner" aria-hidden="true"></span>
-        {{ loading ? 'Generating question…' : 'Start game →' }}
-      </button>
+      <div class="question-actions">
+        <button class="primary" (click)="startGame()" [disabled]="loading">Start game →</button>
+        <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
+        <span *ngIf="loading" class="sr-only" role="status">Generating a question…</span>
+      </div>
     </div>
 
     <div *ngIf="screen === 'question' && current as question" class="question">
@@ -62,10 +63,13 @@
       <p *ngIf="result.correct">That is the correct answer.</p>
       <p *ngIf="!result.correct">The correct answer was <strong>{{ result.correct_answer }} — {{ correctAnswerText }}</strong>.</p>
       <div class="achievement" *ngIf="result.achievement">★ {{ result.achievement | titlecase }} star unlocked!</div>
-      <button class="primary" (click)="continue()" [disabled]="loading">
-        <span *ngIf="loading" class="button-spinner" aria-hidden="true"></span>
-        {{ loading ? 'Generating question…' : (gameEnded ? 'See results →' : 'Next question →') }}
-      </button>
+      <div class="question-actions">
+        <button class="primary" (click)="continue()" [disabled]="loading">
+          {{ gameEnded ? 'See results →' : 'Next question →' }}
+        </button>
+        <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
+        <span *ngIf="loading" class="sr-only" role="status">Generating the next question…</span>
+      </div>
     </div>
 
     <div *ngIf="screen === 'done'" class="results">
