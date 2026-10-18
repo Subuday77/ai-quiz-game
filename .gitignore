@@ -1,2 +1,13 @@
-
 .env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+node_modules/
+frontend/dist/
+dist/
+.angular/
+coverage/
+*.log
