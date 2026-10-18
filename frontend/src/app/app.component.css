@@ -1,6 +1,6 @@
 :host { display: block; min-height: 100vh; background: radial-gradient(ellipse at 20% 0, #373064 0, transparent 48%),radial-gradient(ellipse at 90% 95%,#143a5a 0,transparent 48%); }
 .shell { max-width: 920px; margin: 0 auto; padding: 38px 22px 24px; }
-.brand { display: flex; align-items: center; gap: 9px; letter-spacing: .13em; font-size: 14px; font-weight: 750; margin-bottom: 76px; }
+.brand { display: flex; align-items: center; gap: 9px; letter-spacing: .13em; font-size: 14px; font-weight: 750; margin-bottom: 30px; }
 .brand strong { color: #8de8f4; }
 .spark { color: #b9a0ff; font-size: 24px; }
 .prototype { margin-inline-start: auto; border: 1px solid #ffffff30; color: #c5c7dd; border-radius: 25px; padding: 7px 11px; font-size: 10px; letter-spacing: .1em; }
@@ -29,3 +29,33 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 .error { margin-top: 18px; color: #ffb9bb; background: #7c324433; border-radius: 8px; padding: 12px; line-height: 1.4; }
 footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; }
 @media (max-width: 640px) { .brand { margin-bottom: 35px; } .answers { grid-template-columns: 1fr; } .card { min-height: auto; } }
+
+/* Two always-visible star counters. Prototype all-time totals live in this browser only. */
+.star-dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+.star-panel { padding: 16px 18px; background: #181a37d9; border: 1px solid #ffffff20; border-radius: 15px; min-width: 0; }
+.star-panel-title { letter-spacing: .13em; font-size: 11px; font-weight: 800; color: #acb6da; margin-bottom: 12px; }
+.star-local { font-size: 10px; letter-spacing: normal; text-transform: none; font-weight: 500; color: #8c93b8; }
+.star-items { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.star-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; border: 1px solid #ffffff12; background: #ffffff08; border-radius: 10px; padding: 7px 4px; }
+.star-icon { font-size: 21px; line-height: 1; }
+.star-label { font-size: 10px; line-height: 1.2; color: #c4c9e2; overflow-wrap: anywhere; text-align: center; }
+.star-number { font-size: 15px; color: #f6f6ff; }
+.star-item.bronze .star-icon { color: #d6996e; }
+.star-item.silver .star-icon { color: #c2d3e8; }
+.star-item.gold .star-icon { color: #ffd26f; }
+.star-item.platinum .star-icon { color: #a9f1f5; }
+
+.primary { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+.button-spinner { width: 15px; height: 15px; flex: 0 0 15px; border: 2px solid #20233a4d; border-top-color: #20233a; border-radius: 50%; animation: button-spin .75s linear infinite; }
+@keyframes button-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .button-spinner { animation: none; border-top-color: transparent; } }
+@media (max-width: 640px) {
+  .brand { margin-bottom: 20px; }
+  .star-dashboard { grid-template-columns: 1fr; gap: 8px; }
+  .star-panel { padding: 12px; }
+  .star-items { gap: 5px; }
+  .star-item { flex-direction: row; padding: 7px 3px; gap: 3px; flex-wrap: wrap; }
+  .star-icon { font-size: 15px; }
+  .star-label { font-size: 10px; }
+  .star-number { font-size: 13px; }
+}

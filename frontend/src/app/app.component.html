@@ -1,5 +1,29 @@
 <main class="shell" [attr.dir]="rtl ? 'rtl' : 'ltr'">
   <header class="brand"><span class="spark">✦</span><span>AI QUIZ <strong>GAME</strong></span><span class="prototype">LOCAL PREVIEW</span></header>
+  <section class="star-dashboard" aria-label="Star rewards">
+    <div class="star-panel">
+      <div class="star-panel-title">THIS GAME</div>
+      <div class="star-items">
+        <div class="star-item" *ngFor="let tier of starTiers"
+             [ngClass]="tier.key" [attr.aria-label]="tier.label + ': ' + currentStars[tier.key]">
+          <span class="star-icon" aria-hidden="true">★</span>
+          <span class="star-label">{{ tier.label }}</span>
+          <strong class="star-number">{{ currentStars[tier.key] }}</strong>
+        </div>
+      </div>
+    </div>
+    <div class="star-panel">
+      <div class="star-panel-title">ALL TIME <span class="star-local">(this browser)</span></div>
+      <div class="star-items">
+        <div class="star-item" *ngFor="let tier of starTiers"
+             [ngClass]="tier.key" [attr.aria-label]="tier.label + ': ' + totalStars[tier.key]">
+          <span class="star-icon" aria-hidden="true">★</span>
+          <span class="star-label">{{ tier.label }}</span>
+          <strong class="star-number">{{ totalStars[tier.key] }}</strong>
+        </div>
+      </div>
+    </div>
+  </section>
   <section class="card">
     <div class="eyebrow">KNOWLEDGE IS YOUR SUPERPOWER</div>
     <h1 *ngIf="screen === 'setup'">Ready to play?</h1>
@@ -18,7 +42,10 @@
       <select id="language" [(ngModel)]="selectedLanguage">
         <option *ngFor="let language of languages" [value]="language">{{ language }}</option>
       </select>
-      <button class="primary" (click)="startGame()" [disabled]="loading">{{ loading ? 'Starting…' : 'Start game →' }}</button>
+      <button class="primary" (click)="startGame()" [disabled]="loading">
+        <span *ngIf="loading" class="button-spinner" aria-hidden="true"></span>
+        {{ loading ? 'Generating question…' : 'Start game →' }}
+      </button>
     </div>
 
     <div *ngIf="screen === 'question' && current as question" class="question">
@@ -32,9 +59,13 @@
     </div>
 
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
-      <p>{{ result.correct ? 'That is the correct answer.' : 'The correct choice was ' + result.correct_answer + '.' }}</p>
+      <p *ngIf="result.correct">That is the correct answer.</p>
+      <p *ngIf="!result.correct">The correct answer was <strong>{{ result.correct_answer }} — {{ correctAnswerText }}</strong>.</p>
       <div class="achievement" *ngIf="result.achievement">★ {{ result.achievement | titlecase }} star unlocked!</div>
-      <button class="primary" (click)="continue()">{{ gameEnded ? 'See results →' : 'Next question →' }}</button>
+      <button class="primary" (click)="continue()" [disabled]="loading">
+        <span *ngIf="loading" class="button-spinner" aria-hidden="true"></span>
+        {{ loading ? 'Generating question…' : (gameEnded ? 'See results →' : 'Next question →') }}
+      </button>
     </div>
 
     <div *ngIf="screen === 'done'" class="results">
