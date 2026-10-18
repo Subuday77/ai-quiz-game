@@ -121,10 +121,7 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   white-space: nowrap;
   border: 0;
 }
-@media (prefers-reduced-motion: reduce) {
-  .gear-loader::before,
-  .gear-loader::after { animation: none; }
-}
+/* Gear animation remains active while a question is being generated. */
 @media (max-width: 640px) {
   .brand { margin-bottom: 20px; }
   .star-dashboard { grid-template-columns: 1fr; gap: 8px; }
