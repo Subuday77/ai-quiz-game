@@ -2,13 +2,13 @@
 
 A command-line trivia game inspired by "Who Wants to Be a Millionaire?".
 
-The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends when the player answers incorrectly or completes the configured maximum difficulty.
+The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends on a wrong main-round answer or after 15 main questions and an optional secret 16th bonus question.
 
 ## Features
 
 - Interactive terminal quiz flow.
 - Language selection for generated questions.
-- Difficulty levels from 0 to `MAX_DIFFICULTY`.
+- 15 main questions (difficulty 0–14) and a bonus question (difficulty 15) unlocked after a perfect run without hints.
 - Runtime tuning through `config.py`.
 - Randomized question categories without repetition within a single game.
 - Four-answer multiple-choice format.
@@ -105,7 +105,7 @@ TEMPERATURE = 1.0
 ```
 
 - `MAX_OUTPUT_TOKENS` controls the maximum output size requested from the LLM.
-- `MAX_DIFFICULTY` controls the final difficulty level required to complete the game.
+- `MAX_DIFFICULTY` controls the highest generated difficulty level (15 is reserved for the bonus question).
 - `TEMPERATURE` controls response randomness for question generation.
 
 ## Run
@@ -158,3 +158,14 @@ Use `.env.example` as the shared template for required configuration.
 - `define_ai_provider.py` provides a common client interface for OpenAI, NVIDIA, and Bedrock.
 - `consts.py` stores the quiz prompt, supported languages, question categories, and shared constants.
 - `config.py` stores adjustable runtime values for output length, maximum difficulty, and temperature.
+
+## Refactoring and tests
+
+The ongoing web-app roadmap is documented in [docs/ROADMAP.md](docs/ROADMAP.md).
+The CLI now uses the independent `game_logic.py` engine and `question_generator.py` adapter.
+The current CLI has no hint actions, so a perfect 15-answer run unlocks question 16.
+Run the logic unit tests without API keys:
+
+```bash
+python -m unittest discover -s tests -v
+```
