@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
-import { Component } from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { finalize, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
@@ -40,7 +41,7 @@ interface AnswerFeedback {
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css'],
 })
-export class AppComponent {
+export class AppComponent implements OnInit, OnDestroy {
   readonly languages = ['English', 'Russian', 'Hebrew', 'German', 'French', 'Spanish', 'Italian'];
   readonly choices: Choice[] = ['A', 'B', 'C', 'D'];
   readonly starTiers: { key: StarTier; label: string }[] = [
@@ -56,12 +57,43 @@ export class AppComponent {
   feedback: AnswerFeedback | null = null;
   loading = false;
   error = '';
+  configLoading = true;
+  questionLoading = false;
+  longWait = false;
+  canRetryQuestion = false;
+  private warningMs = 8000;
+  private requestTimeoutMs = 45000;
+  private readonly subscriptions = new Subscription();
   progress = 0;
   stars: string[] = [];
   currentStars: StarCounts = emptyStars();
   totalStars: StarCounts = this.readStoredStars();
 
   constructor(private readonly http: HttpClient) {}
+
+  ngOnInit(): void {
+    this.subscriptions.add(this.http.get<{
+      long_wait_warning_ms: number; request_timeout_ms: number;
+    }>('/api/client-config').pipe(
+      timeout(5000), finalize(() => { this.configLoading = false; }),
+    ).subscribe({
+      next: (settings) => {
+        if (Number.isFinite(settings.long_wait_warning_ms) &&
+            Number.isFinite(settings.request_timeout_ms) &&
+            settings.long_wait_warning_ms > 0 &&
+            settings.request_timeout_ms > settings.long_wait_warning_ms) {
+          this.warningMs = settings.long_wait_warning_ms;
+          this.requestTimeoutMs = settings.request_timeout_ms;
+        }
+      },
+      // Keep finite defaults when running against an older or unavailable backend.
+      error: () => {},
+    }));
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+  }
 
   get rtl(): boolean { return this.selectedLanguage === 'Hebrew'; }
   get correctAnswerText(): string {
@@ -74,45 +106,77 @@ export class AppComponent {
   }
 
   startGame(): void {
-    if (this.loading) return;
+    if (this.loading || this.configLoading) return;
+    if (this.gameId) { this.loadQuestion(); return; }
     this.loading = true;
     this.error = '';
-    this.http.post<GameInfo>('/api/games', { language: this.selectedLanguage }).subscribe({
+    this.subscriptions.add(this.http.post<GameInfo>(
+      '/api/games', { language: this.selectedLanguage },
+    ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
         this.stars = [];
         this.currentStars = emptyStars();
         this.progress = 0;
         this.feedback = null;
+        this.loading = false;
         this.loadQuestion();
       },
-      error: () => this.fail('Could not start a game. Is FastAPI running on port 8000?'),
-    });
+      error: () => this.fail('Could not start a game. Check the connection and try again.'),
+    }));
   }
 
   loadQuestion(): void {
-    if (!this.gameId) return;
+    if (!this.gameId || this.loading) return;
     this.loading = true;
+    this.questionLoading = true;
+    this.longWait = false;
+    this.canRetryQuestion = false;
     this.error = '';
-    this.http.get<PublicQuestion>('/api/games/' + this.gameId + '/question').subscribe({
+    const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
+    this.subscriptions.add(this.http.get<PublicQuestion>(
+      '/api/games/' + this.gameId + '/question',
+    ).pipe(
+      timeout(this.requestTimeoutMs),
+      finalize(() => {
+        warning.unsubscribe();
+        this.loading = false;
+        this.questionLoading = false;
+        this.longWait = false;
+      }),
+    ).subscribe({
       next: (question) => {
         this.current = question;
         this.feedback = null;
         this.screen = 'question';
-        this.loading = false;
       },
-      error: () => this.fail('Could not generate a question. Check your AI provider and backend logs.'),
-    });
+      error: (error: unknown) => {
+        this.canRetryQuestion = true;
+        if (error instanceof TimeoutError) {
+          this.fail('The question is taking too long. It may still be preparing. Retry to retrieve it.');
+        } else if (error instanceof HttpErrorResponse && error.status === 502) {
+          this.fail('The AI could not prepare a valid question. Please retry.');
+        } else if (error instanceof HttpErrorResponse && error.status === 503) {
+          this.fail('The question service is unavailable. Wait a moment and retry.');
+        } else {
+          this.fail('Could not retrieve the question. Check your connection and retry.');
+        }
+      },
+    }));
+  }
+
+  retryQuestion(): void {
+    if (this.canRetryQuestion && !this.loading) this.loadQuestion();
   }
 
   answer(choice: Choice): void {
     if (this.loading || !this.current || this.screen !== 'question') return;
     this.loading = true;
     this.error = '';
-    this.http.post<AnswerFeedback>('/api/games/' + this.gameId + '/answer', {
+    this.subscriptions.add(this.http.post<AnswerFeedback>('/api/games/' + this.gameId + '/answer', {
       question_id: this.current.question_id,
       answer: choice,
-    }).subscribe({
+    }).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
         this.progress = result.correct_main_answers;
@@ -125,8 +189,8 @@ export class AppComponent {
         this.screen = 'feedback';
         this.loading = false;
       },
-      error: () => this.fail('Could not submit your answer. Please try again.'),
-    });
+      error: () => this.fail('Could not confirm your answer. It may already have been recorded. Please try again.'),
+    }));
   }
 
   continue(): void {
@@ -139,6 +203,9 @@ export class AppComponent {
   }
 
   restart(): void {
+    if (this.loading) return;
+    this.canRetryQuestion = false;
+    this.longWait = false;
     this.gameId = '';
     this.current = null;
     this.feedback = null;

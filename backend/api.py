@@ -8,17 +8,19 @@ import json
 import random
 from dataclasses import dataclass, field
 from threading import Lock
-from time import perf_counter
+from time import perf_counter, sleep
 from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 load_dotenv(find_dotenv())
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES  # noqa: E402
 from game_logic import GameState  # noqa: E402
+from generation_policy import (GenerationPolicy, InvalidQuestionError, client_settings,
+                               is_transient, provider_timeout, retry_after_seconds)  # noqa: E402
 from diagnostics import elapsed_ms, event, generation_attempt, request_id, timed_stage  # noqa: E402
 from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
@@ -104,6 +106,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/client-config")
+def public_client_config() -> dict[str, int]:
+    try:
+        return client_settings()
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Invalid client timing configuration") from None
+
+
 @app.post("/api/games", response_model=GameInfo, status_code=201)
 def new_game(payload: NewGame) -> GameInfo:
     if payload.language not in LANGUAGE_DICT.values():
@@ -140,29 +150,64 @@ def get_question(game_id: str) -> PublicQuestion:
                 raise HTTPException(status_code=500, detail="No unused categories")
             difficulty = session.state.current_difficulty
             category = session.categories[-1]
-            # Invalid JSON or schema gets a bounded retry. Provider/auth errors are not retried here.
-            for attempt in range(3):
-                token = generation_attempt.set(attempt + 1)
+            try:
+                policy = GenerationPolicy.from_env()
+            except ValueError:
+                event("generation_configuration_failed")
+                raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+            deadline = perf_counter() + policy.budget_seconds
+            event("generation_policy", budget_ms=policy.budget_seconds * 1000,
+                  max_attempts=policy.max_attempts,
+                  provider_timeout_ms=policy.provider_timeout_seconds * 1000, sdk_max_retries=0)
+            for attempt in range(1, policy.max_attempts + 1):
+                remaining = deadline - perf_counter()
+                if remaining <= 0:
+                    event("generation_budget_exhausted")
+                    raise HTTPException(status_code=503, detail="AI provider unavailable")
+                token = generation_attempt.set(attempt)
+                timeout_token = provider_timeout.set(min(policy.provider_timeout_seconds, remaining))
                 event("generation_attempt_started")
+                failure_status = 503
+                delay_hint = None
                 try:
                     raw = create_question(difficulty, session.language, category)
                     with timed_stage("question_validation"):
                         question = QuizQuestion.model_validate(raw)
                         if question.difficulty != difficulty:
-                            raise ValueError("AI returned the wrong difficulty")
+                            raise InvalidQuestionError("AI returned the wrong difficulty")
                     event("generation_attempt_completed", outcome="success")
                     break
-                except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+                except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
+                    failure_status = 502
                     event("generation_attempt_completed", outcome="invalid_question",
                           error_type=type(exc).__name__)
                 except Exception as exc:
+                    retryable = is_transient(exc)
                     event("generation_attempt_completed", outcome="provider_failure",
-                          error_type=type(exc).__name__)
-                    raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+                          error_type=type(exc).__name__, retryable=retryable)
+                    if not retryable:
+                        raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+                    delay_hint = retry_after_seconds(exc)
                 finally:
                     generation_attempt.reset(token)
-            else:
-                raise HTTPException(status_code=502, detail="AI could not generate a valid question")
+                    provider_timeout.reset(timeout_token)
+                detail = ("AI could not generate a valid question" if failure_status == 502
+                          else "AI provider unavailable")
+                if attempt == policy.max_attempts:
+                    event("generation_retries_exhausted", attempts=attempt)
+                    raise HTTPException(status_code=failure_status, detail=detail)
+                delay = policy.backoff(attempt)
+                # Do not retry sooner than the server requests, or sleep beyond our limits.
+                if delay_hint is not None:
+                    if delay_hint > policy.backoff_max_seconds:
+                        event("generation_retry_suppressed", reason="retry_after_exceeds_limit")
+                        raise HTTPException(status_code=failure_status, detail=detail)
+                    delay = max(delay, delay_hint)
+                if delay >= deadline - perf_counter():
+                    event("generation_budget_exhausted")
+                    raise HTTPException(status_code=failure_status, detail=detail)
+                event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
+                sleep(delay)
             session.question = question
             session.question_id = str(uuid4())
             session.categories.pop()

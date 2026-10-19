@@ -21,10 +21,14 @@ SECRET = "fake-secret-do-not-log"
 class DiagnosticTests(unittest.TestCase):
     def setUp(self):
         sessions.clear()
+        self.enterContext(patch("api.sleep"))
         self.client = TestClient(app)
         self.game_id = self.client.post("/api/games", json={}).json()["game_id"]
         self.url = f"/api/games/{self.game_id}/question"
         self.enterContext(patch.dict("os.environ", {
+            "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
+            "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
             "OPENAI_API_KEY": SECRET, "OPENAI_MODEL_ID": "offline-model",
             "NVIDIA_API_KEY": SECRET, "NVIDIA_MODEL_ID": "offline-model",
             "AWS_REGION": "us-east-1", "BEDROCK_MODEL_ID": "offline-model",
@@ -33,8 +37,8 @@ class DiagnosticTests(unittest.TestCase):
         self.openai = self.enterContext(patch("define_ai_provider.OpenAI"))
         self.boto = self.enterContext(patch("define_ai_provider.boto3.client"))
         self.sdk = self.openai.return_value
-        self.sdk.timeout = SimpleNamespace(connect=5.0, read=600, write=600, pool=600)
-        self.sdk.max_retries = 5
+        self.sdk.timeout = SimpleNamespace(connect=12, read=12, write=12, pool=12)
+        self.sdk.max_retries = 0
         self.sdk_call = self.sdk.chat.completions.create
         self.factory = self.enterContext(patch("question_generator.client",
                                               side_effect=lambda: LLMClient("nvidia")))
@@ -149,7 +153,7 @@ class DiagnosticTests(unittest.TestCase):
     def test_openai_and_bedrock_exceptions_have_provider_failure_events(self):
         self.sdk.responses.create.side_effect = RuntimeError(SECRET)
         bedrock = self.boto.return_value
-        bedrock.meta.config = SimpleNamespace(connect_timeout=60, read_timeout=60,
+        bedrock.meta.config = SimpleNamespace(connect_timeout=3, read_timeout=12,
                                              retries={"mode": "legacy"})
         bedrock.converse.side_effect = RuntimeError(SECRET)
         for provider in ("openai", "bedrock"):
@@ -246,11 +250,11 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(events[-1]["status_code"], 404)
         self.assertFalse(self.selected(events, "provider_request_started"))
 
-    def test_openai_and_nvidia_constructor_settings_are_unchanged(self):
+    def test_openai_and_nvidia_disable_sdk_retries_and_set_timeouts(self):
         for provider, kwargs in [
-            ("openai", {"api_key": SECRET}),
+            ("openai", {"api_key": SECRET, "timeout": 12, "max_retries": 0}),
             ("nvidia", {"api_key": SECRET, "base_url": "https://integrate.api.nvidia.com/v1",
-                        "max_retries": 5}),
+                        "max_retries": 0, "timeout": 12}),
         ]:
             with self.subTest(provider=provider), self.capture():
                 LLMClient(provider)
@@ -265,18 +269,23 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_bedrock_settings_and_provider_events(self):
         sdk = self.boto.return_value
-        sdk.meta.config = SimpleNamespace(connect_timeout=60, read_timeout=60,
-                                         retries={"mode": "standard", "total_max_attempts": 4})
+        sdk.meta.config = SimpleNamespace(connect_timeout=3, read_timeout=12,
+                                         retries={"mode": "standard", "total_max_attempts": 1})
         sdk.converse.return_value = {"output": {"message": {"content": [{"text": json.dumps(QUESTION)}]}}}
         self.factory.side_effect = lambda: LLMClient("bedrock")
         with self.capture() as captured:
             result = self.client.get(self.url)
         self.assertEqual(result.status_code, 200)
-        self.boto.assert_called_once_with("bedrock-runtime", region_name="us-east-1")
+        self.boto.assert_called_once()
+        args, kwargs = self.boto.call_args
+        self.assertEqual(args, ("bedrock-runtime",))
+        self.assertEqual(kwargs["region_name"], "us-east-1")
+        self.assertEqual(kwargs["config"].retries["total_max_attempts"], 1)
+        self.assertEqual(kwargs["config"].read_timeout, 12)
         events = self.events(captured)
         config = self.selected(events, "provider_configuration")[0]
-        self.assertEqual(config["sdk_total_max_attempts"], 4)
-        self.assertEqual(config["read_timeout_seconds"], 60)
+        self.assertEqual(config["sdk_total_max_attempts"], 1)
+        self.assertEqual(config["read_timeout_seconds"], 12)
         self.assertEqual(self.selected(events, "provider_request_completed")[0]["provider"], "bedrock")
         self.assert_safe(captured)
 

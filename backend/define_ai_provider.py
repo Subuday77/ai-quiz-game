@@ -5,12 +5,15 @@ from typing import Any
 
 import boto3
 from openai import OpenAI
+from botocore.config import Config
+
+from generation_policy import GenerationPolicy, provider_timeout
 
 from diagnostics import event, timed_stage
 
 from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT, ROLE, USER, SYSTEM, CONTENT,
                     OPENAI_MODEL_ID, NVIDIA_API_KEY, NVIDIA_MODEL_ID, BEDROCK_RUNTIME, AWS_REGION, BEDROCK_MODEL_ID,
-                    UNKNOWN_PROVIDER, MAX_TOKENS, TEMPERATURE, OUTPUT, MESSAGE, MAX_RETRIES)
+                    UNKNOWN_PROVIDER, MAX_TOKENS, TEMPERATURE, OUTPUT, MESSAGE)
 
 PROVIDER = os.getenv(LLM_PROVIDER, OPENAI).lower()
 
@@ -27,10 +30,14 @@ class LLMClient:
         """
         self.provider = provider
         self.responses = self
+        timeout = provider_timeout.get()
+        if timeout is None:
+            timeout = GenerationPolicy.from_env().provider_timeout_seconds
 
         if provider == OPENAI:
             self.client = OpenAI(
-                api_key=os.environ[OPENAI_API_KEY]
+                api_key=os.environ[OPENAI_API_KEY],
+                timeout=timeout, max_retries=0
             )
             self.model = os.environ[OPENAI_MODEL_ID]
 
@@ -38,18 +45,22 @@ class LLMClient:
             self.client = OpenAI(
                 base_url="https://integrate.api.nvidia.com/v1",
                 api_key=os.environ[NVIDIA_API_KEY],
-                max_retries=MAX_RETRIES
+                max_retries=0, timeout=timeout
             )
             self.model = os.environ[NVIDIA_MODEL_ID]
 
         elif provider == BEDROCK:
-            self.client = boto3.client(BEDROCK_RUNTIME, region_name=os.environ[AWS_REGION])
+            self.client = boto3.client(
+                BEDROCK_RUNTIME, region_name=os.environ[AWS_REGION],
+                config=Config(connect_timeout=min(3.0, timeout), read_timeout=timeout,
+                              retries={"mode": "standard", "total_max_attempts": 1}),
+            )
             self.model = os.environ[BEDROCK_MODEL_ID]
 
         else:
             raise ValueError(f"{UNKNOWN_PROVIDER}: {provider}")
 
-        # Read resolved SDK settings; do not override configuration or credentials.
+        # Log the resolved policy without credentials or request contents.
         if provider in (OPENAI, NVIDIA):
             timeout = self.client.timeout
             event("provider_configuration", provider=provider,

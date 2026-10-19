@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "start": "ng serve --host 127.0.0.1 --port 4200",
-    "build": "ng build"
+    "build": "ng build",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@angular/common": "^20.3.0",

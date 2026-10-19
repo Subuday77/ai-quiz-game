@@ -94,27 +94,26 @@ During local development, do **not** open port 8000 to view the Angular UI: port
 
 - **`ModuleNotFoundError` on backend launch:** confirm the PyCharm working directory is `backend` and the selected interpreter has packages from `backend/requirements.txt` installed.
 - **`python` points to a different interpreter in PyCharm's terminal:** use `.\.venv\Scripts\python.exe` explicitly or activate the project's interpreter; the Run Configuration interpreter is configured separately.
-- **Question generation returns HTTP 503:** check backend logs and confirm AI provider, model ID, access, and credentials. The application does not retry provider exceptions; the SDK may already have retried internally (see diagnostics below).
-- **Question generation returns HTTP 502:** the provider returned an invalid question after three attempts. Check backend logs.
+- **Question generation returns HTTP 503:** check backend logs and confirm AI provider, model ID, access, and credentials. SDK retries are disabled. Transient failures use the bounded application policy below; permanent failures are not retried.
+- **Question generation returns HTTP 502:** the provider returned invalid questions through the configured attempt limit. Check backend logs.
 - **Angular displays a connection error:** verify the PyCharm FastAPI configuration is running on port 8000, Angular runs on 4200, and requests pass through the dev server's `/api` proxy.
 - **Game sessions disappear after restart:** expected at this prototype stage; storage is in memory.
 - **Dependency installation fails:** initial pip and npm installations require network access.
 
 ## 4. Test scope and next learning steps
 
-Python tests exercise the progression and the FastAPI endpoints with a mocked generator. They do not require real AI credentials. The real provider request and Angular-to-backend browser flow still need to be checked locally.
+Python tests exercise progression, FastAPI endpoints, diagnostics, and retry handling with mocked generators/provider SDKs. They do not require real AI credentials. The real provider request and Angular-to-backend browser flow still need to be checked locally.
 
 1. Study the request/response flow in `docs/ARCHITECTURE.md`.
 2. Refine JSON Schema/structured-output handling, stop reasons, and provider error classification.
-3. Add bounded backoff to transient AI failures without retrying invalid credentials.
+3. Tune the generation budget and retry settings using measured provider latency.
 4. Add AI usage instrumentation, limits, persistent database sessions, and secure login.
 
 
 ## 5. Diagnose a slow question request (Issue #2)
 
-This patch adds diagnostics only. Existing retry counts, timeouts, game rules,
-response bodies, and Angular behavior are unchanged. A five-minute successful
-request alone does not establish its cause; reproduce it with these logs enabled.
+The diagnostics from phase 1 remain available. Phase 2 adds the interactive timeout
+and retry policy below. Game rules and existing response bodies remain unchanged.
 
 ### Capture the browser request
 
@@ -125,7 +124,7 @@ request alone does not establish its cause; reproduce it with these logs enabled
    should use port 4200; `frontend/proxy.conf.json` forwards `/api` to port 8000.
    Record the start time, method, status, and elapsed time. A pending request has
    no final HTTP status yet. A completed 200 means success; 502 means three invalid
-   questions; 503 means a provider/setup exception escaped to the application.
+   questions; 503 means the provider is unavailable, retries/budget were exhausted, or configuration failed.
    A proxy-generated failure may have a different body and no diagnostic header.
 3. Open **Timing** (Chrome) or **Timings** (Firefox). Inspect queueing/stalled,
    connection, **Waiting for server response (TTFB)** / **Waiting**, and content
@@ -165,7 +164,7 @@ and are expressed in milliseconds.
 | `generation_attempt_started` / `generation_attempt_completed` | Each application attempt and its `success`, `invalid_question`, or `provider_failure` outcome. |
 | `provider_client_setup_started` / `_completed` / `_failed` | Client construction is measured separately; a fresh client is currently built each attempt. AWS credential discovery may add setup latency. |
 | `provider_configuration` | Allowlisted resolved SDK timeouts, retry settings, provider, and SDK versions. No model IDs, credentials, or headers. |
-| `provider_request_started` / `_completed` / `_failed` | One SDK call, including internal retries and backoff; completion/failure carries `duration_ms`. |
+| `provider_request_started` / `_completed` / `_failed` | One SDK call; SDK retries are now disabled. Completion/failure carries `duration_ms`. |
 | `question_json_parse_started` / `_completed` / `_failed` | JSON parsing time, outside the provider call timer. |
 | `question_validation_started` / `_completed` / `_failed` | Pydantic validation and difficulty check time, outside the provider call timer. |
 | `question_request_completed` | Total backend processing duration, HTTP status, and `success`/`failure`, including handled 404/409/500/502/503 outcomes. Unexpected exceptions also emit `question_request_failed`. |
@@ -174,8 +173,8 @@ Large `session_lock_acquired.duration_ms` identifies lock contention. The sessio
 lock remains held throughout question generation, so a second request can wait
 behind a slow first request and then return its cached question. Large
 `provider_request_completed.duration_ms` (or `_failed`) with a small lock wait
-identifies time inside the provider SDK, including network time and SDK retry
-sleep. A provider start with no completion/failure identifies an outstanding SDK
+identifies time inside the provider SDK, including network time. Application retry
+sleep is logged separately in `generation_retry_scheduled`. A provider start with no completion/failure identifies an outstanding SDK
 call. Repeated application attempt numbers accompanied by parse/validation
 failures identify application retries. Large setup time is separate from all of
 these. A gap between request receipt and lock-wait start can include worker-thread
@@ -187,62 +186,140 @@ never its message or traceback: Pydantic and provider exception text can include
 input content. Keep SDK HTTP/debug logging disabled when collecting this safe
 trace; those independent loggers can expose request/response data.
 
-### Effective SDK timeout and retry behavior
+### Phase 2: interactive timeout and retry policy
 
-The app supplies no explicit timeout to any provider. It supplies `max_retries=5`
-only to NVIDIA, through the same OpenAI Python SDK used for OpenAI.
+Phase 1's 11 real NVIDIA requests succeeded, usually in 2-3.5 seconds and once in
+about 8 seconds. Lock contention and validation were negligible. The previous
+600-second SDK read timeout and five NVIDIA retries could nevertheless produce
+very long waits. With three application attempts, the previous theoretical
+attempt ceilings were 9 for OpenAI, 18 for NVIDIA, and typically 15 for Bedrock
+legacy mode. These settings have now been replaced by one application retry loop.
 
-| Provider | SDK timeouts per attempt | SDK retries | Maximum SDK attempts per application attempt |
-| --- | --- | --- | --- |
-| OpenAI | Default: connect 5 seconds; read/write/pool 600 seconds | Default `max_retries=2` | 3 |
-| NVIDIA | Same OpenAI SDK timeout defaults | `MAX_RETRIES=5` from `consts.py` | 6 (initial call plus five retries) |
-| AWS Bedrock | Botocore defaults: connect 60 seconds, read 60 seconds | Inherited AWS configuration; legacy default typically 5 total attempts; standard/adaptive default 3 total | 5 legacy or 3 standard/adaptive unless overridden |
+Set the following environment variables in your local backend environment (the
+same defaults are in `.env.example`). Restart FastAPI and reload the browser after
+changing them. No secret `.env` file is modified by this patch.
 
-OpenAI retries eligible connection/timeout failures and HTTP 408/409/429/5xx, with
-backoff and supported server retry delays. Those retries happen *inside* one
-`provider_request_*` span; they do not increment the application's `attempt` field.
-The aggregate span cannot distinguish model processing from SDK retry sleep.
-This patch intentionally does not turn on raw SDK logging or claim to count
-individual wire attempts. See [official OpenAI timeout/retry documentation](https://developers.openai.com/api/docs/guides/flex-processing).
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `AI_PROVIDER_TIMEOUT_SECONDS` | `12` | OpenAI/NVIDIA connect, read, write and pool socket limits; Bedrock read limit. Bedrock connect is at most 3 seconds. Each attempt's value is reduced to the remaining budget. |
+| `AI_GENERATION_MAX_ATTEMPTS` | `3` | Total application attempts, including the first, shared by transient provider failures and invalid JSON/schema/difficulty results. |
+| `AI_GENERATION_BUDGET_SECONDS` | `30` | Soft generation budget, starting after session-lock acquisition. No further attempt or retry sleep starts when its budget check fails. |
+| `AI_RETRY_BACKOFF_BASE_SECONDS` | `0.5` | First exponential backoff ceiling. Jitter selects uniformly between half the ceiling and the ceiling. |
+| `AI_RETRY_BACKOFF_MAX_SECONDS` | `2` | Maximum backoff and maximum accepted server-directed retry delay. |
+| `QUIZ_LONG_WAIT_WARNING_SECONDS` | `8` | When the browser displays the long-wait warning. |
+| `QUIZ_HTTP_TIMEOUT_SECONDS` | `45` | Finite browser timeout for question, start-game and answer HTTP requests. |
 
-Bedrock inherits `AWS_RETRY_MODE`, `AWS_MAX_ATTEMPTS`, and shared AWS profile
-settings. `provider_configuration` records `retry_mode`, `sdk_total_max_attempts`,
-and `sdk_max_attempts` from `client.meta.config.retries`. A null attempt setting
-means the SDK's modeled default applies; it does not mean zero retries. AWS env/
-profile `max_attempts` includes the initial call, whereas a Botocore `Config`
-`max_attempts` value counts retries; `total_max_attempts` always includes the
-initial call. See [Boto3 retries](https://docs.aws.amazon.com/boto3/latest/guide/retries.html)
-and [Botocore timeout settings](https://docs.aws.amazon.com/botocore/latest/reference/config.html).
+Settings must be finite positive numbers; attempts must be a positive integer.
+Browser warning must precede timeout, and browser values must fit the JavaScript
+timer range. Invalid generation configuration fails safely with 503 before any
+provider call or state mutation.
 
-`api.py` allows up to **three application attempts**, retrying JSON/schema errors
-and `ValueError` (including a difficulty mismatch). Consequently, the upper bounds
-are **9 OpenAI SDK attempts**, **18 NVIDIA SDK attempts**, and **15 Bedrock attempts
-with legacy defaults** (9 with standard/adaptive defaults), or **3 ? the configured
-Bedrock total-attempt limit**. Reaching these bounds requires earlier SDK calls
-to eventually succeed but return invalid questions, allowing the next application
-attempt. An SDK exception escaping on the first application attempt returns 503
-immediately: its bound is only 3, 6, or the Bedrock SDK limit, respectively. Invalid
-questions on all three application attempts return 502.
+OpenAI and NVIDIA are explicitly constructed with `max_retries=0`. Bedrock uses
+`Config(retries={"mode": "standard", "total_max_attempts": 1})`, overriding AWS
+profile/environment retry counts. One application attempt therefore performs at
+most one provider SDK request: the default request ceiling is **three total**,
+rather than multiplying SDK and application retries. The old NVIDIA
+`MAX_RETRIES=5` constant is removed. Existing `provider_configuration` events
+show effective timeout/retry settings.
 
-These are attempt-count bounds, not guaranteed wall-clock deadlines. Socket
-read timeouts are inactivity limits; retries, backoff, client setup, and lock waits
-add time. There is no application request deadline or session-lock timeout here.
-Thus a successful response after five minutes is possible under current settings.
+Eligible failures include connection/timeouts, HTTP 408/429/5xx, and Bedrock
+throttling, model-not-ready, model-timeout, and temporary service errors.
+Authentication, permission, missing credentials/model/configuration, unsupported
+parameters (400/422), and unknown exceptions fail immediately. A general
+`ValueError` is no longer treated as an invalid generated question. JSON/schema
+failures and difficulty mismatches remain eligible within the same attempt limit.
 
-For reproducibility, the diagnostic tests ran with the repository-root `.venv`:
-OpenAI 3.16.2, Boto3/Botocore 1.43.98. Local SDK source inspection confirmed the
-OpenAI timeout/retry defaults and Botocore's legacy modeled five-attempt default;
-no AI request was sent. Requirements do not pin these SDK versions, so the runtime
-`provider_configuration` events on the machine reproducing the stall are the
-source of truth. No retry count, timeout, or `.env` value was changed by this patch.
+Default retry sleeps are 0.25-0.5 seconds and 0.5-1 second; the configurable ceiling
+never exceeds `AI_RETRY_BACKOFF_MAX_SECONDS`. A valid OpenAI-compatible
+`Retry-After` delay is honored if it fits the backoff cap and remaining budget.
+If it requests more than the cap, the request returns 503 instead of sleeping too
+long or retrying earlier than requested. No sleep occurs after the final attempt.
+503 retains `{"detail":"AI provider unavailable"}`; invalid-question exhaustion
+retains 502 with `{"detail":"AI could not generate a valid question"}`. A budget
+check immediately before an attempt returns 503. Existing endpoint response bodies
+and reward rules are preserved.
 
-Run offline verification from `backend` with the configured interpreter:
+New correlated diagnostic events include `generation_policy`,
+`generation_retry_scheduled` (failed attempt and delay),
+`generation_retries_exhausted`, `generation_budget_exhausted`,
+`generation_retry_suppressed`, and `generation_configuration_failed`.
+`generation_attempt_completed` includes a safe `retryable` flag for provider
+failures. Headers, prompt/question content, secrets, and exception text remain
+excluded.
+
+**Expected waiting time:** normal NVIDIA requests should still finish in a few
+seconds. Assuming each provider attempt's total duration follows its read-timeout
+allocation, repeated slow failures use about 30 seconds including retry sleeps:
+12 + up to 0.5 + 12 + up to 1 + the remaining approximately 4.5 seconds. This is
+**not a strict server wall-clock deadline or guaranteed worst case**. SDK timeouts
+limit individual socket operations/inactivity, rather than the entire generation.
+DNS, connection/write/read phases, streamed response activity, client setup/AWS
+credential discovery, and scheduling can extend a call. An already running call is
+not interrupted at the budget boundary. Session-lock waiting is outside the
+budget and can add time. No abandoned background threads implement a fake timeout.
+The browser stops its own request after 45 seconds by default; timer scheduling
+in a suspended/throttled browser can also defer UI updates.
+
+If an active call succeeds after the budget, its validated question is still cached.
+A failed attempt does not consume its selected category, change difficulty, or
+award rewards. The existing session lock covers the complete retry loop. Concurrent
+requests for the same unanswered question wait and reuse the cached result; if the
+first request fails without a question, a later request can try the same category.
+
+### Browser timeout and Retry recovery
+
+The browser fetches `GET /api/client-config` at startup. This new endpoint returns
+only `long_wait_warning_ms` and `request_timeout_ms`; it exposes no provider or
+secret configuration. Bootstrap configuration has a five-second timeout and falls
+back to the finite 8/45-second defaults when unavailable or invalid.
+
+After the warning threshold, the UI says the question is taking longer than usual.
+After an error/timeout it clears its loading state and offers **Retry question**.
+Retry calls the same game's question URL; it does not create a new game or
+resubmit the previous answer. Rapid clicks while loading are ignored. Warning
+timers and HTTP subscriptions are cleaned up on completion, failure, and component
+destruction.
+
+A browser timeout unsubscribes from HTTP but **does not guarantee cancellation of
+the server's synchronous provider call**. Retry may initially wait behind that
+call's session lock. If a valid unanswered question was generated, Retry retrieves
+that same question ID without another AI call. This also covers late responses
+that the browser did not receive. Generation retries cannot allocate stars;
+answers remain single-use and concurrent duplicate submissions still return 409.
+POST requests are never retried automatically. If an answer's response is lost,
+the server may already have recorded it; replay protection prevents double rewards,
+but recovering that lost feedback is outside this question-generation change.
+
+For SDK semantics, see [official OpenAI error guidance](https://developers.openai.com/api/docs/guides/error-codes),
+[Botocore configuration](https://docs.aws.amazon.com/botocore/latest/reference/config.html),
+and [Angular HTTP request handling](https://angular.dev/guide/http/making-requests).
+
+### Offline checks
+
+From `backend`, with the configured interpreter:
 
 ~~~powershell
 python -m unittest discover -s tests -v
-python -m py_compile api.py question_generator.py define_ai_provider.py
+python -m py_compile api.py question_generator.py define_ai_provider.py generation_policy.py
 ~~~
 
 If the repository-root environment is selected rather than `backend/.venv`, use
-`..\.venv\Scripts\python.exe` in place of `python`. Tests mock SDK constructors
-and calls, including credential discovery; they require no real AI keys.
+`..\.venv\Scripts\python.exe` in place of `python`. SDK constructors and provider
+calls, clocks, jitter, and backoff sleeps are mocked. Tests cover transient/permanent
+failures, mixed retries/exhaustion, unchanged failure state, lock serialization,
+late/browser-abandoned request recovery, and duplicate reward prevention. No AI
+keys, paid calls, or remote AI requests are used.
+
+From `frontend`:
+
+~~~powershell
+npm.cmd test
+npm.cmd run build
+~~~
+
+The frontend tests use Node's built-in runner, the installed TypeScript compiler,
+and RxJS virtual time with mocked HTTP. They require no running server, browser,
+new testing dependency, or real delays. They exercise component behavior and Retry
+template wiring; the production Angular build checks template types. A real
+DevTools/browser session remains useful to confirm rendering and proxy behavior.
+Use `npm.cmd` on Windows when PowerShell's execution policy blocks `npm.ps1`.

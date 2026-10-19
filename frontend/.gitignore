@@ -1,3 +1,5 @@
 node_modules/
 dist/
 .angular/
+# Temporary offline component test modules
+.quiz-tests-*/

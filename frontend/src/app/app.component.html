@@ -39,11 +39,11 @@
 
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">Question language</label>
-      <select id="language" [(ngModel)]="selectedLanguage">
+      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId">
         <option *ngFor="let language of languages" [value]="language">{{ language }}</option>
       </select>
       <div class="question-actions">
-        <button class="primary" (click)="startGame()" [disabled]="loading">Start game →</button>
+        <button class="primary" (click)="startGame()" [disabled]="loading || configLoading || !!gameId">Start game →</button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">Generating a question…</span>
       </div>
@@ -79,7 +79,13 @@
       <button class="primary" (click)="restart()">Play again ↻</button>
     </div>
 
+    <p class="intro" role="status" *ngIf="questionLoading && longWait">
+      This question is taking longer than usual. We are still preparing it.
+    </p>
     <p class="error" role="alert" *ngIf="error">{{ error }}</p>
+    <button class="primary" *ngIf="canRetryQuestion" (click)="retryQuestion()" [disabled]="loading">
+      Retry question
+    </button>
   </section>
   <footer>AI-generated questions · Answers checked on the server · Experimental local build</footer>
 </main>
