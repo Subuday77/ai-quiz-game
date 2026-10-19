@@ -492,6 +492,10 @@ class NativeRequestTests(unittest.TestCase):
                 self.reset(provider, mode="off")
                 verdict = {"decision": "accept", "issue_codes": [], "independent_answer": "B", "rationale": SECRET}
                 self.calls[provider].return_value = RESPONSES[provider](text=json.dumps(verdict))
+                # Model the constructed Botocore client's actual transport config.
+                if provider == "bedrock":
+                    self.aws.meta.config = NS(connect_timeout=2.0, read_timeout=2.0,
+                                              retries={"mode": "standard", "total_max_attempts": 1})
                 now = [0.0]
                 def generate(*args):
                     now[0] = 28.0

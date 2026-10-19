@@ -1,6 +1,7 @@
+import math
 import os
 from importlib.metadata import version
-from typing import Any
+from typing import Any, Callable
 
 import boto3
 from openai import APIStatusError, OpenAI
@@ -19,6 +20,14 @@ from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT,
                     UNKNOWN_PROVIDER, MAX_TOKENS, TEMPERATURE)
 
 PROVIDER = os.getenv(LLM_PROVIDER, OPENAI).lower()
+
+
+class ProviderTimeoutBudgetError(Exception):
+    """No request may start with socket limits exceeding its current allocation."""
+
+    def __init__(self, reason_code: str):
+        self.reason_code = reason_code
+        super().__init__("Provider timeout allocation unavailable")
 
 
 class LLMClient:
@@ -92,6 +101,7 @@ class LLMClient:
     def create(
             self, *, model=None, instructions, input, max_output_tokens=500,
             reasoning=None, temperature=None, output_contract: OutputContract = OutputContract.QUESTION,
+            request_timeout: Callable[[], float] | None = None,
     ) -> ProviderResult:
         """Request optional native schema output, preserving completion normalization."""
         settings = None
@@ -112,7 +122,7 @@ class LLMClient:
             result = self._create(
                 model=model, instructions=instructions, input=input,
                 max_output_tokens=max_output_tokens, reasoning=reasoning,
-                temperature=temperature, structured_parameters=parameters,
+                temperature=temperature, structured_parameters=parameters, request_timeout=request_timeout,
             )
         except Exception as exc:
             status = exc.status_code if isinstance(exc, APIStatusError) else None
@@ -138,6 +148,7 @@ class LLMClient:
             reasoning=None,
             temperature=None,
             structured_parameters: dict,
+            request_timeout: Callable[[], float] | None = None,
     ) -> ProviderResult:
         """
         Create an LLM response through the configured provider.
@@ -151,6 +162,7 @@ class LLMClient:
         """
         if self.provider == OPENAI:
             with timed_stage("provider_request", provider=self.provider):
+                timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.responses.create(
                     model=self.model,
                     instructions=instructions,
@@ -159,11 +171,13 @@ class LLMClient:
                     reasoning=reasoning,
                     temperature=temperature,
                     **structured_parameters,
+                    **timeout_parameters,
                 )
             return self._record_completion(normalize_openai_response(response))
 
         if self.provider == NVIDIA:
             with timed_stage("provider_request", provider=self.provider):
+                timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -179,6 +193,7 @@ class LLMClient:
                     max_completion_tokens=max_output_tokens,
                     temperature=temperature,
                     **structured_parameters,
+                    **timeout_parameters,
                 )
 
             return self._record_completion(normalize_nvidia_response(response))
@@ -193,6 +208,7 @@ class LLMClient:
                 inference_config[TEMPERATURE] = min(temperature, 1.0)
 
             with timed_stage("provider_request", provider=self.provider):
+                timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.converse(
                     modelId=self.model,
                     system=[
@@ -212,9 +228,36 @@ class LLMClient:
                     ],
                     inferenceConfig=inference_config,
                     **structured_parameters,
+                    **timeout_parameters,
                 )
 
             return self._record_completion(normalize_bedrock_response(response))
+
+    def _timeout_parameters(self, allocation: Callable[[], float] | None) -> dict:
+        """Evaluate at dispatch, after client/schema setup. Never mutate SDK internals."""
+        if allocation is None:
+            return {}
+        seconds = allocation()
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ProviderTimeoutBudgetError("budget_exhausted")
+        if self.provider in (OPENAI, NVIDIA):
+            # Both SDK resource methods pass this override to the HTTP transport.
+            event("provider_timeout_allocated", provider=self.provider,
+                  timeout_seconds=seconds, application="request_override")
+            return {"timeout": seconds}
+        # Converse has no request-level socket override. Config alone must not be
+        # mutated: Botocore copied these limits into its transport at construction.
+        config = self.client.meta.config
+        limits = (config.connect_timeout, config.read_timeout)
+        if any(not isinstance(value, (int, float)) or not math.isfinite(value)
+               or value <= 0 or value > seconds for value in limits):
+            event("provider_timeout_unavailable", provider=self.provider,
+                  allocation_seconds=seconds, reason="configured_timeout_exceeds_budget")
+            raise ProviderTimeoutBudgetError("timeout_allocation_unavailable")
+        event("provider_timeout_allocated", provider=self.provider,
+              allocation_seconds=seconds, connect_timeout_seconds=config.connect_timeout,
+              read_timeout_seconds=config.read_timeout, application="existing_socket_limits")
+        return {}
 
     def _record_completion(self, result: ProviderResult) -> ProviderResult:
         event("provider_completion", provider=self.provider,

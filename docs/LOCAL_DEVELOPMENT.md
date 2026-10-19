@@ -372,9 +372,15 @@ Inspect `quality_review_started`, `quality_review_completed`,
 using the existing request ID and attempt fields. Review decisions/issue codes and
 local lexical findings are safe diagnostic fields; rationale, questions, choices
 and answer keys are excluded. Generation and review share the existing default
-three attempts and 30-second **soft** budget. Review socket timeouts are allocated
-from remaining time, capped by the unchanged provider timeout. No separate reviewer
-retry loop exists, and browser timeouts do not guarantee server cancellation.
+three attempts and 30-second **soft** budget. Review allocation is recomputed at
+SDK dispatch, after client/schema setup, capped by the unchanged provider timeout.
+OpenAI/NVIDIA apply a request-level timeout override. Bedrock must have existing
+connect/read socket limits within that allocation; otherwise no review request
+starts (`timeout_allocation_unavailable`). Audit retains the candidate and enforce
+fails closed without automatically retrying that allocation failure. Inspect
+`provider_timeout_allocated` for applied limits and `provider_timeout_unavailable`
+for suppressed requests. No separate reviewer retry loop exists, and browser
+timeouts do not guarantee server cancellation.
 
 See [quality-checker architecture, rollout and limitations](QUALITY_CHECKER.md).
 The backend unittest suite includes mocked review outcomes, the historical nickname

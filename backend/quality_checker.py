@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from config import MAX_OUTPUT_TOKENS, TEMPERATURE
 from consts import client
 from diagnostics import event, timed_stage
+from define_ai_provider import ProviderTimeoutBudgetError
 from generation_policy import is_transient, provider_timeout, retry_after_seconds
 from output_contracts import OutputContract
 from provider_result import ProviderCompletionError, completed_text
@@ -117,7 +118,8 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
                               "language": language, "candidate": question.model_dump()},
                              ensure_ascii=False),
             max_output_tokens=MAX_OUTPUT_TOKENS, reasoning={"effort": "none"},
-            temperature=TEMPERATURE, output_contract=OutputContract.QUALITY_REVIEW)
+            temperature=TEMPERATURE, output_contract=OutputContract.QUALITY_REVIEW,
+            request_timeout=lambda: min(timeout_seconds, deadline - clock()))
         text = completed_text(response)
         with timed_stage("quality_json_parse"):
             raw = json.loads(normalize_output(text))
@@ -128,6 +130,8 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
             classification = "invalid_verdict"
         elif isinstance(exc, ProviderCompletionError):
             classification = "completion_" + exc.completion.value
+        elif isinstance(exc, ProviderTimeoutBudgetError):
+            classification = exc.reason_code
         elif isinstance(exc, QualityReviewFailure):
             classification = exc.classification
         else:

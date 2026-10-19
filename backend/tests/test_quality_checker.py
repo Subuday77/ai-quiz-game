@@ -14,10 +14,13 @@ from pydantic import ValidationError
 
 from api import app, sessions
 from generation_policy import is_transient, provider_timeout
+from diagnostics import generation_attempt, request_id
+from define_ai_provider import LLMClient
+from test_provider_completion import openai_response, nvidia_response, bedrock_response
 from output_contracts import OutputContract
 from provider_result import Completion, ProviderResult
-from quality_checker import lexical_findings, quality_mode_from_env
-from quality_errors import QualityConfigurationError
+from quality_checker import check_quality, lexical_findings, quality_mode_from_env
+from quality_errors import QualityConfigurationError, QualityReviewFailure
 from quality_schema import (IssueCode, QualityMode, QualityReview, ReviewDecision,
                             quality_review_schema)
 from question_schema import QuizQuestion
@@ -390,3 +393,175 @@ class QualityApiTests(unittest.TestCase):
         self.review.assert_called_once()
         self.assertEqual(self.events("quality_review_completed")[0]["local_issue_codes"], ["answer_leak"])
         self.assertFalse(self.events("quality_question_rejected"))
+
+
+class ReviewerTimeoutTests(unittest.TestCase):
+    """Exercise the real provider wrapper; every SDK constructor/request is mocked."""
+
+    def setUp(self):
+        self.enterContext(patch.dict("os.environ", {
+            "AI_STRUCTURED_OUTPUT_MODE": "off", "OPENAI_API_KEY": SECRET,
+            "OPENAI_MODEL_ID": "offline", "NVIDIA_API_KEY": SECRET,
+            "NVIDIA_MODEL_ID": "offline", "AWS_REGION": "us-east-1",
+            "BEDROCK_MODEL_ID": "offline"}))
+        self.sdk = Mock(max_retries=0)
+        self.aws = Mock()
+        self.openai_constructor = self.enterContext(patch("define_ai_provider.OpenAI"))
+        self.aws_constructor = self.enterContext(patch("define_ai_provider.boto3.client"))
+        self.factory = self.enterContext(patch("quality_checker.client"))
+        self.now = 0.0
+        self.init_seconds = 0.0
+        def openai_constructor(**kwargs):
+            self.sdk.timeout = kwargs["timeout"]
+            self.now += self.init_seconds
+            return self.sdk
+        def aws_constructor(*args, **kwargs):
+            self.aws.meta.config = kwargs["config"]
+            self.now += self.init_seconds
+            return self.aws
+        self.openai_constructor.side_effect = openai_constructor
+        self.aws_constructor.side_effect = aws_constructor
+        self.calls = {"openai": self.sdk.responses.create,
+                      "nvidia": self.sdk.chat.completions.create,
+                      "bedrock": self.aws.converse}
+        self.raw = {"openai": openai_response, "nvidia": nvidia_response, "bedrock": bedrock_response}
+        self.logs = self.enterContext(self.assertLogs("quiz.diagnostics", level="INFO"))
+        self.context_tokens = (provider_timeout.set(7.0), generation_attempt.set(2), request_id.set("timeout-regression"))
+        self.addCleanup(request_id.reset, self.context_tokens[2])
+        self.addCleanup(generation_attempt.reset, self.context_tokens[1])
+        self.addCleanup(provider_timeout.reset, self.context_tokens[0])
+
+    def reset(self, provider, initialization):
+        self.now = 0.0
+        self.init_seconds = initialization
+        self.factory.side_effect = lambda: LLMClient(provider)
+        for call in self.calls.values():
+            call.reset_mock(side_effect=True)
+        self.calls[provider].return_value = self.raw[provider](text=json.dumps(ACCEPT))
+
+    def review(self, mode=QualityMode.ENFORCE):
+        try:
+            return check_quality(QuizQuestion.model_validate(QUESTION), 0, "English", mode,
+                                 deadline=30.0, timeout_seconds=12.0, clock=lambda: self.now)
+        finally:
+            self.assertEqual(provider_timeout.get(), 7.0)
+            self.assertEqual(generation_attempt.get(), 2)
+            self.assertEqual(request_id.get(), "timeout-regression")
+
+    def test_slow_initialization_uses_openai_and_nvidia_request_override(self):
+        for provider in ("openai", "nvidia"):
+            for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+                with self.subTest(provider=provider, mode=mode):
+                    self.reset(provider, initialization=27.0)
+                    self.review(mode)
+                    self.calls[provider].assert_called_once()
+                    self.assertEqual(self.sdk.timeout, 12.0)  # Construction snapshot is stale.
+                    self.assertEqual(self.calls[provider].call_args.kwargs["timeout"], 3.0)
+                    self.assertEqual(self.openai_constructor.call_args.kwargs["max_retries"], 0)
+                    self.assertNotIn("request_timeout", self.calls[provider].call_args.kwargs)
+
+    def test_slow_bedrock_initialization_safely_withholds_unbounded_review(self):
+        for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+            with self.subTest(mode=mode):
+                self.reset("bedrock", initialization=27.0)
+                if mode == QualityMode.AUDIT:
+                    self.review(mode)
+                else:
+                    with self.assertRaises(QualityReviewFailure) as raised:
+                        self.review(mode)
+                    self.assertEqual(raised.exception.classification, "timeout_allocation_unavailable")
+                    self.assertFalse(is_transient(raised.exception))
+                self.aws.converse.assert_not_called()
+                self.assertEqual(self.aws.meta.config.read_timeout, 12.0)
+                self.assertEqual(self.aws_constructor.call_count, 1 if mode == QualityMode.AUDIT else 2)
+                # No client reconstruction or transport-internal mutation.
+                self.assertEqual(self.aws.meta.config.retries["total_max_attempts"], 1)
+
+    def test_initialization_exhausts_budget_for_every_provider_and_mode(self):
+        for provider in self.calls:
+            for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+                with self.subTest(provider=provider, mode=mode):
+                    self.reset(provider, initialization=30.0)
+                    if mode == QualityMode.AUDIT:
+                        self.review(mode)
+                    else:
+                        with self.assertRaises(QualityReviewFailure) as raised:
+                            self.review(mode)
+                        self.assertEqual(raised.exception.classification, "budget_exhausted")
+                    self.calls[provider].assert_not_called()
+
+    def test_bedrock_uses_existing_socket_limits_only_when_both_fit(self):
+        self.reset("bedrock", initialization=10.0)
+        self.review()
+        self.aws.converse.assert_called_once()
+        kwargs = self.aws.converse.call_args.kwargs
+        self.assertNotIn("timeout", kwargs)
+        self.assertNotIn("request_timeout", kwargs)
+        self.assertEqual(self.aws.meta.config.read_timeout, 12.0)
+        self.assertEqual(self.aws.meta.config.connect_timeout, 3.0)
+        entries = [json.loads(record.getMessage()) for record in self.logs.records]
+        allocated = next(e for e in entries if e["event"] == "provider_timeout_allocated")
+        self.assertEqual(allocated["allocation_seconds"], 12.0)
+        self.assertEqual(allocated["read_timeout_seconds"], 12.0)
+        self.assertEqual(allocated["application"], "existing_socket_limits")
+
+    def test_allocation_is_recomputed_after_schema_setup_immediately_at_dispatch(self):
+        from structured_outputs import StructuredOutputSettings
+        original = StructuredOutputSettings.request_parameters
+        def prepare(settings, *args, **kwargs):
+            params = original(settings, *args, **kwargs)
+            self.now += 18.0
+            return params
+        for provider in ("openai", "nvidia"):
+            with self.subTest(provider=provider):
+                self.reset(provider, initialization=10.0)
+                with patch.object(StructuredOutputSettings, "request_parameters", prepare):
+                    self.review()
+                self.assertEqual(self.calls[provider].call_args.kwargs["timeout"], 2.0)
+
+    def test_budget_exhausted_during_schema_setup_never_dispatches(self):
+        from structured_outputs import StructuredOutputSettings
+        original = StructuredOutputSettings.request_parameters
+        def prepare(settings, *args, **kwargs):
+            params = original(settings, *args, **kwargs)
+            self.now = 30.0
+            return params
+        for provider in self.calls:
+            for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+                with self.subTest(provider=provider, mode=mode):
+                    self.reset(provider, initialization=10.0)
+                    with patch.object(StructuredOutputSettings, "request_parameters", prepare):
+                        if mode == QualityMode.AUDIT:
+                            self.review(mode)
+                        else:
+                            with self.assertRaises(QualityReviewFailure) as raised:
+                                self.review(mode)
+                            self.assertEqual(raised.exception.classification, "budget_exhausted")
+                    self.calls[provider].assert_not_called()
+
+    def test_request_failure_restores_context_and_preserves_audit_enforce_policy(self):
+        for provider in self.calls:
+            for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+                with self.subTest(provider=provider, mode=mode):
+                    self.reset(provider, initialization=1.0)
+                    self.calls[provider].side_effect = TimeoutError(SECRET)
+                    if mode == QualityMode.AUDIT:
+                        self.review(mode)
+                    else:
+                        with self.assertRaises(QualityReviewFailure) as raised:
+                            self.review(mode)
+                        self.assertTrue(is_transient(raised.exception))
+                    self.calls[provider].assert_called_once()
+
+    def test_initialization_failure_restores_context(self):
+        for mode in (QualityMode.AUDIT, QualityMode.ENFORCE):
+            with self.subTest(mode=mode):
+                self.reset("openai", initialization=0.0)
+                self.openai_constructor.side_effect = ValueError(SECRET)
+                if mode == QualityMode.AUDIT:
+                    self.review(mode)
+                else:
+                    with self.assertRaises(QualityReviewFailure) as raised:
+                        self.review(mode)
+                    self.assertFalse(is_transient(raised.exception))
+                self.sdk.responses.create.assert_not_called()

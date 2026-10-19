@@ -104,8 +104,24 @@ SDK retries remain disabled for all providers.
 
 Before creating the reviewer client, the checker checks remaining time and
 allocates socket timeout `min(AI_PROVIDER_TIMEOUT_SECONDS, remaining_budget)`.
-It checks the budget again after setup, before starting a request. If time is
-exhausted, audit skips review and retains the candidate; enforce fails closed.
+It checks the budget again after setup. Immediately before the SDK request, after
+schema preparation, it recomputes the remaining allocation. OpenAI and NVIDIA use
+the SDK resource method's `timeout` override, so the request uses the fresh value
+rather than the timeout captured during construction.
+
+Bedrock Converse does not expose an equivalent request-level socket override.
+The existing transport's configured connect **and** read limits must already fit
+within the fresh allocation. If either exceeds it, no request starts: diagnostics
+report `timeout_allocation_unavailable`, audit retains the candidate, and enforce
+fails closed with generic HTTP 503 without automatic retry. The client is not
+reconstructed, and neither its Config metadata nor private transport internals are
+mutated. Even a small setup delay can suppress review when Bedrock was constructed
+with a timeout equal to all remaining time. This conservative limitation avoids
+claiming an adjustment that the SDK transport did not apply.
+
+If the budget is exhausted during client or schema setup, no provider request
+starts; audit retains the candidate and enforce fails closed. These failure paths
+restore the caller's timeout context, as do success and provider exceptions.
 The current defaults are unchanged: provider sockets 12 seconds, browser HTTP
 45 seconds, long-wait warning 8 seconds.
 
@@ -136,7 +152,11 @@ Events `quality_review_started`, `quality_review_completed`, `quality_review_fai
 `quality_question_rejected`, `quality_review_skipped` retain request ID and attempt
 correlation. Depending on event, safe fields include mode, provider, duration,
 decision, issue codes, source, reason and failure classification. Existing native
-output diagnostics also include the selected output contract. Questions, choices,
+output diagnostics also include the selected output contract.
+`provider_timeout_allocated` distinguishes an OpenAI/NVIDIA `request_override` from
+Bedrock `existing_socket_limits` and records the applied limits safely;
+`provider_timeout_unavailable` records a suppressed Bedrock request. These events
+retain request/attempt correlation. Questions, choices,
 keys, independent answers, rationale, prompts, credentials, full schemas, raw
 provider responses and exception messages are excluded.
 
