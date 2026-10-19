@@ -3,13 +3,15 @@ from importlib.metadata import version
 from typing import Any
 
 import boto3
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 from botocore.config import Config
+from botocore.exceptions import ClientError, ParamValidationError
 
-from generation_policy import GenerationPolicy, provider_timeout
+from generation_policy import GenerationPolicy, is_transient, provider_timeout
 
 from diagnostics import event, timed_stage
 from provider_result import Completion, ProviderResult
+from structured_outputs import StructuredOutputConfigurationError, StructuredOutputSettings
 
 from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT, ROLE, USER, SYSTEM, CONTENT,
                     OPENAI_MODEL_ID, NVIDIA_API_KEY, NVIDIA_MODEL_ID, BEDROCK_RUNTIME, AWS_REGION, BEDROCK_MODEL_ID,
@@ -87,6 +89,44 @@ class LLMClient:
                   sdk_max_attempts=retries.get("max_attempts"))
 
     def create(
+            self, *, model=None, instructions, input, max_output_tokens=500,
+            reasoning=None, temperature=None,
+    ) -> ProviderResult:
+        """Request optional native schema output, preserving completion normalization."""
+        settings = None
+        try:
+            settings = StructuredOutputSettings.from_env(self.provider)
+            parameters = settings.request_parameters(self.provider, self.client)
+        except StructuredOutputConfigurationError as exc:
+            event("structured_output_failed", provider=self.provider,
+                  native_requested=os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off") == "strict",
+                  output_format=settings.output_format if settings else None,
+                  classification="configuration_error", reason_code=exc.reason_code)
+            raise
+        fields = {"provider": self.provider, "native_requested": settings.requested,
+                  "output_format": settings.output_format}
+        event("structured_output_request", **fields)
+        try:
+            result = self._create(
+                model=model, instructions=instructions, input=input,
+                max_output_tokens=max_output_tokens, reasoning=reasoning,
+                temperature=temperature, structured_parameters=parameters,
+            )
+        except Exception as exc:
+            status = exc.status_code if isinstance(exc, APIStatusError) else None
+            rejected = status in (400, 422) or (
+                isinstance(exc, ClientError) and
+                exc.response.get("Error", {}).get("Code") == "ValidationException")
+            classification = ("provider_request_rejected" if rejected else
+                              "sdk_request_rejected" if isinstance(exc, (TypeError, ParamValidationError)) else
+                              "transient_failure" if is_transient(exc) else "permanent_failure")
+            event("structured_output_failed", **fields, classification=classification,
+                  error_type=type(exc).__name__, status_code=status)
+            raise
+        event("structured_output_result", **fields, classification=result.completion.value)
+        return result
+
+    def _create(
             self,
             *,
             model=None,
@@ -95,6 +135,7 @@ class LLMClient:
             max_output_tokens=500,
             reasoning=None,
             temperature=None,
+            structured_parameters: dict,
     ) -> ProviderResult:
         """
         Create an LLM response through the configured provider.
@@ -115,6 +156,7 @@ class LLMClient:
                     max_output_tokens=max_output_tokens,
                     reasoning=reasoning,
                     temperature=temperature,
+                    **structured_parameters,
                 )
             return self._record_completion(normalize_openai_response(response))
 
@@ -134,11 +176,7 @@ class LLMClient:
                     ],
                     max_completion_tokens=max_output_tokens,
                     temperature=temperature,
-                    extra_body={
-                        "chat_template_kwargs": {
-                            "enable_thinking": False
-                        }
-                    }
+                    **structured_parameters,
                 )
 
             return self._record_completion(normalize_nvidia_response(response))
@@ -171,6 +209,7 @@ class LLMClient:
                         }
                     ],
                     inferenceConfig=inference_config,
+                    **structured_parameters,
                 )
 
             return self._record_completion(normalize_bedrock_response(response))

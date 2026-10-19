@@ -338,3 +338,16 @@ schema validation. See [the result contract and provider mapping](PROVIDER_COMPL
 for retry behavior, the `provider_completion` diagnostic event, offline coverage,
 and provider-specific limitations. Existing timeout/retry defaults, endpoint
 response formats, game state rules, and correct-answer handling are preserved.
+
+
+## 7. AI Engine v2: opt-in Structured Outputs (Step 2)
+
+`AI_STRUCTURED_OUTPUT_MODE=off` preserves the existing provider requests by default.
+After verifying the configured model's support, set `AI_STRUCTURED_OUTPUT_MODE=strict`
+and, for NVIDIA, explicitly select `NVIDIA_STRUCTURED_OUTPUT_FORMAT=guided_json` or
+`json_schema`. There is no automatic fallback on unsupported models or parameters.
+See [Structured Outputs configuration and verification](STRUCTURED_OUTPUTS.md)
+for provider request shapes, safe diagnostics, rollback to off mode, and SDK/model
+limits. Bedrock's first schema compilation can exceed the unchanged interactive
+timeout/budget; this change does not extend it. Pydantic and difficulty checks
+remain mandatory after the existing completion gate.

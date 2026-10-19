@@ -18,6 +18,7 @@ SOCKET_NAMES = ("connect", "read", "write", "pool")
 class ProviderConfigurationTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.dict("os.environ", {
+            "AI_STRUCTURED_OUTPUT_MODE": "off",
             "OPENAI_API_KEY": DUMMY_KEY, "OPENAI_MODEL_ID": "offline-model",
             "NVIDIA_API_KEY": DUMMY_KEY, "NVIDIA_MODEL_ID": "offline-model",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12",

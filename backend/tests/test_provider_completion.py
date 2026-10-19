@@ -240,6 +240,7 @@ class CompletionFlowTests(unittest.TestCase):
         self.game_id = self.client.post("/api/games", json={}).json()["game_id"]
         self.url = f"/api/games/{self.game_id}/question"
         self.enterContext(patch.dict("os.environ", {
+            "AI_STRUCTURED_OUTPUT_MODE": "off",
             "OPENAI_API_KEY": SENSITIVE, "OPENAI_MODEL_ID": "offline-model",
             "NVIDIA_API_KEY": SENSITIVE, "NVIDIA_MODEL_ID": "offline-model",
             "AWS_REGION": "us-east-1", "BEDROCK_MODEL_ID": "offline-model",
