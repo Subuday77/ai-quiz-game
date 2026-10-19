@@ -361,8 +361,12 @@ local results, set `enforce` to require approval before a question becomes visib
 Restart the backend after changing environment settings. Unknown values fail
 safely before generation; setting `off` restores the previous generation behavior.
 
-The checker uses the configured provider/model with a separate prompt and evaluation
-context. It has no external factual sources. Native Structured Outputs, if enabled,
+The checker inherits the generator provider/model unless both `AI_QUALITY_PROVIDER`
+and `AI_QUALITY_MODEL_ID` are configured. A partial pair is invalid; audit logs a
+review failure and retains the candidate, while enforce fails closed. Reviewer
+credentials/region come from the selected provider's existing settings. No generator
+settings or environment variables are temporarily mutated. It uses a separate
+prompt and evaluation context, with no external factual sources. Native Structured Outputs, if enabled,
 selects `quality_review_v1` for reviews and retains `quiz_question_v1` for questions;
 NVIDIA `guided_json` selects the corresponding schema. Model compatibility must be
 verified for both contracts. No unsupported-parameter fallback is attempted.
@@ -388,3 +392,37 @@ regression fixture, request/reward concurrency and native schema selection. Run
 `python -m unittest discover -s tests -v` and `python -m compileall -q .` from
 `backend`. These checks make no remote AI calls; mocked verdicts do not establish
 that a live model detects the same factual mistakes.
+
+
+### Independent reviewer example (Step 3.1)
+
+The repository's `.env.example` now actively shows Super generation with strict
+`guided_json` and Nano audit review with prompt-guided JSON:
+
+```dotenv
+AI_QUALITY_MODE=audit
+AI_QUALITY_PROVIDER=nvidia
+AI_QUALITY_MODEL_ID=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+AI_QUALITY_STRUCTURED_OUTPUT_MODE=off
+```
+
+Generator settings remain `LLM_PROVIDER`, its provider model ID and
+`AI_STRUCTURED_OUTPUT_MODE`. Remove both reviewer provider/model settings to inherit
+the generator. Remove reviewer schema mode to inherit the generator schema mode;
+an empty setting is invalid. The fallback-model variable is never used for review.
+`AI_QUALITY_MODE=off` skips reviewer settings and client initialization entirely.
+
+Correlate `structured_output_request` events by request ID and attempt. `role`,
+`provider`, `model_id`, `structured_output_mode`, `output_format` and `output_contract`
+show Super's generation and Nano's review. The example's two public NVIDIA model
+IDs are logged verbatim; other model IDs use a stable `model_fingerprint` and null
+`model_id` to avoid exposing custom/tenant identifiers. Prompts, questions, keys
+and rationale remain redacted.
+
+The local leakage check now recognizes unique normalized complete-answer phrases,
+including `Первый канал`. Tests include positive and negative examples in all seven
+supported languages. Morphology (such as `мантия` / `мантийные`), ambiguous capitals
+and subjective cultural habits are addressed in prompts and mocked review fixtures;
+those tests do not establish real model accuracy. See [limitations and rollout](QUALITY_CHECKER.md).
+Verify Nano's actual JSON and chat-template support before enabling enforcement;
+no capability inference, automatic model fallback or quality benchmark is included.

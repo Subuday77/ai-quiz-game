@@ -216,4 +216,19 @@ The optional [quality checker](QUALITY_CHECKER.md) reuses these mechanisms with 
 separate internal `quality_review` contract and stable `quality_review_v1` schema.
 Generator requests retain `quiz_question_v1`. Native schema selection is explicit
 per request; off-mode generator payloads remain unchanged. Verify model support
-for both schemas before combining strict output with enforced review.
+for each role's schema before combining strict output with enforced review.
+
+
+Reviewer configuration is independent: `AI_QUALITY_STRUCTURED_OUTPUT_MODE=off|strict`
+overrides `AI_STRUCTURED_OUTPUT_MODE` for the reviewer only; when absent it inherits
+the generator mode. Generator requests are unchanged. Provider/model overrides must
+be paired as `AI_QUALITY_PROVIDER` and `AI_QUALITY_MODEL_ID`. Strict review uses
+`quality_review_v1` on that configured model; off review still passes completion,
+JSON and Pydantic checks. Invalid reviewer settings follow audit/enforce failure
+policy and never trigger silent downgrade. NVIDIA roles share the configured
+`NVIDIA_STRUCTURED_OUTPUT_FORMAT` and retain existing chat-template options.
+
+The example uses strict Super generation with Nano review in off mode; this avoids
+assuming equal native schema support but does not guarantee Nano accepts the other
+parameters or produces valid JSON. Verify actual deployment support separately.
+Diagnostic events identify role, safe model identity, mode, format and contract.

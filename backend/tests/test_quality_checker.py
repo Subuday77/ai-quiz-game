@@ -1,6 +1,7 @@
 """Offline quality-policy integration; every generator and reviewer call is mocked."""
 
 import json
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -81,13 +82,16 @@ class VerdictTests(unittest.TestCase):
         candidate["answers"]["B"] = word[:-1] + "x"
         self.assertEqual(lexical_findings(QuizQuestion.model_validate(candidate)), [IssueCode.ANSWER_LEAK])
         for question in (QUESTION, {**candidate, "question": 'Where did ' + word + ' live?'},
-                         {**QUESTION, "question": 'What does "Mars" mean?'},
+                         {**QUESTION, "question": 'What does "planet" mean?'},
                          {**candidate, "answers": {**candidate["answers"], "A": word + " city"}}):
             self.assertEqual(lexical_findings(QuizQuestion.model_validate(question)), [])
 
 
 class QualityApiTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.dict("os.environ"))
+        for key in ("AI_QUALITY_PROVIDER", "AI_QUALITY_MODEL_ID", "AI_QUALITY_STRUCTURED_OUTPUT_MODE"):
+            os.environ.pop(key, None)
         sessions.clear()
         self.enterContext(patch.dict("os.environ", {
             "AI_QUALITY_MODE": "enforce", "AI_STRUCTURED_OUTPUT_MODE": "off",
@@ -96,7 +100,7 @@ class QualityApiTests(unittest.TestCase):
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2", "LLM_PROVIDER": "nvidia",
             "NVIDIA_API_KEY": SECRET}))
         self.generated = self.enterContext(patch("api.create_question", return_value=QUESTION))
-        self.factory = self.enterContext(patch("quality_checker.client"))
+        self.factory = self.enterContext(patch("quality_checker.LLMClient"))
         self.review = self.factory.return_value.responses.create
         self.review.return_value = result()
         self.sleep = self.enterContext(patch("api.sleep"))
@@ -275,7 +279,7 @@ class QualityApiTests(unittest.TestCase):
             return QUESTION
         observed = []
         self.generated.side_effect = generate
-        self.factory.side_effect = lambda: (observed.append(provider_timeout.get()) or Mock(
+        self.factory.side_effect = lambda *args, **kwargs: (observed.append(provider_timeout.get()) or Mock(
             responses=Mock(create=Mock(return_value=result()))))
         with patch("api.perf_counter", side_effect=lambda: now[0]):
             self.assertEqual(self.http.get(self.url).status_code, 200)
@@ -299,7 +303,7 @@ class QualityApiTests(unittest.TestCase):
 
     def test_client_setup_cannot_start_review_after_budget_expiry(self):
         now = [0.0]
-        def factory():
+        def factory(*args, **kwargs):
             now[0] = 31.0
             return Mock(responses=Mock(create=self.review))
         self.factory.side_effect = factory
@@ -399,6 +403,9 @@ class ReviewerTimeoutTests(unittest.TestCase):
     """Exercise the real provider wrapper; every SDK constructor/request is mocked."""
 
     def setUp(self):
+        self.enterContext(patch.dict("os.environ"))
+        for key in ("AI_QUALITY_PROVIDER", "AI_QUALITY_MODEL_ID", "AI_QUALITY_STRUCTURED_OUTPUT_MODE"):
+            os.environ.pop(key, None)
         self.enterContext(patch.dict("os.environ", {
             "AI_STRUCTURED_OUTPUT_MODE": "off", "OPENAI_API_KEY": SECRET,
             "OPENAI_MODEL_ID": "offline", "NVIDIA_API_KEY": SECRET,
@@ -408,7 +415,7 @@ class ReviewerTimeoutTests(unittest.TestCase):
         self.aws = Mock()
         self.openai_constructor = self.enterContext(patch("define_ai_provider.OpenAI"))
         self.aws_constructor = self.enterContext(patch("define_ai_provider.boto3.client"))
-        self.factory = self.enterContext(patch("quality_checker.client"))
+        self.factory = self.enterContext(patch("quality_checker.LLMClient"))
         self.now = 0.0
         self.init_seconds = 0.0
         def openai_constructor(**kwargs):
@@ -434,7 +441,7 @@ class ReviewerTimeoutTests(unittest.TestCase):
     def reset(self, provider, initialization):
         self.now = 0.0
         self.init_seconds = initialization
-        self.factory.side_effect = lambda: LLMClient(provider)
+        self.factory.side_effect = lambda *args, **kwargs: LLMClient(provider, **kwargs)
         for call in self.calls.values():
             call.reset_mock(side_effect=True)
         self.calls[provider].return_value = self.raw[provider](text=json.dumps(ACCEPT))

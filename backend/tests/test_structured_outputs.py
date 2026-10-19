@@ -1,6 +1,7 @@
 """Offline transport-schema, native payload, validation and no-downgrade tests."""
 
 import json
+import os
 import unittest
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, patch
@@ -113,6 +114,9 @@ class SchemaTests(unittest.TestCase):
 
 class NativeRequestTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.dict("os.environ"))
+        for key in ("AI_QUALITY_PROVIDER", "AI_QUALITY_MODEL_ID", "AI_QUALITY_STRUCTURED_OUTPUT_MODE"):
+            os.environ.pop(key, None)
         self.enterContext(patch.dict("os.environ", {
             "AI_STRUCTURED_OUTPUT_MODE": "off", "NVIDIA_STRUCTURED_OUTPUT_FORMAT": "guided_json",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3",
@@ -454,7 +458,7 @@ class NativeRequestTests(unittest.TestCase):
                 self.calls[provider].side_effect = [RESPONSES[provider](),
                     RESPONSES[provider](text=json.dumps(verdict))]
                 with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
-                        "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                        "quality_checker.LLMClient", side_effect=lambda *args, **kwargs: LLMClient(provider, **kwargs)):
                     response = self.http.get(self.url)
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(self.calls[provider].call_count, 2)
@@ -477,7 +481,7 @@ class NativeRequestTests(unittest.TestCase):
                     self.calls[provider].side_effect = [RESPONSES[provider](), error]
                     categories = sessions[self.game_id].categories.copy()
                     with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
-                            "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                            "quality_checker.LLMClient", side_effect=lambda *args, **kwargs: LLMClient(provider, **kwargs)):
                         self.assertEqual(self.http.get(self.url).status_code, 503)
                     self.assertEqual(self.calls[provider].call_count, 2)
                     self.sleep.assert_not_called()
@@ -503,7 +507,7 @@ class NativeRequestTests(unittest.TestCase):
                 with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
                         "api.perf_counter", side_effect=lambda: now[0]), patch(
                         "api.create_question", side_effect=generate), patch(
-                        "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                        "quality_checker.LLMClient", side_effect=lambda *args, **kwargs: LLMClient(provider, **kwargs)):
                     self.assertEqual(self.http.get(self.url).status_code, 200)
                 if provider == "bedrock":
                     config = define_ai_provider.boto3.client.call_args.kwargs["config"]

@@ -46,6 +46,15 @@ Requirements:
 - Do not ask subjective or ambiguous questions.
 - Avoid questions where more than one answer could reasonably be considered correct.
 - Avoid facts that may change over time.
+- Never put the answer itself in the question, including a repeated quoted expression.
+- Avoid obvious morphological derivatives of the answer (e.g. мантия / мантийные).
+- Ask: Can the player identify the correct option from the wording alone, without
+  knowing the underlying fact? If yes, regenerate instead of giving a lexical clue.
+- Apply these checks in English, Russian, Hebrew, German, French, Spanish and Italian.
+- Specify context when more than one answer could be defensible (e.g. types of capitals).
+- Do not present subjective cultural habits as objective universal facts.
+- Cultural/religious questions are allowed when they have a conventional unique answer
+  within clearly stated scope; do not manufacture ambiguity.
 - Randomize the position of the correct answer.
 - Match the requested difficulty level as closely as possible.
 

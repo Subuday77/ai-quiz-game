@@ -1,7 +1,8 @@
+import hashlib
 import math
 import os
 from importlib.metadata import version
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import boto3
 from openai import APIStatusError, OpenAI
@@ -31,16 +32,22 @@ class ProviderTimeoutBudgetError(Exception):
 
 
 class LLMClient:
-    def __init__(self, provider: str) -> None:
+    def __init__(self, provider: str, *, model_id: str | None = None,
+                 structured_output_mode: str | None = None,
+                 role: Literal["generator", "reviewer"] = "generator") -> None:
         """
         Initialize a provider-specific LLM client.
         :param provider: Provider identifier to configure: openai, nvidia, or bedrock.
+        :param model_id: Explicit internal model override; otherwise use provider environment.
+        :param structured_output_mode: Explicit role mode; None inherits generator mode.
         :return: None.
         Raise:
             ValueError: If the provider is not supported.
             KeyError: If a required environment variable is missing.
         """
         self.provider = provider
+        self.role = role
+        self.structured_output_mode = structured_output_mode
         self.responses = self
         timeout = provider_timeout.get()
         if timeout is None:
@@ -51,7 +58,7 @@ class LLMClient:
                 api_key=os.environ[OPENAI_API_KEY],
                 timeout=timeout, max_retries=0
             )
-            self.model = os.environ[OPENAI_MODEL_ID]
+            self.model = model_id if model_id is not None else os.environ[OPENAI_MODEL_ID]
 
         elif provider == NVIDIA:
             self.client = OpenAI(
@@ -59,7 +66,7 @@ class LLMClient:
                 api_key=os.environ[NVIDIA_API_KEY],
                 max_retries=0, timeout=timeout
             )
-            self.model = os.environ[NVIDIA_MODEL_ID]
+            self.model = model_id if model_id is not None else os.environ[NVIDIA_MODEL_ID]
 
         elif provider == BEDROCK:
             self.client = boto3.client(
@@ -67,7 +74,7 @@ class LLMClient:
                 config=Config(connect_timeout=min(3.0, timeout), read_timeout=timeout,
                               retries={"mode": "standard", "total_max_attempts": 1}),
             )
-            self.model = os.environ[BEDROCK_MODEL_ID]
+            self.model = model_id if model_id is not None else os.environ[BEDROCK_MODEL_ID]
 
         else:
             raise ValueError(f"{UNKNOWN_PROVIDER}: {provider}")
@@ -83,14 +90,14 @@ class LLMClient:
                 if isinstance(timeout, (int, float)) or timeout is None
                 else {name: getattr(timeout, name) for name in socket_names}
             )
-            event("provider_configuration", provider=provider,
+            event("provider_configuration", **self._identity(),
                   sdk_version=version("openai"),
                   sdk_max_retries=self.client.max_retries,
                   timeout_seconds=timeout_seconds)
         elif provider == BEDROCK:
             config = self.client.meta.config
             retries = config.retries or {}
-            event("provider_configuration", provider=provider,
+            event("provider_configuration", **self._identity(),
                   sdk_version=version("boto3"), botocore_version=version("botocore"),
                   connect_timeout_seconds=config.connect_timeout,
                   read_timeout_seconds=config.read_timeout,
@@ -106,15 +113,17 @@ class LLMClient:
         """Request optional native schema output, preserving completion normalization."""
         settings = None
         try:
-            settings = StructuredOutputSettings.from_env(self.provider)
+            settings = StructuredOutputSettings.from_env(self.provider, mode=self.structured_output_mode)
             parameters = settings.request_parameters(self.provider, self.client, output_contract)
         except StructuredOutputConfigurationError as exc:
-            event("structured_output_failed", provider=self.provider,
-                  native_requested=os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off") == "strict",
+            event("structured_output_failed", **self._identity(),
+                  native_requested=(self.structured_output_mode if self.structured_output_mode is not None
+                                    else os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off")) == "strict",
                   output_format=settings.output_format if settings else None,
                   classification="configuration_error", reason_code=exc.reason_code)
             raise
-        fields = {"provider": self.provider, "native_requested": settings.requested,
+        fields = {**self._identity(), "native_requested": settings.requested,
+                  "structured_output_mode": settings.mode,
                   "output_format": settings.output_format,
                   "output_contract": OutputContract(output_contract).value}
         event("structured_output_request", **fields)
@@ -161,7 +170,7 @@ class LLMClient:
         :return: Provider-independent text and completion metadata.
         """
         if self.provider == OPENAI:
-            with timed_stage("provider_request", provider=self.provider):
+            with timed_stage("provider_request", **self._identity()):
                 timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.responses.create(
                     model=self.model,
@@ -176,7 +185,7 @@ class LLMClient:
             return self._record_completion(normalize_openai_response(response))
 
         if self.provider == NVIDIA:
-            with timed_stage("provider_request", provider=self.provider):
+            with timed_stage("provider_request", **self._identity()):
                 timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -207,7 +216,7 @@ class LLMClient:
                 # Bedrock Converse accepts temperature only from 0 to 1.
                 inference_config[TEMPERATURE] = min(temperature, 1.0)
 
-            with timed_stage("provider_request", provider=self.provider):
+            with timed_stage("provider_request", **self._identity()):
                 timeout_parameters = self._timeout_parameters(request_timeout)
                 response = self.client.converse(
                     modelId=self.model,
@@ -242,7 +251,7 @@ class LLMClient:
             raise ProviderTimeoutBudgetError("budget_exhausted")
         if self.provider in (OPENAI, NVIDIA):
             # Both SDK resource methods pass this override to the HTTP transport.
-            event("provider_timeout_allocated", provider=self.provider,
+            event("provider_timeout_allocated", **self._identity(),
                   timeout_seconds=seconds, application="request_override")
             return {"timeout": seconds}
         # Converse has no request-level socket override. Config alone must not be
@@ -251,16 +260,25 @@ class LLMClient:
         limits = (config.connect_timeout, config.read_timeout)
         if any(not isinstance(value, (int, float)) or not math.isfinite(value)
                or value <= 0 or value > seconds for value in limits):
-            event("provider_timeout_unavailable", provider=self.provider,
+            event("provider_timeout_unavailable", **self._identity(),
                   allocation_seconds=seconds, reason="configured_timeout_exceeds_budget")
             raise ProviderTimeoutBudgetError("timeout_allocation_unavailable")
-        event("provider_timeout_allocated", provider=self.provider,
+        event("provider_timeout_allocated", **self._identity(),
               allocation_seconds=seconds, connect_timeout_seconds=config.connect_timeout,
               read_timeout_seconds=config.read_timeout, application="existing_socket_limits")
         return {}
 
+    def _identity(self) -> dict:
+        # Only explicitly public deployment IDs are logged verbatim. Custom model
+        # IDs/ARNs can carry tenant data; retain a stable fingerprint instead.
+        public_models = {"nvidia/nemotron-3-super-120b-a12b",
+                         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"}
+        return {"role": self.role, "provider": self.provider,
+                "model_id": self.model if self.model in public_models else None,
+                "model_fingerprint": hashlib.sha256(self.model.encode()).hexdigest()[:12]}
+
     def _record_completion(self, result: ProviderResult) -> ProviderResult:
-        event("provider_completion", provider=self.provider,
+        event("provider_completion", **self._identity(),
               completion=result.completion.value, provider_reason=result.provider_reason)
         return result
 

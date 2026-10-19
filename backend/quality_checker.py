@@ -10,15 +10,16 @@ from time import perf_counter
 from pydantic import ValidationError
 
 from config import MAX_OUTPUT_TOKENS, TEMPERATURE
-from consts import client
 from diagnostics import event, timed_stage
-from define_ai_provider import ProviderTimeoutBudgetError
+from define_ai_provider import LLMClient, ProviderTimeoutBudgetError
 from generation_policy import is_transient, provider_timeout, retry_after_seconds
 from output_contracts import OutputContract
 from provider_result import ProviderCompletionError, completed_text
+from quality_configuration import ReviewerSettings
 from quality_errors import (QualityConfigurationError, QualityEscalationError,
                             QualityRegenerationError, QualityReviewFailure)
 from quality_schema import IssueCode, QualityMode, QualityReview, ReviewDecision
+from structured_outputs import StructuredOutputConfigurationError
 from question_generator import normalize_output
 from question_schema import QuizQuestion
 
@@ -30,6 +31,18 @@ Evaluate factual premises, the key, terminology, nicknames and unsupported causa
 explanations; uniqueness of the correct option; missing temporal/geographic context,
 disputed claims and ambiguity; answer leakage including similar names, wording and
 formatting; significant difficulty mismatch; grammar, localization and mistranslation.
+Review all supported languages: English, Russian, Hebrew, German, French,
+Spanish and Italian. Ask: "Can the player identify the correct option from the
+wording alone, without knowing the underlying fact?" Flag literal answers in the
+question, quoted answer expressions, obvious morphological derivatives (for example
+мантия / мантийные), and clues that reveal the answer without factual knowledge.
+Distinguish a necessary shared topic word from a giveaway of the entire answer.
+Reject missing context that leaves multiple defensible answers (including distinct
+constitutional and administrative capitals). Reject subjective cultural habits
+presented as universal facts, such as an unspecified drink often served with food.
+Do not reject cultural or religious questions merely for being cultural/religious:
+accept a conventional unique answer when scope is clear and no defensible alternative
+exists. Likewise, do not invent ambiguity in a straightforward astronomy question.
 Difficulty 0 is trivial, 5 general knowledge, 10 advanced, 15 expert specialist.
 Allow normal variation in difficulty. No external references were consulted: do not
 claim verified facts. Escalate uncertainty needing verification, rather than guessing.
@@ -61,7 +74,33 @@ def quality_mode_from_env() -> QualityMode:
 
 
 def lexical_findings(question: QuizQuestion) -> list[IssueCode]:
-    """Only unique near-copies of long quoted terms; deliberately low recall."""
+    """Unique full-answer phrases, plus conservative long quoted near-copies."""
+    def tokens(text):
+        normalized = unicodedata.normalize("NFKD", text).casefold()
+        normalized = "".join(char for char in normalized
+                             if not unicodedata.category(char).startswith("M")
+                             and unicodedata.category(char) != "Cf")
+        return re.findall(r"[^\W_]+", normalized)
+
+    def contains(haystack, needle):
+        return bool(needle) and any(haystack[i:i + len(needle)] == needle
+                                   for i in range(len(haystack) - len(needle) + 1))
+
+    quoted_text = re.findall(r'"([^"\n]+)"|«([^»\n]+)»|“([^”\n]+)”', question.question)
+    question_tokens = tokens(question.question)
+    answer_tokens = {key: tokens(answer) for key, answer in question.answers.items()}
+    correct = answer_tokens[question.correct_answer]
+    quoted_answer = any(tokens(" ".join(groups)) == correct for groups in quoted_text)
+    # Avoid tiny/common standalone tokens; short quoted expressions are stronger.
+    substantial = (len(correct) >= 2 and sum(map(len, correct)) >= 5
+                   or len(correct) == 1 and len(correct[0]) >= 4 and correct[0].isalpha()
+                   or quoted_answer and sum(map(len, correct)) >= 2)
+    if substantial and contains(question_tokens, correct) and not any(
+            contains(question_tokens, phrase) or contains(phrase, correct)
+            for key, phrase in answer_tokens.items()
+            if key != question.correct_answer):
+        return [IssueCode.ANSWER_LEAK]
+
     def words(text):
         text = unicodedata.normalize("NFKC", text).casefold()
         return [w for w in re.findall(r"[^\W\d_]+", text) if 10 <= len(w) <= 64]
@@ -71,11 +110,10 @@ def lexical_findings(question: QuizQuestion) -> list[IssueCode]:
             None, left, right, autojunk=False).ratio() >= 0.9
 
     # Paired quotation marks only, avoiding ordinary shared topic words.
-    quoted = re.findall(r'"([^"\n]+)"|«([^»\n]+)»|“([^”\n]+)”', question.question)
     key_words = words(question.answers[question.correct_answer])
     distractors = [word for key, text in question.answers.items()
                    if key != question.correct_answer for word in words(text)]
-    for groups in quoted:
+    for groups in quoted_text:
         for word in words(" ".join(groups)):
             if any(similar(word, answer) for answer in key_words) and not any(
                     similar(word, answer) for answer in distractors):
@@ -86,7 +124,7 @@ def lexical_findings(question: QuizQuestion) -> list[IssueCode]:
 def check_quality(question: QuizQuestion, requested_difficulty: int, language: str,
                   mode: QualityMode, deadline: float, timeout_seconds: float,
                   clock=perf_counter) -> None:
-    fields = {"mode": mode.value, "provider": _provider()}
+    fields = {"mode": mode.value, "provider": _provider(), "role": "reviewer"}
     if mode == QualityMode.OFF:
         event("quality_review_skipped", **fields, reason="disabled")
         return
@@ -104,11 +142,14 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
         event("quality_review_failed", **fields, classification="budget_exhausted")
         raise QualityReviewFailure("budget_exhausted")
     start = clock()
-    event("quality_review_started", **fields, local_issue_codes=local)
     token = provider_timeout.set(min(timeout_seconds, remaining))
     try:
+        settings = ReviewerSettings.from_env()
+        fields["provider"] = settings.provider
+        event("quality_review_started", **fields, local_issue_codes=local)
         with timed_stage("quality_provider_client_setup"):
-            reviewer = client()
+            reviewer = LLMClient(settings.provider, model_id=settings.model_id,
+                                 structured_output_mode=settings.structured_output_mode, role="reviewer")
         remaining = deadline - clock()
         if remaining <= 0:
             raise QualityReviewFailure("budget_exhausted")
@@ -126,7 +167,9 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
         with timed_stage("quality_validation"):
             verdict = QualityReview.model_validate(raw)
     except Exception as exc:
-        if isinstance(exc, (json.JSONDecodeError, ValidationError)):
+        if isinstance(exc, (QualityConfigurationError, StructuredOutputConfigurationError)):
+            classification = "configuration_error"
+        elif isinstance(exc, (json.JSONDecodeError, ValidationError)):
             classification = "invalid_verdict"
         elif isinstance(exc, ProviderCompletionError):
             classification = "completion_" + exc.completion.value

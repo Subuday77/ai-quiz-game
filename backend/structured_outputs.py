@@ -26,8 +26,9 @@ class StructuredOutputSettings:
         return self.mode == "strict"
 
     @classmethod
-    def from_env(cls, provider: str):
-        mode = os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off")
+    def from_env(cls, provider: str, *, mode: str | None = None):
+        if mode is None:
+            mode = os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off")
         if mode not in ("off", "strict"):
             raise StructuredOutputConfigurationError("invalid_mode")
         if mode == "off":
