@@ -5,25 +5,50 @@ Do not deploy publicly before persistent storage, authentication and quotas.
 """
 
 import json
-import logging
 import random
 from dataclasses import dataclass, field
 from threading import Lock
+from time import perf_counter
 from uuid import uuid4
 
 from dotenv import find_dotenv, load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 load_dotenv(find_dotenv())
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES  # noqa: E402
 from game_logic import GameState  # noqa: E402
+from diagnostics import elapsed_ms, event, generation_attempt, request_id, timed_stage  # noqa: E402
 from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
 
-log = logging.getLogger(__name__)
 app = FastAPI(title="AI Quiz Game", version="0.1.0")
+
+
+@app.middleware("http")
+async def question_diagnostics(request: Request, call_next):
+    parts = request.url.path.split("/")
+    if not (request.method == "GET" and len(parts) == 5
+            and parts[1:3] == ["api", "games"] and parts[4] == "question"):
+        return await call_next(request)
+    diagnostic_id = str(uuid4())
+    token = request_id.set(diagnostic_id)
+    start = perf_counter()
+    status = 500
+    event("question_request_received")
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Diagnostic-Request-ID"] = diagnostic_id
+        return response
+    except Exception as exc:
+        event("question_request_failed", error_type=type(exc).__name__)
+        raise
+    finally:
+        event("question_request_completed", duration_ms=elapsed_ms(start),
+              status_code=status, outcome="success" if status < 400 else "failure")
+        request_id.reset(token)
 
 
 class NewGame(BaseModel):
@@ -103,32 +128,46 @@ def game_info(game_id: str) -> GameInfo:
 @app.get("/api/games/{game_id}/question", response_model=PublicQuestion)
 def get_question(game_id: str) -> PublicQuestion:
     session = find_session(game_id)
+    lock_start = perf_counter()
+    event("session_lock_wait_started")
     with session.lock:
+        event("session_lock_acquired", duration_ms=elapsed_ms(lock_start))
         if session.state.phase not in ("main", "bonus"):
             raise HTTPException(status_code=409, detail="Game has ended")
         if session.question is None:
+            event("question_cache", hit=False)
             if not session.categories:
                 raise HTTPException(status_code=500, detail="No unused categories")
             difficulty = session.state.current_difficulty
             category = session.categories[-1]
             # Invalid JSON or schema gets a bounded retry. Provider/auth errors are not retried here.
             for attempt in range(3):
+                token = generation_attempt.set(attempt + 1)
+                event("generation_attempt_started")
                 try:
                     raw = create_question(difficulty, session.language, category)
-                    question = QuizQuestion.model_validate(raw)
-                    if question.difficulty != difficulty:
-                        raise ValueError("AI returned the wrong difficulty")
+                    with timed_stage("question_validation"):
+                        question = QuizQuestion.model_validate(raw)
+                        if question.difficulty != difficulty:
+                            raise ValueError("AI returned the wrong difficulty")
+                    event("generation_attempt_completed", outcome="success")
                     break
                 except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-                    log.warning("Invalid AI question on attempt %s: %s", attempt + 1, exc)
-                except Exception:
-                    log.exception("AI provider request failed")
+                    event("generation_attempt_completed", outcome="invalid_question",
+                          error_type=type(exc).__name__)
+                except Exception as exc:
+                    event("generation_attempt_completed", outcome="provider_failure",
+                          error_type=type(exc).__name__)
                     raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+                finally:
+                    generation_attempt.reset(token)
             else:
                 raise HTTPException(status_code=502, detail="AI could not generate a valid question")
             session.question = question
             session.question_id = str(uuid4())
             session.categories.pop()
+        else:
+            event("question_cache", hit=True)
         question = session.question
         assert question is not None and session.question_id is not None
         return PublicQuestion(question_id=session.question_id,

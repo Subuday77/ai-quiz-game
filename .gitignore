@@ -11,3 +11,4 @@ dist/
 .angular/
 coverage/
 *.log
+.idea

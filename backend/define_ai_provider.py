@@ -1,9 +1,12 @@
 import os
+from importlib.metadata import version
 from types import SimpleNamespace
 from typing import Any
 
 import boto3
 from openai import OpenAI
+
+from diagnostics import event, timed_stage
 
 from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT, ROLE, USER, SYSTEM, CONTENT,
                     OPENAI_MODEL_ID, NVIDIA_API_KEY, NVIDIA_MODEL_ID, BEDROCK_RUNTIME, AWS_REGION, BEDROCK_MODEL_ID,
@@ -46,6 +49,25 @@ class LLMClient:
         else:
             raise ValueError(f"{UNKNOWN_PROVIDER}: {provider}")
 
+        # Read resolved SDK settings; do not override configuration or credentials.
+        if provider in (OPENAI, NVIDIA):
+            timeout = self.client.timeout
+            event("provider_configuration", provider=provider,
+                  sdk_version=version("openai"),
+                  sdk_max_retries=self.client.max_retries,
+                  timeout_seconds={name: getattr(timeout, name)
+                                   for name in ("connect", "read", "write", "pool")})
+        elif provider == BEDROCK:
+            config = self.client.meta.config
+            retries = config.retries or {}
+            event("provider_configuration", provider=provider,
+                  sdk_version=version("boto3"), botocore_version=version("botocore"),
+                  connect_timeout_seconds=config.connect_timeout,
+                  read_timeout_seconds=config.read_timeout,
+                  retry_mode=retries.get("mode"),
+                  sdk_total_max_attempts=retries.get("total_max_attempts"),
+                  sdk_max_attempts=retries.get("max_attempts"))
+
     def create(
             self,
             *,
@@ -67,36 +89,38 @@ class LLMClient:
         :return: Response object with an output_text attribute or provider-native response.
         """
         if self.provider == OPENAI:
-            return self.client.responses.create(
-                model=self.model,
-                instructions=instructions,
-                input=input,
-                max_output_tokens=max_output_tokens,
-                reasoning=reasoning,
-                temperature=temperature,
-            )
+            with timed_stage("provider_request", provider=self.provider):
+                return self.client.responses.create(
+                    model=self.model,
+                    instructions=instructions,
+                    input=input,
+                    max_output_tokens=max_output_tokens,
+                    reasoning=reasoning,
+                    temperature=temperature,
+                )
 
         if self.provider == NVIDIA:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        ROLE: SYSTEM,
-                        CONTENT: instructions
-                    },
-                    {
-                        ROLE: USER,
-                        CONTENT: input
+            with timed_stage("provider_request", provider=self.provider):
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            ROLE: SYSTEM,
+                            CONTENT: instructions
+                        },
+                        {
+                            ROLE: USER,
+                            CONTENT: input
+                        }
+                    ],
+                    max_completion_tokens=max_output_tokens,
+                    temperature=temperature,
+                    extra_body={
+                        "chat_template_kwargs": {
+                            "enable_thinking": False
+                        }
                     }
-                ],
-                max_completion_tokens=max_output_tokens,
-                temperature=temperature,
-                extra_body={
-                    "chat_template_kwargs": {
-                        "enable_thinking": False
-                    }
-                }
-            )
+                )
 
             return SimpleNamespace(
                 output_text=normalize_output(
@@ -113,25 +137,26 @@ class LLMClient:
                 # Bedrock Converse accepts temperature only from 0 to 1.
                 inference_config[TEMPERATURE] = min(temperature, 1.0)
 
-            response = self.client.converse(
-                modelId=self.model,
-                system=[
-                    {
-                        TEXT: instructions
-                    }
-                ],
-                messages=[
-                    {
-                        ROLE: USER,
-                        CONTENT: [
-                            {
-                                TEXT: input
-                            }
-                        ]
-                    }
-                ],
-                inferenceConfig=inference_config,
-            )
+            with timed_stage("provider_request", provider=self.provider):
+                response = self.client.converse(
+                    modelId=self.model,
+                    system=[
+                        {
+                            TEXT: instructions
+                        }
+                    ],
+                    messages=[
+                        {
+                            ROLE: USER,
+                            CONTENT: [
+                                {
+                                    TEXT: input
+                                }
+                            ]
+                        }
+                    ],
+                    inferenceConfig=inference_config,
+                )
 
             text = response[OUTPUT][MESSAGE][CONTENT][0][TEXT]
 
