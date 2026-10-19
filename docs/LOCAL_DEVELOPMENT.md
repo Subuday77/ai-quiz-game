@@ -289,6 +289,8 @@ answers remain single-use and concurrent duplicate submissions still return 409.
 POST requests are never retried automatically. If an answer's response is lost,
 the server may already have recorded it; replay protection prevents double rewards,
 but recovering that lost feedback is outside this question-generation change.
+The confirmed stuck-player scenario and a proposed read-only answer receipt API
+are documented in [the CR-2 recovery follow-up](ANSWER_RESPONSE_RECOVERY.md).
 
 For SDK semantics, see [official OpenAI error guidance](https://developers.openai.com/api/docs/guides/error-codes),
 [Botocore configuration](https://docs.aws.amazon.com/botocore/latest/reference/config.html),
@@ -305,7 +307,11 @@ python -m py_compile api.py question_generator.py define_ai_provider.py generati
 
 If the repository-root environment is selected rather than `backend/.venv`, use
 `..\.venv\Scripts\python.exe` in place of `python`. SDK constructors and provider
-calls, clocks, jitter, and backoff sleeps are mocked. Tests cover transient/permanent
+calls, clocks, jitter, and backoff sleeps are mocked in request-flow tests.
+Constructor regressions additionally instantiate actual OpenAI/NVIDIA SDK clients
+with dummy keys and block SDK requests/socket connections. They cover numeric and
+structured timeout diagnostics, including remaining-budget limits. The timeout and
+retry policy is unchanged by the CR-1 fix. Tests cover transient/permanent
 failures, mixed retries/exhaustion, unchanged failure state, lock serialization,
 late/browser-abandoned request recovery, and duplicate reward prevention. No AI
 keys, paid calls, or remote AI requests are used.

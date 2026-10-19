@@ -63,11 +63,18 @@ class LLMClient:
         # Log the resolved policy without credentials or request contents.
         if provider in (OPENAI, NVIDIA):
             timeout = self.client.timeout
+            # SDK versions may retain a scalar rather than a Timeout object.
+            # Normalize only diagnostic fields; leave the transport policy intact.
+            socket_names = ("connect", "read", "write", "pool")
+            timeout_seconds = (
+                dict.fromkeys(socket_names, timeout)
+                if isinstance(timeout, (int, float)) or timeout is None
+                else {name: getattr(timeout, name) for name in socket_names}
+            )
             event("provider_configuration", provider=provider,
                   sdk_version=version("openai"),
                   sdk_max_retries=self.client.max_retries,
-                  timeout_seconds={name: getattr(timeout, name)
-                                   for name in ("connect", "read", "write", "pool")})
+                  timeout_seconds=timeout_seconds)
         elif provider == BEDROCK:
             config = self.client.meta.config
             retries = config.retries or {}
