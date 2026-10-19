@@ -12,6 +12,8 @@ from botocore.exceptions import (ClientError, ConnectionClosedError, ConnectTime
                                  EndpointConnectionError, ReadTimeoutError)
 from openai import APIConnectionError, APIStatusError
 
+from provider_result import EmptyGenerationError, TruncatedGenerationError
+
 # Set only while an API generation attempt is running; CLI calls use the default.
 provider_timeout = ContextVar("provider_timeout", default=None)
 
@@ -53,7 +55,8 @@ class InvalidQuestionError(ValueError):
 
 
 def is_transient(exc: Exception) -> bool:
-    if isinstance(exc, (APIConnectionError, ConnectTimeoutError, ReadTimeoutError,
+    if isinstance(exc, (TruncatedGenerationError, EmptyGenerationError,
+                        APIConnectionError, ConnectTimeoutError, ReadTimeoutError,
                         EndpointConnectionError, ConnectionClosedError,
                         TimeoutError, ConnectionError)):
         return True

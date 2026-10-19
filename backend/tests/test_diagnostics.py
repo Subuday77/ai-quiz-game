@@ -46,7 +46,8 @@ class DiagnosticTests(unittest.TestCase):
     def response(self, data):
         text = json.dumps(data) if isinstance(data, dict) else data
         return SimpleNamespace(choices=[SimpleNamespace(
-            message=SimpleNamespace(content=text))])
+            finish_reason="stop", message=SimpleNamespace(
+                content=text, refusal=None, tool_calls=None, function_call=None))])
 
     def capture(self):
         return self.assertLogs("quiz.diagnostics", level="INFO")
@@ -259,7 +260,10 @@ class DiagnosticTests(unittest.TestCase):
             with self.subTest(provider=provider), self.capture():
                 LLMClient(provider)
             self.openai.assert_called_with(**kwargs)
-        self.sdk.responses.create.return_value = SimpleNamespace(output_text=json.dumps(QUESTION))
+        self.sdk.responses.create.return_value = SimpleNamespace(
+            status="completed", incomplete_details=None,
+            output=[SimpleNamespace(type="message", status="completed", content=[
+                SimpleNamespace(type="output_text", text=json.dumps(QUESTION))])])
         self.factory.side_effect = lambda: LLMClient("openai")
         with self.capture() as captured:
             result = self.client.get(self.url)
@@ -271,7 +275,8 @@ class DiagnosticTests(unittest.TestCase):
         sdk = self.boto.return_value
         sdk.meta.config = SimpleNamespace(connect_timeout=3, read_timeout=12,
                                          retries={"mode": "standard", "total_max_attempts": 1})
-        sdk.converse.return_value = {"output": {"message": {"content": [{"text": json.dumps(QUESTION)}]}}}
+        sdk.converse.return_value = {"stopReason": "end_turn", "output": {
+            "message": {"content": [{"text": json.dumps(QUESTION)}]}}}
         self.factory.side_effect = lambda: LLMClient("bedrock")
         with self.capture() as captured:
             result = self.client.get(self.url)

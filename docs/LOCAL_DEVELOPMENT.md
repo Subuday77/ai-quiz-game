@@ -329,3 +329,12 @@ new testing dependency, or real delays. They exercise component behavior and Ret
 template wiring; the production Angular build checks template types. A real
 DevTools/browser session remains useful to confirm rendering and proxy behavior.
 Use `npm.cmd` on Windows when PowerShell's execution policy blocks `npm.ps1`.
+
+
+## 6. AI Engine v2: completion metadata (Step 1)
+
+Provider text now passes a typed completion-status gate before JSON parsing and
+schema validation. See [the result contract and provider mapping](PROVIDER_COMPLETION.md)
+for retry behavior, the `provider_completion` diagnostic event, offline coverage,
+and provider-specific limitations. Existing timeout/retry defaults, endpoint
+response formats, game state rules, and correct-answer handling are preserved.

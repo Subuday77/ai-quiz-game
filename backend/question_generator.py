@@ -6,6 +6,7 @@ from typing import Any
 from config import MAX_DIFFICULTY, MAX_OUTPUT_TOKENS, TEMPERATURE
 from consts import QUESTION_PROMPT, client
 from diagnostics import timed_stage
+from provider_result import completed_text
 
 
 def create_question(complexity: int, language: str, category: str) -> dict[str, Any]:
@@ -26,5 +27,17 @@ def create_question(complexity: int, language: str, category: str) -> dict[str, 
         reasoning={"effort": "none"},
         temperature=TEMPERATURE,
     )
+    text = completed_text(response)
     with timed_stage("question_json_parse"):
-        return json.loads(response.output_text)
+        return json.loads(normalize_output(text))
+
+
+def normalize_output(text: str) -> str:
+    """Remove optional Markdown fences only after completion has been checked."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text

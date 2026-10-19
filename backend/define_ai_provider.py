@@ -1,6 +1,5 @@
 import os
 from importlib.metadata import version
-from types import SimpleNamespace
 from typing import Any
 
 import boto3
@@ -10,10 +9,11 @@ from botocore.config import Config
 from generation_policy import GenerationPolicy, provider_timeout
 
 from diagnostics import event, timed_stage
+from provider_result import Completion, ProviderResult
 
 from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT, ROLE, USER, SYSTEM, CONTENT,
                     OPENAI_MODEL_ID, NVIDIA_API_KEY, NVIDIA_MODEL_ID, BEDROCK_RUNTIME, AWS_REGION, BEDROCK_MODEL_ID,
-                    UNKNOWN_PROVIDER, MAX_TOKENS, TEMPERATURE, OUTPUT, MESSAGE)
+                    UNKNOWN_PROVIDER, MAX_TOKENS, TEMPERATURE)
 
 PROVIDER = os.getenv(LLM_PROVIDER, OPENAI).lower()
 
@@ -95,7 +95,7 @@ class LLMClient:
             max_output_tokens=500,
             reasoning=None,
             temperature=None,
-    ) -> Any:
+    ) -> ProviderResult:
         """
         Create an LLM response through the configured provider.
         :param model: Optional model argument kept for API compatibility.
@@ -104,11 +104,11 @@ class LLMClient:
         :param max_output_tokens: Maximum number of output tokens to request.
         :param reasoning: Optional reasoning configuration for providers that support it.
         :param temperature: Optional sampling temperature.
-        :return: Response object with an output_text attribute or provider-native response.
+        :return: Provider-independent text and completion metadata.
         """
         if self.provider == OPENAI:
             with timed_stage("provider_request", provider=self.provider):
-                return self.client.responses.create(
+                response = self.client.responses.create(
                     model=self.model,
                     instructions=instructions,
                     input=input,
@@ -116,6 +116,7 @@ class LLMClient:
                     reasoning=reasoning,
                     temperature=temperature,
                 )
+            return self._record_completion(normalize_openai_response(response))
 
         if self.provider == NVIDIA:
             with timed_stage("provider_request", provider=self.provider):
@@ -140,11 +141,7 @@ class LLMClient:
                     }
                 )
 
-            return SimpleNamespace(
-                output_text=normalize_output(
-                    response.choices[0].message.content
-                )
-            )
+            return self._record_completion(normalize_nvidia_response(response))
 
         if self.provider == BEDROCK:
             inference_config = {
@@ -176,34 +173,116 @@ class LLMClient:
                     inferenceConfig=inference_config,
                 )
 
-            text = response[OUTPUT][MESSAGE][CONTENT][0][TEXT]
+            return self._record_completion(normalize_bedrock_response(response))
 
-            return SimpleNamespace(
-                output_text=normalize_output(text)
-            )
+    def _record_completion(self, result: ProviderResult) -> ProviderResult:
+        event("provider_completion", provider=self.provider,
+              completion=result.completion.value, provider_reason=result.provider_reason)
+        return result
 
 
-def normalize_output(text: str) -> str:
-    """
-    Normalize model output by removing optional Markdown code fences.
-    :param text: Raw text returned by the model.
-    :return: Cleaned text content.
-    """
-    text = text.strip()
+def _field(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
 
-    if text.startswith("```"):
-        lines = text.splitlines()
 
-        # Remove opening ```json / ```
-        lines = lines[1:]
+def _items(value: Any) -> list | tuple:
+    return value if isinstance(value, (list, tuple)) else []
 
-        # Remove closing ```
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
 
-        text = "\n".join(lines).strip()
+def _reason(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
 
-    return text
+
+def normalize_openai_response(response: Any) -> ProviderResult:
+    status = _reason(_field(response, "status"))
+    incomplete = _reason(_field(_field(response, "incomplete_details"), "reason"))
+    reason = incomplete if incomplete is not None else status
+    texts = []
+    refused = tool_call = unexpected = unfinished_message = False
+    # Output discriminators from the Responses API, not invented finish reasons.
+    tool_types = {
+        "function_call", "custom_tool_call", "computer_call", "web_search_call",
+        "file_search_call", "code_interpreter_call", "image_generation_call",
+        "local_shell_call", "shell_call", "apply_patch_call", "mcp_call",
+        "tool_search_call", "mcp_approval_request",
+    }
+    for item in _items(_field(response, "output")):
+        kind = _field(item, "type")
+        if kind == "message":
+            message_status = _field(item, "status")
+            if message_status != "completed":
+                unfinished_message = True
+            for part in _items(_field(item, "content")):
+                part_type = _field(part, "type")
+                if part_type == "refusal":
+                    refused = True
+                elif part_type == "output_text":
+                    text = _field(part, "text")
+                    if isinstance(text, str):
+                        texts.append(text)
+                else:
+                    unexpected = True
+        elif kind in tool_types:
+            tool_call = True
+        elif kind != "reasoning":
+            unexpected = True
+    if incomplete == "content_filter":
+        completion = Completion.BLOCKED
+    elif refused:
+        completion = Completion.REFUSED
+    elif tool_call:
+        completion = Completion.TOOL_CALL
+    elif incomplete == "max_output_tokens":
+        completion = Completion.TRUNCATED
+    elif status == "completed" and incomplete is None and not (unexpected or unfinished_message):
+        completion = Completion.COMPLETE
+    else:
+        completion = Completion.UNKNOWN
+    return ProviderResult("".join(texts) if texts else None, completion, reason)
+
+
+def normalize_nvidia_response(response: Any) -> ProviderResult:
+    choices = _items(_field(response, "choices"))
+    choice = choices[0] if choices else None
+    reason = _reason(_field(choice, "finish_reason"))
+    message = _field(choice, "message")
+    text = _field(message, "content")
+    completion = {
+        "stop": Completion.COMPLETE,
+        "length": Completion.TRUNCATED,
+        "content_filter": Completion.BLOCKED,
+        "tool_calls": Completion.TOOL_CALL,
+        "function_call": Completion.TOOL_CALL,
+    }.get(reason, Completion.UNKNOWN)
+    if completion != Completion.BLOCKED:
+        if isinstance(_field(message, "refusal"), str):
+            completion = Completion.REFUSED
+        elif _field(message, "tool_calls") or _field(message, "function_call") is not None:
+            completion = Completion.TOOL_CALL
+    return ProviderResult(text if isinstance(text, str) else None, completion, reason)
+
+
+def normalize_bedrock_response(response: Any) -> ProviderResult:
+    reason = _reason(_field(response, "stopReason"))
+    completion = {
+        "end_turn": Completion.COMPLETE,
+        "stop_sequence": Completion.COMPLETE,
+        "max_tokens": Completion.TRUNCATED,
+        "model_context_window_exceeded": Completion.TRUNCATED,
+        "guardrail_intervened": Completion.BLOCKED,
+        "content_filtered": Completion.BLOCKED,
+        "tool_use": Completion.TOOL_CALL,
+        "malformed_tool_use": Completion.TOOL_CALL,
+    }.get(reason, Completion.UNKNOWN)
+    message = _field(_field(response, "output"), "message")
+    texts = []
+    for block in _items(_field(message, "content")):
+        text = _field(block, "text")
+        if isinstance(text, str):
+            texts.append(text)
+        if isinstance(block, dict) and "toolUse" in block and completion != Completion.BLOCKED:
+            completion = Completion.TOOL_CALL
+    return ProviderResult("".join(texts) if texts else None, completion, reason)
 
 
 def get_client() -> LLMClient:
