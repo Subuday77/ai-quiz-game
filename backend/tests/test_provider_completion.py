@@ -244,7 +244,7 @@ class CompletionFlowTests(unittest.TestCase):
             "OPENAI_API_KEY": SENSITIVE, "OPENAI_MODEL_ID": "offline-model",
             "NVIDIA_API_KEY": SENSITIVE, "NVIDIA_MODEL_ID": "offline-model",
             "AWS_REGION": "us-east-1", "BEDROCK_MODEL_ID": "offline-model",
-            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3",
             "AI_GENERATION_BUDGET_SECONDS": "30", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
         }))

@@ -15,6 +15,8 @@ from pydantic import ValidationError
 from api import app, sessions
 from define_ai_provider import LLMClient
 from generation_policy import is_transient
+from output_contracts import OutputContract
+from quality_schema import QUALITY_SCHEMA_NAME, quality_review_schema
 from provider_result import Completion, ProviderResult
 from question_schema import QuizQuestion
 from question_transport_schema import QUIZ_SCHEMA_NAME, quiz_question_schema, quiz_question_schema_json
@@ -113,7 +115,7 @@ class NativeRequestTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.dict("os.environ", {
             "AI_STRUCTURED_OUTPUT_MODE": "off", "NVIDIA_STRUCTURED_OUTPUT_FORMAT": "guided_json",
-            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3",
             "AI_GENERATION_BUDGET_SECONDS": "30", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
             "OPENAI_API_KEY": SECRET, "OPENAI_MODEL_ID": MODEL,
@@ -395,6 +397,120 @@ class NativeRequestTests(unittest.TestCase):
                       quiz_question_schema_json(), "additionalProperties", "chat_template_kwargs"):
             self.assertNotIn(value, output)
         self.assertTrue(all(record.exc_info is None for record in self.capture.records))
+
+    def test_review_contract_selects_distinct_native_schema_for_all_formats(self):
+        for provider, output_format in FORMATS:
+            with self.subTest(provider=provider, output_format=output_format):
+                self.reset(provider, output_format)
+                returned = LLMClient(provider).create(
+                    instructions=SECRET, input=SECRET, max_output_tokens=500,
+                    output_contract=OutputContract.QUALITY_REVIEW)
+                self.assertEqual(returned.completion, Completion.COMPLETE)
+                kwargs = self.calls[provider].call_args.kwargs
+                self.assertNotIn("output_contract", kwargs)
+                if provider == "openai":
+                    native = kwargs["text"]["format"]
+                    self.assertTrue(native["strict"])
+                elif provider == "nvidia" and output_format == "guided_json":
+                    self.assertEqual(kwargs["extra_body"]["guided_json"], quality_review_schema())
+                    self.assertEqual(kwargs["extra_body"]["chat_template_kwargs"], {"enable_thinking": False})
+                    self.assertNotIn("response_format", kwargs)
+                    continue
+                elif provider == "nvidia":
+                    native = kwargs["response_format"]["json_schema"]
+                    self.assertNotIn("guided_json", kwargs["extra_body"])
+                else:
+                    validate_parameters(kwargs, self.aws.meta.service_model.operation_model("Converse").input_shape)
+                    native = kwargs["outputConfig"]["textFormat"]["structure"]["jsonSchema"]
+                    native = {**native, "schema": json.loads(native["schema"])}
+                self.assertEqual(native["name"], QUALITY_SCHEMA_NAME)
+                self.assertEqual(native["schema"], quality_review_schema())
+        self.assertTrue(all(e["output_contract"] == "quality_review" for e in self.events()
+                            if e["event"] == "structured_output_request"))
+
+    def test_review_off_contract_keeps_native_request_parameters(self):
+        for provider in self.calls:
+            with self.subTest(provider=provider):
+                self.reset(provider, mode="off")
+                self.direct(provider)
+                previous = self.calls[provider].call_args.kwargs
+                LLMClient(provider).create(instructions=SECRET, input=SECRET, max_output_tokens=500,
+                    reasoning={"effort": "none"}, temperature=1.0,
+                    output_contract=OutputContract.QUALITY_REVIEW)
+                self.assertEqual(self.calls[provider].call_args.kwargs, previous)
+
+    def test_invalid_contract_is_permanent_and_does_not_call_provider(self):
+        self.reset("openai")
+        with self.assertRaises(StructuredOutputConfigurationError) as error:
+            LLMClient("openai").create(instructions=SECRET, input=SECRET, output_contract="future_task")
+        self.assertFalse(is_transient(error.exception))
+        self.calls["openai"].assert_not_called()
+
+    def test_strict_generator_and_review_pipeline_uses_separate_contracts(self):
+        verdict = {"decision": "accept", "issue_codes": [], "independent_answer": "B", "rationale": SECRET}
+        for provider, fmt in FORMATS:
+            with self.subTest(provider=provider, fmt=fmt):
+                self.reset(provider, fmt)
+                self.calls[provider].side_effect = [RESPONSES[provider](),
+                    RESPONSES[provider](text=json.dumps(verdict))]
+                with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
+                        "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                    response = self.http.get(self.url)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(self.calls[provider].call_count, 2)
+                self.assertEqual([e["output_contract"] for e in self.events()
+                                  if e["event"] == "structured_output_request"][-2:],
+                                 ["question", "quality_review"])
+                self.assertEqual(self.sdk.max_retries, 0)
+                self.assertNotIn(SECRET, " ".join(self.capture.output))
+
+
+    def test_strict_review_parameter_rejection_never_downgrades_or_retries(self):
+        for provider, fmt in FORMATS:
+            for status in (400, 422):
+                with self.subTest(provider=provider, fmt=fmt, status=status):
+                    self.reset(provider, fmt)
+                    error = (ClientError({"Error": {"Code": "ValidationException", "Message": SECRET},
+                             "ResponseMetadata": {"HTTPStatusCode": status}}, "Converse")
+                             if provider == "bedrock" else APIStatusError(SECRET, body=None,
+                                 response=Mock(status_code=status, headers={}, request=Mock())))
+                    self.calls[provider].side_effect = [RESPONSES[provider](), error]
+                    categories = sessions[self.game_id].categories.copy()
+                    with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
+                            "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                        self.assertEqual(self.http.get(self.url).status_code, 503)
+                    self.assertEqual(self.calls[provider].call_count, 2)
+                    self.sleep.assert_not_called()
+                    self.assertIsNone(sessions[self.game_id].question)
+                    self.assertEqual(sessions[self.game_id].categories, categories)
+                    self.assertNotIn(SECRET, " ".join(self.capture.output))
+
+    def test_review_remaining_budget_is_applied_to_sdk_socket_configuration(self):
+        import define_ai_provider
+        for provider in self.calls:
+            with self.subTest(provider=provider):
+                self.reset(provider, mode="off")
+                verdict = {"decision": "accept", "issue_codes": [], "independent_answer": "B", "rationale": SECRET}
+                self.calls[provider].return_value = RESPONSES[provider](text=json.dumps(verdict))
+                now = [0.0]
+                def generate(*args):
+                    now[0] = 28.0
+                    return QUESTION
+                with patch.dict("os.environ", {"AI_QUALITY_MODE": "enforce"}), patch(
+                        "api.perf_counter", side_effect=lambda: now[0]), patch(
+                        "api.create_question", side_effect=generate), patch(
+                        "quality_checker.client", side_effect=lambda: LLMClient(provider)):
+                    self.assertEqual(self.http.get(self.url).status_code, 200)
+                if provider == "bedrock":
+                    config = define_ai_provider.boto3.client.call_args.kwargs["config"]
+                    self.assertEqual(config.read_timeout, 2.0)
+                    self.assertEqual(config.connect_timeout, 2.0)
+                    self.assertEqual(config.retries["total_max_attempts"], 1)
+                else:
+                    config = define_ai_provider.OpenAI.call_args.kwargs
+                    self.assertEqual(config["timeout"], 2.0)
+                    self.assertEqual(config["max_retries"], 0)
+
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ class ApiTests(unittest.TestCase):
         sessions.clear()
         self.enterContext(patch("api.sleep"))
         self.enterContext(patch.dict("os.environ", {
-            "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
         }))

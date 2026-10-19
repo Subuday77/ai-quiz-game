@@ -210,3 +210,10 @@ the exact portable schema and Pydantic drift checks, unchanged off payloads, all
 native formats, unsupported settings/SDK/models, no downgrade, safety/completion
 gating, validation, retries, state preservation and diagnostic redaction.
 Real-model compatibility and cold-schema latency still require manual verification.
+
+
+The optional [quality checker](QUALITY_CHECKER.md) reuses these mechanisms with a
+separate internal `quality_review` contract and stable `quality_review_v1` schema.
+Generator requests retain `quiz_question_v1`. Native schema selection is explicit
+per request; off-mode generator payloads remain unchanged. Verify model support
+for both schemas before combining strict output with enforced review.

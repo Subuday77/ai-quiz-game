@@ -27,7 +27,7 @@ class DiagnosticTests(unittest.TestCase):
         self.url = f"/api/games/{self.game_id}/question"
         self.enterContext(patch.dict("os.environ", {
             "AI_STRUCTURED_OUTPUT_MODE": "off",
-            "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
             "OPENAI_API_KEY": SECRET, "OPENAI_MODEL_ID": "offline-model",

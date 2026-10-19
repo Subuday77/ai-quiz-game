@@ -11,6 +11,7 @@ from generation_policy import GenerationPolicy, is_transient, provider_timeout
 
 from diagnostics import event, timed_stage
 from provider_result import Completion, ProviderResult
+from output_contracts import OutputContract
 from structured_outputs import StructuredOutputConfigurationError, StructuredOutputSettings
 
 from consts import (LLM_PROVIDER, OPENAI, OPENAI_API_KEY, NVIDIA, BEDROCK, TEXT, ROLE, USER, SYSTEM, CONTENT,
@@ -90,13 +91,13 @@ class LLMClient:
 
     def create(
             self, *, model=None, instructions, input, max_output_tokens=500,
-            reasoning=None, temperature=None,
+            reasoning=None, temperature=None, output_contract: OutputContract = OutputContract.QUESTION,
     ) -> ProviderResult:
         """Request optional native schema output, preserving completion normalization."""
         settings = None
         try:
             settings = StructuredOutputSettings.from_env(self.provider)
-            parameters = settings.request_parameters(self.provider, self.client)
+            parameters = settings.request_parameters(self.provider, self.client, output_contract)
         except StructuredOutputConfigurationError as exc:
             event("structured_output_failed", provider=self.provider,
                   native_requested=os.getenv("AI_STRUCTURED_OUTPUT_MODE", "off") == "strict",
@@ -104,7 +105,8 @@ class LLMClient:
                   classification="configuration_error", reason_code=exc.reason_code)
             raise
         fields = {"provider": self.provider, "native_requested": settings.requested,
-                  "output_format": settings.output_format}
+                  "output_format": settings.output_format,
+                  "output_contract": OutputContract(output_contract).value}
         event("structured_output_request", **fields)
         try:
             result = self._create(

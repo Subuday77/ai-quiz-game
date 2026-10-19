@@ -1,10 +1,11 @@
 """Explicit, default-off native schema requests. No provider/model fallback."""
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Literal
 
-from question_transport_schema import QUIZ_SCHEMA_NAME, quiz_question_schema, quiz_question_schema_json
+from output_contracts import OutputContract, transport_contract
 
 
 class StructuredOutputConfigurationError(Exception):
@@ -41,27 +42,33 @@ class StructuredOutputSettings:
             raise StructuredOutputConfigurationError("unsupported_provider")
         return cls("strict", formats[provider])
 
-    def request_parameters(self, provider: str, client) -> dict:
+    def request_parameters(self, provider: str, client,
+                           output_contract: OutputContract = OutputContract.QUESTION) -> dict:
+        try:
+            contract = OutputContract(output_contract)
+        except ValueError:
+            raise StructuredOutputConfigurationError("invalid_output_contract") from None
         # Keep NVIDIA's working chat-template extension in both modes.
         params = {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}} if provider == "nvidia" else {}
         if not self.requested:
             return params
+        schema_name, schema = transport_contract(contract)
         if provider == "openai":
-            return {"text": {"format": {"type": "json_schema", "name": QUIZ_SCHEMA_NAME,
-                                        "strict": True, "schema": quiz_question_schema()}}}
+            return {"text": {"format": {"type": "json_schema", "name": schema_name,
+                                        "strict": True, "schema": schema}}}
         if provider == "nvidia":
             if self.output_format == "guided_json":
-                params["extra_body"]["guided_json"] = quiz_question_schema()
+                params["extra_body"]["guided_json"] = schema
             else:
                 # NVIDIA's documented JSON Schema form does not require an
                 # additional OpenAI strict flag; model/backend support varies.
                 params["response_format"] = {"type": "json_schema", "json_schema": {
-                    "name": QUIZ_SCHEMA_NAME, "schema": quiz_question_schema()}}
+                    "name": schema_name, "schema": schema}}
             return params
         if provider == "bedrock":
             ensure_bedrock_schema_support(client)
             return {"outputConfig": {"textFormat": {"type": "json_schema", "structure": {
-                "jsonSchema": {"name": QUIZ_SCHEMA_NAME, "schema": quiz_question_schema_json()}}}}}
+                "jsonSchema": {"name": schema_name, "schema": json.dumps(schema, sort_keys=True, separators=(",", ":"))}}}}}
         raise StructuredOutputConfigurationError("unsupported_provider")
 
 

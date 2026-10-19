@@ -351,3 +351,34 @@ for provider request shapes, safe diagnostics, rollback to off mode, and SDK/mod
 limits. Bedrock's first schema compilation can exceed the unchanged interactive
 timeout/budget; this change does not extend it. Pydantic and difficulty checks
 remain mandatory after the existing completion gate.
+
+
+## 8. AI Engine v2: optional quality checker (Step 3)
+
+`AI_QUALITY_MODE=off` is the default and makes no reviewer requests. Set `audit`
+to evaluate structurally valid candidates without rejecting them. After assessing
+local results, set `enforce` to require approval before a question becomes visible.
+Restart the backend after changing environment settings. Unknown values fail
+safely before generation; setting `off` restores the previous generation behavior.
+
+The checker uses the configured provider/model with a separate prompt and evaluation
+context. It has no external factual sources. Native Structured Outputs, if enabled,
+selects `quality_review_v1` for reviews and retains `quiz_question_v1` for questions;
+NVIDIA `guided_json` selects the corresponding schema. Model compatibility must be
+verified for both contracts. No unsupported-parameter fallback is attempted.
+
+Inspect `quality_review_started`, `quality_review_completed`,
+`quality_review_failed`, `quality_question_rejected`, and `quality_review_skipped`
+using the existing request ID and attempt fields. Review decisions/issue codes and
+local lexical findings are safe diagnostic fields; rationale, questions, choices
+and answer keys are excluded. Generation and review share the existing default
+three attempts and 30-second **soft** budget. Review socket timeouts are allocated
+from remaining time, capped by the unchanged provider timeout. No separate reviewer
+retry loop exists, and browser timeouts do not guarantee server cancellation.
+
+See [quality-checker architecture, rollout and limitations](QUALITY_CHECKER.md).
+The backend unittest suite includes mocked review outcomes, the historical nickname
+regression fixture, request/reward concurrency and native schema selection. Run
+`python -m unittest discover -s tests -v` and `python -m compileall -q .` from
+`backend`. These checks make no remote AI calls; mocked verdicts do not establish
+that a live model detects the same factual mistakes.

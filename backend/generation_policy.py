@@ -13,6 +13,7 @@ from botocore.exceptions import (ClientError, ConnectionClosedError, ConnectTime
 from openai import APIConnectionError, APIStatusError
 
 from provider_result import EmptyGenerationError, TruncatedGenerationError
+from quality_errors import QualityReviewFailure
 
 # Set only while an API generation attempt is running; CLI calls use the default.
 provider_timeout = ContextVar("provider_timeout", default=None)
@@ -55,6 +56,8 @@ class InvalidQuestionError(ValueError):
 
 
 def is_transient(exc: Exception) -> bool:
+    if isinstance(exc, QualityReviewFailure):
+        return exc.retryable
     if isinstance(exc, (TruncatedGenerationError, EmptyGenerationError,
                         APIConnectionError, ConnectTimeoutError, ReadTimeoutError,
                         EndpointConnectionError, ConnectionClosedError,
@@ -79,6 +82,8 @@ def is_transient(exc: Exception) -> bool:
 
 def retry_after_seconds(exc: Exception) -> float | None:
     """Read only the retry delay; never log headers or exception messages."""
+    if isinstance(exc, QualityReviewFailure):
+        return exc.retry_after
     if not isinstance(exc, APIStatusError):
         return None
     value = exc.response.headers.get("retry-after")
