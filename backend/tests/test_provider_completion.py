@@ -23,6 +23,19 @@ TEXT = json.dumps(QUESTION)
 SENSITIVE = "do-not-log-prompt-refusal-tool-arguments-or-secret"
 
 
+# Tool-related ResponseOutputItem discriminators reviewed in OpenAI SDK 3.16.2.
+OPENAI_TOOL_OUTPUT_TYPES = (
+    "function_call", "custom_tool_call", "computer_call", "web_search_call",
+    "file_search_call", "code_interpreter_call", "image_generation_call",
+    "local_shell_call", "shell_call", "apply_patch_call", "mcp_call",
+    "tool_search_call", "mcp_approval_request", "function_call_output",
+    "custom_tool_call_output", "computer_call_output", "tool_search_output",
+    "local_shell_call_output", "shell_call_output", "apply_patch_call_output",
+    "mcp_list_tools", "mcp_approval_response", "program", "program_output",
+    "additional_tools",
+)
+
+
 def openai_response(status="completed", reason=None, text=TEXT, *, refusal=None, extra=()):
     content = [] if text is None else [NS(type="output_text", text=text)]
     if refusal is not None:
@@ -118,13 +131,28 @@ class NormalizationTests(unittest.TestCase):
                 self.assertFalse(is_transient(error.exception))
 
     def test_openai_tools_are_rejected_even_with_completed_text(self):
-        for kind in ("function_call", "custom_tool_call", "web_search_call", "computer_call",
-                     "mcp_call", "mcp_approval_request"):
-            with self.subTest(kind=kind):
-                result = normalize_openai_response(openai_response(extra=[
-                    NS(type=kind, arguments=SENSITIVE)]))
-                self.assertEqual(result.completion, Completion.TOOL_CALL)
-                self.assertEqual(result.provider_reason, "completed")
+        for kind in OPENAI_TOOL_OUTPUT_TYPES:
+            for text in (None, TEXT):
+                with self.subTest(kind=kind, with_text=text is not None):
+                    result = normalize_openai_response(openai_response(text=text, extra=[
+                        NS(type=kind, arguments=SENSITIVE)]))
+                    self.assertEqual(result.completion, Completion.TOOL_CALL)
+                    self.assertEqual(result.output_text, text)
+                    self.assertEqual(result.provider_reason, "completed")
+                    with self.assertRaises(UnexpectedToolCallError) as raised:
+                        completed_text(result)
+                    self.assertFalse(is_transient(raised.exception))
+
+    def test_openai_tool_items_preserve_refusal_and_filter_precedence(self):
+        for kind in OPENAI_TOOL_OUTPUT_TYPES:
+            cases = [
+                (openai_response(refusal=SENSITIVE, extra=[NS(type=kind)]), Completion.REFUSED),
+                (openai_response("incomplete", "content_filter", refusal=SENSITIVE,
+                                 extra=[NS(type=kind)]), Completion.BLOCKED),
+            ]
+            for response, expected in cases:
+                with self.subTest(kind=kind, expected=expected):
+                    self.assertEqual(normalize_openai_response(response).completion, expected)
 
     def test_nvidia_tool_finish_reasons_and_payloads(self):
         for reason, tools in [("tool_calls", None), ("function_call", None),
@@ -179,8 +207,10 @@ class NormalizationTests(unittest.TestCase):
                     self.assertTrue(is_transient(error.exception))
 
     def test_unknown_openai_output_or_unfinished_message_is_not_accepted(self):
-        response = openai_response(extra=[NS(type="future_output_type")])
-        self.assertEqual(normalize_openai_response(response).completion, Completion.UNKNOWN)
+        for kind in ("future_output_type", "future_tool_call", "future_tool_output", "compaction"):
+            with self.subTest(kind=kind):
+                response = openai_response(extra=[NS(type=kind)])
+                self.assertEqual(normalize_openai_response(response).completion, Completion.UNKNOWN)
         response = openai_response()
         response.output[0].status = "incomplete"
         self.assertEqual(normalize_openai_response(response).completion, Completion.UNKNOWN)
@@ -309,6 +339,28 @@ class CompletionFlowTests(unittest.TestCase):
                 self.assertIsNone(sessions[self.game_id].question)
                 self.assertNotIn(SENSITIVE, "\n".join(captured.output))
                 self.assertFalse(any('question_validation' in r.getMessage() for r in captured.records))
+
+    def test_openai_tool_items_fail_before_json_parsing(self):
+        for kind in OPENAI_TOOL_OUTPUT_TYPES:
+            for text in (None, TEXT):
+                with self.subTest(kind=kind, with_text=text is not None):
+                    self.reset_question("openai")
+                    categories = sessions[self.game_id].categories.copy()
+                    self.calls["openai"].return_value = openai_response(
+                        text=text, extra=[NS(type=kind, arguments=SENSITIVE)])
+                    response, parse, captured = self.get_with_parse_spy()
+                    self.assertEqual(response.status_code, 503)
+                    self.calls["openai"].assert_called_once()
+                    parse.assert_not_called()
+                    self.sleep.assert_not_called()
+                    self.assertEqual(sessions[self.game_id].categories, categories)
+                    self.assertIsNone(sessions[self.game_id].question)
+                    events = [json.loads(r.getMessage()) for r in captured.records]
+                    failure = next(e for e in events if e["event"] == "generation_attempt_completed")
+                    self.assertEqual(failure["error_type"], "UnexpectedToolCallError")
+                    self.assertFalse(failure["retryable"])
+                    self.assertFalse(any(e["event"].startswith("question_validation") for e in events))
+                    self.assertNotIn(SENSITIVE, "\n".join(captured.output))
 
     def test_completion_retry_exhaustion_obeys_shared_three_attempt_limit(self):
         self.provider = "nvidia"

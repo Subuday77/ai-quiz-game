@@ -205,6 +205,10 @@ def normalize_openai_response(response: Any) -> ProviderResult:
         "file_search_call", "code_interpreter_call", "image_generation_call",
         "local_shell_call", "shell_call", "apply_patch_call", "mcp_call",
         "tool_search_call", "mcp_approval_request",
+        "function_call_output", "custom_tool_call_output", "computer_call_output",
+        "tool_search_output", "local_shell_call_output", "shell_call_output",
+        "apply_patch_call_output", "mcp_list_tools", "mcp_approval_response",
+        "program", "program_output", "additional_tools",
     }
     for item in _items(_field(response, "output")):
         kind = _field(item, "type")

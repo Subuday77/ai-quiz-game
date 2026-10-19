@@ -22,7 +22,7 @@ JSON, schema correctness, factual accuracy, or suitable difficulty.
 | OpenAI Responses | `incomplete_details.reason=max_output_tokens` | `truncated` |
 | OpenAI Responses | `incomplete_details.reason=content_filter` | `blocked` |
 | OpenAI Responses | A message content block with `type=refusal` | `refused`, including when the overall response status is completed |
-| OpenAI Responses | Function/custom/built-in tool call or MCP approval-request output | `tool_call`; no tool is executed |
+| OpenAI Responses | Recognized tool requests, results, MCP discovery/approval, programmatic tool items, or additional tool definitions | `tool_call`; no tool is executed |
 | NVIDIA Chat Completions | First choice `finish_reason=stop` | `complete` |
 | NVIDIA Chat Completions | `length` | `truncated` |
 | NVIDIA Chat Completions | `content_filter` | `blocked` |
@@ -39,6 +39,22 @@ block takes precedence over tool payloads. A refusal or unexpected tool call is
 not reclassified as retryable truncation merely because token-limit metadata is
 also present. OpenAI reasoning items may accompany assistant text without making
 it a tool call; unfamiliar output types and unfinished messages fail closed.
+
+The OpenAI allowlist was reviewed against `ResponseOutputItem` in installed SDK
+3.16.2. Alongside tool requests, it includes their supported result items:
+`function_call_output`, `custom_tool_call_output`, `computer_call_output`,
+`tool_search_output`, `local_shell_call_output`, `shell_call_output`, and
+`apply_patch_call_output`. MCP discovery and approval items (`mcp_list_tools`,
+`mcp_approval_request`, `mcp_approval_response`), programmatic tool execution
+(`program`, `program_output`), and tool-definition items (`additional_tools`) also
+map to `tool_call`. This internal category identifies unexpected tool-related
+activity; it does not claim that discovery/approval/definition items executed a tool.
+
+The allowlist is explicit, without suffix-based guessing. Ordinary assistant text
+and reasoning remain non-tool output; `compaction` is not a tool item and remains
+`unknown` under this quiz contract. Unknown future types, including ones named
+like tool requests/results, also remain `unknown`. Refusal and content-filter
+precedence is unchanged, even alongside recognized tool items and valid JSON text.
 
 `provider_reason` preserves NVIDIA's original finish reason and Bedrock's original
 stop reason. For OpenAI it preserves `incomplete_details.reason` when present,
@@ -103,6 +119,11 @@ existing API failure logging continues to record only exception class/metadata.
 Provider fixtures include realistic completion metadata. Normalization tests cover
 successes (including SDK response model fixtures), partial text, refusal/filtering,
 tools, missing text/choices/metadata, unfamiliar reasons, and safety precedence.
+All 25 recognized OpenAI tool-related discriminators are covered with and without
+otherwise valid JSON text: the parsing gate raises non-retryable
+`UnexpectedToolCallError`, and mocked request-flow tests verify no JSON parsing,
+validation, retry sleep, or category consumption. Refusal/filter precedence is
+checked for every recognized tool-related type.
 Mocked SDK integration tests verify correlation/redaction, rejection before parsing
 and Pydantic, retries, shared exhaustion/budget, and unchanged failure state.
 Existing real-client constructor regressions use dummy keys with requests blocked.
