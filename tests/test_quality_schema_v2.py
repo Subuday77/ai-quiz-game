@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from quality_schema import ReviewDecision
+from output_contracts import OutputContract, transport_contract
 from quality_schema_v2 import (QualityReviewV2, quality_review_v2_schema,
                                decide_review)
 
@@ -46,6 +47,14 @@ class QualityV2Tests(unittest.TestCase):
     def test_invalid_schema_rejected(self):
         with self.assertRaises(Exception):
             report(facts="yes")
+
+    def test_separate_transport_contract(self):
+        name, schema = transport_contract(OutputContract.QUALITY_REVIEW_V2)
+        self.assertEqual(name, "quality_review_v2")
+        self.assertIn("facts", schema["required"])
+        old_name, old_schema = transport_contract(OutputContract.QUALITY_REVIEW)
+        self.assertEqual(old_name, "quality_review_v1")
+        self.assertNotIn("facts", old_schema["properties"])
 
     def test_transport_schema_no_extra_properties(self):
         schema = quality_review_v2_schema()
