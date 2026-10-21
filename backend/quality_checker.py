@@ -132,7 +132,8 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
             input=json.dumps({"requested_difficulty": requested_difficulty,
                               "language": language, "candidate": question.model_dump()},
                              ensure_ascii=False),
-            max_output_tokens=MAX_OUTPUT_TOKENS, reasoning={"effort": "none"},
+            max_output_tokens=max(MAX_OUTPUT_TOKENS, 800) if is_v2 else MAX_OUTPUT_TOKENS,
+            reasoning={"effort": "low" if is_v2 else "none"},
             temperature=TEMPERATURE,
             output_contract=(OutputContract.QUALITY_REVIEW_V2 if is_v2
                              else OutputContract.QUALITY_REVIEW),
