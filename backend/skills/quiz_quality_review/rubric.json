@@ -2,7 +2,7 @@
   "name": "quiz_quality_review",
   "version": "1.1.0",
   "status": "evaluation_only",
-  "runtime_behavior_changed": false,
+  "runtime_behavior_changed": true,
   "decisions": {
     "accept": "Factually sound, unique correct answer, readable, difficulty plausible and no revealing cues",
     "regenerate": "Definite error: factual falsehood, no unique key, material language corruption, or answer leak",
@@ -50,6 +50,10 @@
     {
       "id": "medium",
       "description": "Distinguish paintings from sculptures, theories from facts and other category mismatches."
+    },
+    {
+      "id": "procedure",
+      "description": "Ordered facts, four-option evaluation, localization, leakage, difficulty and calibrated verdict; applied in v1.1 system instructions."
     }
   ],
   "evaluation": {
