@@ -24,6 +24,8 @@ from question_generator import normalize_output
 from question_schema import QuizQuestion
 
 from agents.critic import QUALITY_REVIEW_PROMPT
+from agents.critic_v2 import QUALITY_REVIEW_V2_PROMPT
+from quality_schema_v2 import QualityReviewV2, decide_review
 
 
 def _provider() -> str:
@@ -121,19 +123,27 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
         remaining = deadline - clock()
         if remaining <= 0:
             raise QualityReviewFailure("budget_exhausted")
+        contract_version = os.getenv("AI_QUALITY_CONTRACT", "v1")
+        if contract_version not in {"v1", "v2"}:
+            raise QualityConfigurationError("Invalid quality contract version")
+        is_v2 = contract_version == "v2"
         response = reviewer.responses.create(
-            instructions=QUALITY_REVIEW_PROMPT,
+            instructions=QUALITY_REVIEW_V2_PROMPT if is_v2 else QUALITY_REVIEW_PROMPT,
             input=json.dumps({"requested_difficulty": requested_difficulty,
                               "language": language, "candidate": question.model_dump()},
                              ensure_ascii=False),
-            max_output_tokens=MAX_OUTPUT_TOKENS, reasoning={"effort": "none"},
-            temperature=TEMPERATURE, output_contract=OutputContract.QUALITY_REVIEW,
+            max_output_tokens=max(MAX_OUTPUT_TOKENS, 800) if is_v2 else MAX_OUTPUT_TOKENS,
+            reasoning={"effort": "low" if is_v2 else "none"},
+            temperature=TEMPERATURE,
+            output_contract=(OutputContract.QUALITY_REVIEW_V2 if is_v2
+                             else OutputContract.QUALITY_REVIEW),
             request_timeout=lambda: min(timeout_seconds, deadline - clock()))
         text = completed_text(response)
         with timed_stage("quality_json_parse"):
             raw = json.loads(normalize_output(text))
         with timed_stage("quality_validation"):
-            verdict = QualityReview.model_validate(raw)
+            verdict = (QualityReviewV2.model_validate(raw) if is_v2
+                       else QualityReview.model_validate(raw))
     except Exception as exc:
         if isinstance(exc, (QualityConfigurationError, StructuredOutputConfigurationError)):
             classification = "configuration_error"
@@ -157,10 +167,17 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
                                    retry_after=retry_after_seconds(exc)) from None
     finally:
         provider_timeout.reset(token)
-    decision = verdict.decision
-    issues = [code.value for code in verdict.issue_codes]
-    if decision == ReviewDecision.ACCEPT and verdict.independent_answer != question.correct_answer:
-        decision, issues = ReviewDecision.ESCALATE, [IssueCode.NEEDS_VERIFICATION.value]
+    if isinstance(verdict, QualityReviewV2):
+        decision, issues = decide_review(verdict, question.correct_answer)
+        event("quality_review_checks", **fields, facts=verdict.facts.value,
+              options=verdict.options.value, language=verdict.language.value,
+              distractors=verdict.distractors.value, leakage=verdict.leakage.value,
+              difficulty=verdict.difficulty.value)
+    else:
+        decision = verdict.decision
+        issues = [code.value for code in verdict.issue_codes]
+        if decision == ReviewDecision.ACCEPT and verdict.independent_answer != question.correct_answer:
+            decision, issues = ReviewDecision.ESCALATE, [IssueCode.NEEDS_VERIFICATION.value]
     event("quality_review_completed", **fields, decision=decision.value, issue_codes=issues,
           local_issue_codes=local, duration_ms=round((clock() - start) * 1000, 3))
     if mode == QualityMode.AUDIT or decision == ReviewDecision.ACCEPT:
