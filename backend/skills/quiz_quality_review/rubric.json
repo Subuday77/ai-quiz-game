@@ -1,6 +1,6 @@
 {
   "name": "quiz_quality_review",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "status": "evaluation_only",
   "runtime_behavior_changed": true,
   "decisions": {
@@ -62,5 +62,6 @@
     "false_reject": "Predicted regenerate/escalate for adjudicated accept",
     "unavailable": "Provider failure never equals accept."
   },
-  "warning": "Labels are provisional human-assistant assessments, not externally fact-checked adjudications. Revisit before treating corpus as certification."
+  "warning": "Labels are provisional human-assistant assessments, not externally fact-checked adjudications. Revisit before treating corpus as certification.",
+  "role_experiment": "editorial role prefix only; existing review procedure and output schema unchanged"
 }
