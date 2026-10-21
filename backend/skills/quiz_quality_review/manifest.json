@@ -1,0 +1,8 @@
+{
+  "name": "quiz_quality_review",
+  "version": "1.0.0",
+  "runtime_role": "critic",
+  "output_contract": "quality_review_v1",
+  "model_config_env": "AI_QUALITY_MODEL_ID",
+  "note": "Instructions extracted without edits from quality_checker.py. This is a runtime skill specification, not an SDK-specific agent tool."
+}
