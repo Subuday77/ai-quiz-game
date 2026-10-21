@@ -32,8 +32,8 @@ class CriticCorpusTests(unittest.TestCase):
                 self.assertIn(gold["decision"], {"accept", "regenerate", "escalate"})
             self.assertTrue(gold["notes"])
 
-    def test_v1_1_updates_instructions_but_not_contract(self):
-        self.assertEqual(self.rubric["version"], "1.1.0")
+    def test_v1_2_updates_instructions_but_not_contract(self):
+        self.assertEqual(self.rubric["version"], "1.2.0")
         self.assertTrue(self.rubric["runtime_behavior_changed"])
         self.assertEqual(self.rubric["status"], "evaluation_only")
 
