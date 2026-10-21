@@ -11,7 +11,7 @@ from agents.critic import QUALITY_REVIEW_PROMPT, SKILL_PATH, SKILL_VERSION, load
 
 class CriticSkillTests(unittest.TestCase):
     def test_skill_is_versioned_and_loaded_verbatim(self):
-        self.assertEqual(SKILL_VERSION, "1.2.0"
+        self.assertEqual(SKILL_VERSION, "1.2.0")
         self.assertTrue(SKILL_PATH.is_file())
         self.assertEqual(QUALITY_REVIEW_PROMPT, SKILL_PATH.read_text(encoding="utf-8"))
         self.assertIs(QUALITY_REVIEW_PROMPT, load_critic_skill())
