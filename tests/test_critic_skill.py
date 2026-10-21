@@ -11,7 +11,7 @@ from agents.critic import QUALITY_REVIEW_PROMPT, SKILL_PATH, SKILL_VERSION, load
 
 class CriticSkillTests(unittest.TestCase):
     def test_skill_is_versioned_and_loaded_verbatim(self):
-        self.assertEqual(SKILL_VERSION, "1.0.0")
+        self.assertEqual(SKILL_VERSION, "1.1.0")
         self.assertTrue(SKILL_PATH.is_file())
         self.assertEqual(QUALITY_REVIEW_PROMPT, SKILL_PATH.read_text(encoding="utf-8"))
         self.assertIs(QUALITY_REVIEW_PROMPT, load_critic_skill())
@@ -24,6 +24,9 @@ class CriticSkillTests(unittest.TestCase):
             "decision: accept | regenerate | escalate",
             "independent_answer: A | B | C | D | unknown",
             "No external references were consulted",
+            "Review procedure (apply in order",
+            "Examine A, B, C and D separately",
+            "A normal definition or characteristic",
         ):
             self.assertIn(phrase, prompt)
 
