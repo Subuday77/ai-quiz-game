@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "quiz_quality_review" / "SKILL.md"
-SKILL_VERSION = "1.1.0"
+SKILL_VERSION = "1.2.0"
 
 
 @lru_cache(maxsize=1)
