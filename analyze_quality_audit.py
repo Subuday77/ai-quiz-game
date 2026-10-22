@@ -19,8 +19,25 @@ import re
 _EVENT_START = re.compile(r'\{\s*"(?:timestamp|event)"\s*:')
 
 
+def read_log_text(path: Path) -> str:
+    """Read PowerShell Tee-Object UTF-16 logs or ordinary UTF-8 logs."""
+    data = path.read_bytes()
+    if data.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+        return data.decode("utf-16", errors="replace")
+    sample = data[:4096]
+    # Some logs are UTF-16 without a byte-order mark.
+    if sample:
+        odd_nuls = sample[1::2].count(0)
+        even_nuls = sample[::2].count(0)
+        if odd_nuls >= 8 and odd_nuls > even_nuls * 3:
+            return data.decode("utf-16-le", errors="replace")
+        if even_nuls >= 8 and even_nuls > odd_nuls * 3:
+            return data.decode("utf-16-be", errors="replace")
+    return data.decode("utf-8-sig", errors="replace")
+
+
 def read_audits(path: Path):
-    content = path.read_text(encoding="utf-8-sig", errors="replace")
+    content = read_log_text(path)
     decoder = json.JSONDecoder()
     audits = []
     for match in _EVENT_START.finditer(content):
@@ -57,7 +74,7 @@ def main():
         parser.error(f"File not found: {args.log}")
     audits = read_audits(args.log)
     if not audits:
-        content = args.log.read_text(encoding="utf-8-sig", errors="replace")
+        content = read_log_text(args.log)
         print(f"No parseable v3 audit events in {args.log.resolve()} "
               f"({args.log.stat().st_size} bytes).")
         occurrences = content.count("quality_review_score")
