@@ -45,6 +45,29 @@ NOT leaks:
   naming the work is necessary identification context, not a lexical clue
   to the author's name.
 
+REASONING VERSUS LEAKAGE — ADDITIONAL CALIBRATION:
+A quiz question may be answerable by reasoning rather than rote memorization.
+This is a GOOD property, not grounds for rejection.
+
+Ask where the DECISIVE LINK comes from:
+1. If the stem plus the offered choices explicitly contain the connection
+   that singles out the correct answer (a distinctive shared root, translated
+   title, matching proper name, or transparent paraphrase), this is leakage.
+   Merely noticing the supplied wording is enough to choose.
+2. If the player must first REMEMBER an additional fact, term, identification
+   or meaningful association not supplied anywhere in the stem or options,
+   then use it to deduce the answer, this is legitimate quiz reasoning.
+   Even a short, relatively easy chain of recalled knowledge is valid.
+3. A superficial resemblance can be a misleading coincidence. Check whether
+   it really gives a uniquely privileged route to the keyed option; neither
+   assume it is correct nor assume it is a deliberate trick.
+
+Do not label a question as leaking merely because the answer becomes obvious
+AFTER recalling outside knowledge. Difficulty must be judged separately from
+leakage: simple deduction may be easy, but easy does not mean defective.
+When one supplied phrase effectively names the keyed option, do not excuse it
+as "requiring reasoning" just because the player must notice the similarity.
+
 Do NOT treat ordinary subject vocabulary, necessary definitions, correct
 scientific descriptions, or overlap shared by multiple options as leakage
 unless it disproportionately points to one answer without topic knowledge.
