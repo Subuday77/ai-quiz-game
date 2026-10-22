@@ -16,7 +16,7 @@ import re
 # Match the BEGINNING of a JSON diagnostic object, not its nested dictionaries.
 # PowerShell can preserve native stderr as a multiline error record, so a
 # line-at-a-time JSON parser may silently lose otherwise intact events.
-_EVENT_START = re.compile(r'\\{\\s*"(?:timestamp|event)"\\s*:')
+_EVENT_START = re.compile(r'\{\s*"(?:timestamp|event)"\s*:')
 
 
 def read_audits(path: Path):
