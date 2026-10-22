@@ -10,19 +10,25 @@ import csv
 import json
 from collections import Counter
 from pathlib import Path
+import re
+
+
+# Match the BEGINNING of a JSON diagnostic object, not its nested dictionaries.
+# PowerShell can preserve native stderr as a multiline error record, so a
+# line-at-a-time JSON parser may silently lose otherwise intact events.
+_EVENT_START = re.compile(r'\\{\\s*"(?:timestamp|event)"\\s*:')
 
 
 def read_audits(path: Path):
+    content = path.read_text(encoding="utf-8-sig", errors="replace")
+    decoder = json.JSONDecoder()
     audits = []
-    for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
-        start = line.find("{")
-        if start < 0:
-            continue
+    for match in _EVENT_START.finditer(content):
         try:
-            event = json.loads(line[start:])
+            event, _ = decoder.raw_decode(content[match.start():])
         except (ValueError, TypeError):
             continue
-        if event.get("event") == "quality_review_score" and event.get("contract") == "v3":
+        if isinstance(event, dict) and event.get("event") == "quality_review_score" and event.get("contract") == "v3":
             audits.append(event)
     return audits
 
@@ -51,7 +57,19 @@ def main():
         parser.error(f"File not found: {args.log}")
     audits = read_audits(args.log)
     if not audits:
-        print("No v3 audit events. Check AI_QUALITY_MODE=audit, AI_QUALITY_CONTRACT=v3 and the log file.")
+        content = args.log.read_text(encoding="utf-8-sig", errors="replace")
+        print(f"No parseable v3 audit events in {args.log.resolve()} "
+              f"({args.log.stat().st_size} bytes).")
+        occurrences = content.count("quality_review_score")
+        if occurrences:
+            print(f"Found {occurrences} 'quality_review_score' markers, but could not parse "
+                  "complete JSON records. The log may contain PowerShell formatting; "
+                  "share the log for diagnosis.")
+        else:
+            print("No 'quality_review_score' markers in this file. The captured stream "
+                  "might not contain the backend diagnostic logger's stderr, "
+                  "or the wrong/empty log was selected.")
+
         return
     distribution, critical, penalties, thresholds = summarize(audits)
     print(f"V3 AUDIT: {len(audits)} question reviews")
