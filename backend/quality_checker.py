@@ -25,7 +25,9 @@ from question_schema import QuizQuestion
 
 from agents.critic import QUALITY_REVIEW_PROMPT
 from agents.critic_v2 import QUALITY_REVIEW_V2_PROMPT
+from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from quality_schema_v2 import QualityReviewV2, decide_review
+from quality_schema_v3 import QualityReviewV3, audit_score
 
 
 def _provider() -> str:
@@ -98,6 +100,11 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
     if mode == QualityMode.OFF:
         event("quality_review_skipped", **fields, reason="disabled")
         return
+    contract_version = os.getenv("AI_QUALITY_CONTRACT", "v1")
+    if contract_version not in {"v1", "v2", "v3"}:
+        raise QualityConfigurationError("Invalid quality contract version")
+    if contract_version == "v3" and mode != QualityMode.AUDIT:
+        raise QualityConfigurationError("Quality contract v3 is audit-only")
     local = [code.value for code in lexical_findings(question)]
     if local and mode == QualityMode.ENFORCE:
         event("quality_review_skipped", **fields, reason="local_rejection")
@@ -123,27 +130,30 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
         remaining = deadline - clock()
         if remaining <= 0:
             raise QualityReviewFailure("budget_exhausted")
-        contract_version = os.getenv("AI_QUALITY_CONTRACT", "v1")
-        if contract_version not in {"v1", "v2"}:
-            raise QualityConfigurationError("Invalid quality contract version")
         is_v2 = contract_version == "v2"
+        is_v3 = contract_version == "v3"
         response = reviewer.responses.create(
-            instructions=QUALITY_REVIEW_V2_PROMPT if is_v2 else QUALITY_REVIEW_PROMPT,
+            instructions=(QUALITY_REVIEW_V3_PROMPT if is_v3 else
+                          QUALITY_REVIEW_V2_PROMPT if is_v2 else QUALITY_REVIEW_PROMPT),
             input=json.dumps({"requested_difficulty": requested_difficulty,
                               "language": language, "candidate": question.model_dump()},
                              ensure_ascii=False),
-            max_output_tokens=max(MAX_OUTPUT_TOKENS, 800) if is_v2 else MAX_OUTPUT_TOKENS,
-            reasoning={"effort": "low" if is_v2 else "none"},
+            max_output_tokens=(max(MAX_OUTPUT_TOKENS, 1500) if is_v3
+                               else max(MAX_OUTPUT_TOKENS, 800) if is_v2
+                               else MAX_OUTPUT_TOKENS),
+            reasoning={"effort": "low" if (is_v2 or is_v3) else "none"},
             temperature=TEMPERATURE,
-            output_contract=(OutputContract.QUALITY_REVIEW_V2 if is_v2
-                             else OutputContract.QUALITY_REVIEW),
+            output_contract=(OutputContract.QUALITY_REVIEW_V3 if is_v3 else
+                             OutputContract.QUALITY_REVIEW_V2 if is_v2 else
+                             OutputContract.QUALITY_REVIEW),
             request_timeout=lambda: min(timeout_seconds, deadline - clock()))
         text = completed_text(response)
         with timed_stage("quality_json_parse"):
             raw = json.loads(normalize_output(text))
         with timed_stage("quality_validation"):
-            verdict = (QualityReviewV2.model_validate(raw) if is_v2
-                       else QualityReview.model_validate(raw))
+            verdict = (QualityReviewV3.model_validate(raw) if is_v3 else
+                       QualityReviewV2.model_validate(raw) if is_v2 else
+                       QualityReview.model_validate(raw))
     except Exception as exc:
         if isinstance(exc, (QualityConfigurationError, StructuredOutputConfigurationError)):
             classification = "configuration_error"
@@ -167,7 +177,20 @@ def check_quality(question: QuizQuestion, requested_difficulty: int, language: s
                                    retry_after=retry_after_seconds(exc)) from None
     finally:
         provider_timeout.reset(token)
-    if isinstance(verdict, QualityReviewV2):
+    if isinstance(verdict, QualityReviewV3):
+        assessment = audit_score(verdict, question.correct_answer)
+        critical = assessment["critical"]
+        if local and critical == "none":
+            critical = "regenerate"
+        issues = [code.value for code in verdict.issue_codes]
+        decision = (ReviewDecision.ACCEPT if critical == "none" else ReviewDecision(critical))
+        event("quality_review_score", **fields, contract="v3",
+              score=assessment["total"], penalties=assessment["penalties"],
+              critical=critical, threshold_preview=assessment["threshold_preview"],
+              issue_codes=issues, local_issue_codes=local,
+              difficulty=verdict.difficulty.value)
+        # v3 is audit-only; even critical suggestions cannot reject a live question.
+    elif isinstance(verdict, QualityReviewV2):
         decision, issues = decide_review(verdict, question.correct_answer)
         event("quality_review_checks", **fields, facts=verdict.facts.value,
               options=verdict.options.value, language=verdict.language.value,
