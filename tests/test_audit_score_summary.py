@@ -42,12 +42,12 @@ class AuditSummaryTests(unittest.TestCase):
         # A JSON object broken over physical lines, with native stderr
         # rendering around it, should still parse as one event.
         long_record = json.dumps(event, ensure_ascii=False).replace(
-            ', "score":', ',\\n "score":').replace(
-            ', "penalties":', ',\\n "penalties":')
+            ', "score":', ',\n "score":').replace(
+            ', "penalties":', ',\n "penalties":')
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "audit_v3.log"
-            path.write_text("python : INFO: started\\n" + long_record +
-                            "\\nINFO: next event\\n", encoding="utf-8")
+            path.write_text("python : INFO: started\n" + long_record +
+                            "\nINFO: next event\n", encoding="utf-8")
             audits = read_audits(path)
             self.assertEqual(len(audits), 1)
             self.assertEqual(audits[0]["score"], 2)
