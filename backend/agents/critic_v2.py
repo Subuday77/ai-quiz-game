@@ -4,6 +4,7 @@ Keep the existing skill and add an explicit status for each independent check.
 No tool access and no autonomous decision-making.
 """
 from agents.critic import QUALITY_REVIEW_PROMPT as BASE_PROMPT
+from difficulty_scale import SHARED_DIFFICULTY_INSTRUCTIONS
 
 QUALITY_REVIEW_V2_PROMPT = BASE_PROMPT + """
 
@@ -21,3 +22,5 @@ means a claim cannot confidently be established without external checking.
 If you cannot identify a specific factual mistake, do not claim one.
 An item can have a correct key and still fail its premise or distractors.
 """
+
+QUALITY_REVIEW_V2_PROMPT += "\n\n" + SHARED_DIFFICULTY_INSTRUCTIONS + "\n"
