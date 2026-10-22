@@ -2,6 +2,7 @@
 
 Run from the project root:
     python test_openai_reviewer_v2.py
+    python test_openai_reviewer_v2.py --reasoning-cases  # 8 playtest + 1 A/B
 """
 import csv
 import json
@@ -52,6 +53,47 @@ LEAK_CASES = (
     (8, "Literature", "Кто написал роман «Педро Парамо», герой которого приезжает в Комалу в поисках отца?",
      ["Карлос Фуэнтес", "Хуан Карлос Онетти", "Хуан Рульфо", "Хулио Кортасар"], "C", "pass"),
 )
+
+
+
+# Eight questions from the human playtest, plus a ninth A/B variant with
+# the explicit etymological clue removed. None of these appear in the v2 prompt.
+# Gold labels are for leakage ONLY; difficulty is assessed independently.
+REASONING_CASES = (
+    (6, "Literature", "Какой французский писатель создал цикл романов «Человеческая комедия»?",
+     ["Стендаль", "Оноре де Бальзак", "Виктор Гюго", "Эмиль Золя"], "B", "pass"),
+    (6, "Visual arts", "Какое художественное направление получило своё название от французского слова impression, означающего «впечатление»?",
+     ["Экспрессионизм", "Импрессионизм", "Фовизм", "Сюрреализм"], "B", "fail"),
+    (8, "Classical music", "Какой британский композитор создал оркестровую сюиту «Планеты», состоящую из семи частей, названных в честь планет Солнечной системы?",
+     ["Густав Холст", "Эдуард Элгар", "Ральф Воан-Уильямс", "Бенджамин Бриттен"], "A", "pass"),
+    (6, "Ancient history", "Какой город, основанный Александром Македонским в Египте, стал одним из крупнейших центров науки и культуры эллинистического мира?",
+     ["Мемфис", "Александрия", "Антиохия", "Пергам"], "B", "fail"),
+    (7, "World geography", "Какая африканская страна полностью окружает территорию государства Лесото?",
+     ["Намибия", "Ботсвана", "ЮАР", "Мозамбик"], "C", "pass"),
+    (8, "Ancient history", "Какой древний город Малой Азии дал своё название пергаменту — материалу для письма из обработанной кожи?",
+     ["Милет", "Пергам", "Эфес", "Смирна"], "B", "fail"),
+    (9, "Visual arts", "Какой художник написал картину «Остров мёртвых», существующую в нескольких авторских вариантах?",
+     ["Эдвард Мунк", "Каспар Давид Фридрих", "Арнольд Бёклин", "Гюстав Моро"], "C", "pass"),
+    (8, "Mineralogy", "Какой драгоценный камень получил своё название от латинского выражения aqua marina — «морская вода»?",
+     ["Бирюза", "Сапфир", "Аквамарин", "Лазурит"], "C", "fail"),
+    (4, "Ancient history / reasoning control", "Какой древний город Малой Азии дал своё название материалу для письма, изготавливаемому из специально обработанной кожи животных?",
+     ["Милет", "Пергам", "Эфес", "Смирна"], "B", "pass"),
+)
+
+
+def load_reasoning_cases():
+    items = []
+    for number, (difficulty, category, stem, answers, key, expected) in enumerate(REASONING_CASES, 1):
+        question = QuizQuestion.model_validate({
+            "difficulty": difficulty, "question": stem,
+            "answers": dict(zip("ABCD", answers)), "correct_answer": key,
+        })
+        items.append({
+            "generator": "human-playtest", "number": number,
+            "category": category, "question": question,
+            "expected_leakage": expected,
+        })
+    return items
 
 
 def load_leak_cases():
@@ -153,9 +195,14 @@ def review(item):
 
 def main():
     leak_mode = '--leak-cases' in sys.argv[1:]
-    candidates = load_leak_cases() if leak_mode else load_candidates()[:LIMIT]
+    reasoning_mode = '--reasoning-cases' in sys.argv[1:]
+    if leak_mode and reasoning_mode:
+        raise SystemExit("Choose one: --leak-cases OR --reasoning-cases")
+    candidates = (load_reasoning_cases() if reasoning_mode else
+                  load_leak_cases() if leak_mode else load_candidates()[:LIMIT])
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = "leak_review_v2" if leak_mode else "reviewer_v2"
+    prefix = ("reasoning_review_v2" if reasoning_mode else
+              "leak_review_v2" if leak_mode else "reviewer_v2")
     jsonl_path = ROOT / f"{prefix}_{stamp}.jsonl"
     csv_path = ROOT / f"{prefix}_{stamp}.csv"
     print(f"REVIEWER: {MODEL} | CONTRACT: v2 | REASONING: {REASONING_EFFORT}")
@@ -180,7 +227,7 @@ def main():
         print(f"Q: {q.question}")
         print(f"{result['status']} ({result['elapsed_seconds']}s) | {result['decision']}")
         print(f"CHECKS: {result['checks']}")
-        if leak_mode:
+        if leak_mode or reasoning_mode:
             observed = (result["checks"] or {}).get("leakage")
             expected = item["expected_leakage"]
             print(f"EXPECTED LEAKAGE: {expected} | OBSERVED: {observed}")
@@ -224,7 +271,7 @@ def main():
     for key in ("accept", "regenerate", "escalate", "failed"):
         print(f"{key}: {counts[key]}")
     print(f"Estimated cost: ${sum(r['openai_review']['cost_usd'] for r in rows):.6f}")
-    if leak_mode:
+    if leak_mode or reasoning_mode:
         matched = sum((r["openai_review"]["checks"] or {}).get("leakage") == r["expected_leakage"] for r in rows)
         print(f"LEAKAGE MATCH: {matched}/{len(rows)}")
     print(f"JSONL: {jsonl_path}\nCSV: {csv_path}")
