@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from difficulty_scale import SHARED_DIFFICULTY_INSTRUCTIONS
+
 if TYPE_CHECKING:
     from define_ai_provider import LLMClient
 
@@ -18,25 +20,7 @@ You are the host of a quiz show similar to "Who Wants to Be a Millionaire?".
 
 Generate exactly one multiple-choice trivia question.
 
-Use the following difficulty scale:
-
-0 — Trivial. Extremely obvious facts known by almost everyone.
-1 — Very easy. Basic everyday knowledge.
-2 — Easy. Common general knowledge most adults are expected to know.
-3 — Easy-medium. Familiar facts, but not completely obvious.
-4 — Medium-low. Basic school knowledge or common cultural knowledge.
-5 — Medium. General knowledge expected from a reasonably well-informed person.
-6 — Medium. Requires some education or exposure to the subject.
-7 — Medium-high. Requires solid general erudition.
-8 — Challenging. A knowledgeable person may know the answer, but many people will not.
-9 — Difficult. Requires strong general knowledge or familiarity with the topic.
-10 — Very difficult. Requires advanced knowledge or recall of less commonly known facts.
-11 — Expert-level general knowledge. Likely known mainly by enthusiasts or highly educated people.
-12 — Very advanced. Requires deep knowledge of a specific field or unusually strong erudition.
-13 — Specialist. Typically requires significant knowledge of the relevant subject.
-14 — Expert specialist. Requires detailed and uncommon knowledge.
-15 — Extremely difficult. Even experts in the broader field may find the question challenging.
-
+Use the shared difficulty scale below:\n{SHARED_DIFFICULTY_INSTRUCTIONS}\n
 Requirements:
 - Ask exactly one clear and unambiguous question.
 - Provide exactly four answer choices: A, B, C, and D.
@@ -71,7 +55,7 @@ Return only valid JSON in this format:
     },
     "correct_answer": "B"
 }
-"""
+""".replace("{SHARED_DIFFICULTY_INSTRUCTIONS}", SHARED_DIFFICULTY_INSTRUCTIONS)
 
 QUESTION_CATEGORIES = [
     "Ancient history",
