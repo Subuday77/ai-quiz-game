@@ -41,6 +41,34 @@ DATASETS = (
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=TIMEOUT, max_retries=0)
 
 
+
+LEAK_CASES = (
+    (4, "Human anatomy", "Какая кость образует лоб человека?",
+     ["Теменная кость", "Лобная кость", "Скуловая кость", "Затылочная кость"], "B", "fail"),
+    (2, "Board games", "В какой настольной игре игроки по очереди опускают фишки в вертикальную решётку, стараясь первыми собрать четыре в ряд?",
+     ["Реверси", "Соедини четыре", "Скрэббл", "Морской бой"], "B", "fail"),
+    (5, "Physics", "Какой физический закон описывает зависимость силы тока от напряжения и электрического сопротивления?",
+     ["Закон Фарадея", "Закон Ампера", "Закон Ома", "Закон Кулона"], "C", "pass"),
+    (8, "Literature", "Кто написал роман «Педро Парамо», герой которого приезжает в Комалу в поисках отца?",
+     ["Карлос Фуэнтес", "Хуан Карлос Онетти", "Хуан Рульфо", "Хулио Кортасар"], "C", "pass"),
+)
+
+
+def load_leak_cases():
+    items = []
+    for number, (difficulty, category, stem, answers, key, expected) in enumerate(LEAK_CASES, 1):
+        question = QuizQuestion.model_validate({
+            "difficulty": difficulty, "question": stem,
+            "answers": dict(zip("ABCD", answers)), "correct_answer": key,
+        })
+        items.append({
+            "generator": "leak-regression", "number": number,
+            "category": category, "question": question,
+            "expected_leakage": expected,
+        })
+    return items
+
+
 def load_candidates():
     items = []
     for generator, filename in DATASETS:
@@ -124,10 +152,12 @@ def review(item):
 
 
 def main():
-    candidates = load_candidates()[:LIMIT]
+    leak_mode = '--leak-cases' in sys.argv[1:]
+    candidates = load_leak_cases() if leak_mode else load_candidates()[:LIMIT]
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    jsonl_path = ROOT / f"reviewer_v2_{stamp}.jsonl"
-    csv_path = ROOT / f"reviewer_v2_{stamp}.csv"
+    prefix = "leak_review_v2" if leak_mode else "reviewer_v2"
+    jsonl_path = ROOT / f"{prefix}_{stamp}.jsonl"
+    csv_path = ROOT / f"{prefix}_{stamp}.csv"
     print(f"REVIEWER: {MODEL} | CONTRACT: v2 | REASONING: {REASONING_EFFORT}")
     print(f"QUESTIONS: {len(candidates)} | TEMPERATURE: {TEMPERATURE}")
     print("=" * 70)
@@ -141,6 +171,7 @@ def main():
             "category": item["category"],
             "question": q.model_dump(),
             "openai_review": result,  # Compatible with evaluate_critic_corpus.py
+            "expected_leakage": item.get("expected_leakage"),
         }
         rows.append(row)
         with jsonl_path.open("a", encoding="utf-8") as file:
@@ -149,6 +180,10 @@ def main():
         print(f"Q: {q.question}")
         print(f"{result['status']} ({result['elapsed_seconds']}s) | {result['decision']}")
         print(f"CHECKS: {result['checks']}")
+        if leak_mode:
+            observed = (result["checks"] or {}).get("leakage")
+            expected = item["expected_leakage"]
+            print(f"EXPECTED LEAKAGE: {expected} | OBSERVED: {observed}")
         print(f"ISSUES: {result['issue_codes']}")
         print(f"RATIONALE: {result['rationale']}")
         if result["error"]:
@@ -159,7 +194,7 @@ def main():
                "status", "decision", "issues", "independent_answer", "facts",
                "options", "language", "distractors", "leakage", "difficulty",
                "rationale", "elapsed_seconds", "input_tokens", "output_tokens",
-               "cost_usd", "error"]
+               "cost_usd", "error", "expected_leakage"]
     with csv_path.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
@@ -179,6 +214,7 @@ def main():
                 "rationale": r["rationale"], "elapsed_seconds": r["elapsed_seconds"],
                 "input_tokens": r["input_tokens"], "output_tokens": r["output_tokens"],
                 "cost_usd": r["cost_usd"], "error": r["error"],
+                "expected_leakage": row["expected_leakage"],
             })
 
     counts = Counter(r["openai_review"]["decision"] or "failed" for r in rows)
@@ -188,6 +224,9 @@ def main():
     for key in ("accept", "regenerate", "escalate", "failed"):
         print(f"{key}: {counts[key]}")
     print(f"Estimated cost: ${sum(r['openai_review']['cost_usd'] for r in rows):.6f}")
+    if leak_mode:
+        matched = sum((r["openai_review"]["checks"] or {}).get("leakage") == r["expected_leakage"] for r in rows)
+        print(f"LEAKAGE MATCH: {matched}/{len(rows)}")
     print(f"JSONL: {jsonl_path}\nCSV: {csv_path}")
 
 
