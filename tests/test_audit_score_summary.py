@@ -52,6 +52,38 @@ class AuditSummaryTests(unittest.TestCase):
             self.assertEqual(len(audits), 1)
             self.assertEqual(audits[0]["score"], 2)
 
+    def test_powershell_utf16_le_bom(self):
+        event = {
+            "timestamp": "2026-10-22T13:07:42+00:00",
+            "event": "quality_review_score", "contract": "v3",
+            "score": 2, "critical": "none",
+            "penalties": {"distractors": 2, "knowledge": 0,
+                          "suitability": 0, "wording": 0},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit_v3.log"
+            raw = "INFO: started\n" + json.dumps(event) + "\nINFO: done\n"
+            path.write_bytes(raw.encode("utf-16"))
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(audits[0]["score"], 2)
+
+    def test_powershell_utf16_le_without_bom(self):
+        event = {
+            "timestamp": "2026-10-22T13:07:42+00:00",
+            "event": "quality_review_score", "contract": "v3",
+            "score": 1, "critical": "none",
+            "penalties": {"distractors": 1, "knowledge": 0,
+                          "suitability": 0, "wording": 0},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit_v3.log"
+            raw = "INFO: started\n" + json.dumps(event) + "\nINFO: done\n"
+            path.write_bytes(raw.encode("utf-16-le"))
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(audits[0]["score"], 1)
+
     def test_critical_counts_even_under_threshold(self):
         audits = [{"score": 0, "critical": "regenerate", "penalties": {
             "distractors": 0, "knowledge": 0, "suitability": 0, "wording": 0}}]
