@@ -22,7 +22,7 @@ _EVENT_START = re.compile(r'\{\s*"(?:timestamp|event)"\s*:')
 def read_log_text(path: Path) -> str:
     """Read PowerShell Tee-Object UTF-16 logs or ordinary UTF-8 logs."""
     data = path.read_bytes()
-    if data.startswith((b"\\xff\\xfe", b"\\xfe\\xff")):
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
         return data.decode("utf-16", errors="replace")
     sample = data[:4096]
     # Some logs are UTF-16 without a byte-order mark.
