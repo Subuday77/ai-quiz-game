@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
-from consts import (DIFFICULTY_LEVELS, SHARED_DIFFICULTY_INSTRUCTIONS,
-                    QUESTION_PROMPT)
+from consts import DIFFICULTY_LEVELS, SHARED_DIFFICULTY_INSTRUCTIONS
+from agents.generator import GENERATOR_PROMPT_V1, GENERATOR_PROMPT_V2
 from agents.critic_v2 import QUALITY_REVIEW_V2_PROMPT
 
 
@@ -18,10 +18,10 @@ class SharedDifficultyTests(unittest.TestCase):
             self.assertTrue(description.startswith(f"{level} —"))
 
     def test_generator_and_reviewer_use_exact_same_instructions(self):
-        self.assertIn(SHARED_DIFFICULTY_INSTRUCTIONS, QUESTION_PROMPT)
-        self.assertIn(SHARED_DIFFICULTY_INSTRUCTIONS, QUALITY_REVIEW_V2_PROMPT)
-        self.assertEqual(QUESTION_PROMPT.count(SHARED_DIFFICULTY_INSTRUCTIONS), 1)
-        self.assertEqual(QUALITY_REVIEW_V2_PROMPT.count(SHARED_DIFFICULTY_INSTRUCTIONS), 1)
+        for prompt in (GENERATOR_PROMPT_V1, GENERATOR_PROMPT_V2,
+                       QUALITY_REVIEW_V2_PROMPT):
+            self.assertIn(SHARED_DIFFICULTY_INSTRUCTIONS, prompt)
+            self.assertEqual(prompt.count(SHARED_DIFFICULTY_INSTRUCTIONS), 1)
 
     def test_low_levels_are_not_penalized_for_being_easy(self):
         self.assertIn("level 0 or 1 is SUPPOSED to be easy", SHARED_DIFFICULTY_INSTRUCTIONS)
