@@ -14,9 +14,11 @@ from test_openai_generator_ab import (SCENARIOS, as_markdown,
 
 class GeneratorABTests(unittest.TestCase):
     def test_scenarios_cover_early_and_advanced_difficulty(self):
-        self.assertEqual(len(SCENARIOS), 12)
+        self.assertEqual(len(SCENARIOS), 15)
+        self.assertEqual([level for level, _ in SCENARIOS], list(range(15)))
         self.assertEqual([level for level, _ in SCENARIOS[:8]], list(range(8)))
-        self.assertEqual([level for level, _ in SCENARIOS[-4:]], [8, 10, 12, 15])
+        self.assertEqual(SCENARIOS[1][1], "Languages and linguistics")
+        self.assertEqual(SCENARIOS[-1][1], "Ancient history")
 
     def test_order_is_balanced(self):
         self.assertEqual(variant_order(1), ("v1", "v2"))
@@ -41,6 +43,30 @@ class GeneratorABTests(unittest.TestCase):
         self.assertEqual([call[:3] for call in calls], [
             (5, "Russian", "Astronomy and space")] * 2)
         self.assertEqual([call[3] for call in calls], ["v1", "v2"])
+
+    def test_repeated_level_is_an_independent_blind_pair(self):
+        calls = []
+
+        def fake_generator(level, language, category, *, prompt_version):
+            calls.append((level, language, category, prompt_version))
+            return {
+                "difficulty": level, "question": "Какой язык является государственным в Бразилии?",
+                "answers": {"A": "Испанский", "B": "Португальский",
+                            "C": "Итальянский", "D": "Французский"},
+                "correct_answer": "B",
+            }
+
+        with patch("test_openai_generator_ab.create_question", side_effect=fake_generator):
+            first = generate_pair(1, 1, "Languages and linguistics", "Russian", repetition=1)
+            second = generate_pair(2, 1, "Languages and linguistics", "Russian", repetition=2)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual({row["repeat"] for row in first}, {1})
+        self.assertEqual({row["repeat"] for row in second}, {2})
+        self.assertEqual([x["prompt_version"] for x in first], ["v1", "v2"])
+        self.assertEqual([x["prompt_version"] for x in second], ["v2", "v1"])
+        self.assertTrue(all(x[:3] == (1, "Russian", "Languages and linguistics")
+                            for x in calls))
+        self.assertIn("repetition 2", as_markdown(second))
 
     def test_report_blinds_version_before_answer_key(self):
         with patch("test_openai_generator_ab.create_question") as generator:
