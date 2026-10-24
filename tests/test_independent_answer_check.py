@@ -12,10 +12,10 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from independent_answer_check import (
     IndependentAnswerReview, answer_review_schema, blind_payload,
-    summarize_answer_review,
+    summarize_answer_review, publication_preview,
 )
 from question_schema import QuizQuestion
-from test_openai_answer_check import CASES, payload_for_case
+from test_openai_answer_check import CASES, payload_for_case, expected_publication
 
 
 def review(outcomes, premise="valid"):
@@ -86,6 +86,34 @@ class IndependentAnswerTests(unittest.TestCase):
         self.assertEqual(result["outcome"], "uncertain")
         self.assertEqual(result["supported_choices"], ["A"])
         self.assertEqual(result["uncertain_choices"], ["B"])
+
+    def test_hypothetical_gate_rejects_bad_key_multiple_and_literal_leak(self):
+        good = review(["no", "yes", "no", "no"])
+        self.assertFalse(publication_preview(good, "B", False)["would_block"])
+        self.assertEqual(publication_preview(good, "A", False)["reasons"],
+                         ["generator_key_mismatch"])
+        self.assertEqual(publication_preview(good, "B", True)["reasons"],
+                         ["literal_answer_leak"])
+        several = review(["yes", "no", "yes", "yes"])
+        self.assertEqual(publication_preview(several, "A", False)["reasons"],
+                         ["multiple_correct"])
+        missing = review(["no", "no", "no", "no"])
+        self.assertEqual(publication_preview(missing, "A", False)["reasons"],
+                         ["no_correct"])
+        disputed = review(["no", "yes", "uncertain", "no"])
+        self.assertEqual(publication_preview(disputed, "B", False)["reasons"],
+                         ["uncertain"])
+        with self.assertRaises(ValueError):
+            publication_preview(good, "X", False)
+
+    def test_benchmark_expected_release_distinguishes_bad_key_and_leak(self):
+        for case_id in ("saturn_wrong_key", "enclave_three_correct",
+                        "mrs_dalloway_direct_leak", "hanno_periplus",
+                        "ebla_direct_leak", "empty_answer_set",
+                        "incorrect_nickname_premise"):
+            self.assertEqual(expected_publication(case_id), "block")
+        self.assertEqual(expected_publication("piano"), "allow")
+        self.assertEqual(expected_publication("mussorgsky_versions"), "review")
 
     def test_benchmark_contains_both_good_and_bad_questions(self):
         self.assertGreaterEqual(len(CASES), 12)
