@@ -68,6 +68,13 @@ class LiteralLeakTests(unittest.TestCase):
         q = q.model_copy(update={"answers": {**q.answers, "A": "Древняя Эбла"}})
         self.assertFalse(exact_answer_leak(q))
 
+    def test_past_good_game_questions_are_not_blocked(self):
+        # Regression: false semantic "leaks" were seen for iconic slogans.
+        from test_openai_critic_v3_calibration import REAL_GAME_CASES, question_from_case
+        for case in REAL_GAME_CASES:
+            with self.subTest(case=case["id"]):
+                self.assertFalse(exact_answer_leak(question_from_case(case)))
+
     def test_modes_and_invalid_config(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(local_leak_mode_from_env(), "enforce")
@@ -126,6 +133,16 @@ class PublicationGateTests(unittest.TestCase):
         self.assertEqual(generated.call_count, 2)
         self.assertEqual(response.json()["question"], self.clean["question"])
         self.assertNotIn("correct_answer", response.json())
+
+    def test_critic_v3_audit_does_not_override_independent_gate(self):
+        with patch.dict(os.environ, {"AI_QUALITY_MODE": "audit",
+                                      "AI_QUALITY_CONTRACT": "v3"}), patch(
+                "api.create_question", return_value=self.leaky) as generated, patch(
+                "api.check_quality") as model_review:
+            response = self.http.get(self.url)
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(generated.call_count, 3)
+        model_review.assert_not_called()
 
     def test_audit_override_does_not_block_publication(self):
         with patch.dict(os.environ, {"AI_LOCAL_LEAK_MODE": "audit"}), patch(
