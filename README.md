@@ -137,6 +137,27 @@ results for false positives and missed multiple/no-correct-answer cases
 before allowing AI-based rejection. Persistent storage, player reports,
 tags and game telemetry will be implemented with the PostgreSQL phase.
 
+## PostgreSQL accounts + question history foundation (24 Oct 2026)
+
+The dev branch now contains a versioned PostgreSQL schema
+(`backend/migrations/versions/0001_initial.py`) for username/password
+accounts, server-side sessions, topic/tag clouds, scores, stars, achievements,
+question attempts, timing, quality reviews and player dispute records.
+
+New endpoints: `POST /api/auth/register`, `POST /api/auth/login`,
+`GET /api/auth/me`, `POST /api/auth/logout` and
+`GET /api/profile/me/stats`. Passwords use Argon2id; opaque
+session tokens are stored as hashes and sent using HttpOnly cookies.
+Google sign-in and a SweetAlert2-based Angular form will come later;
+**SweetAlert2 is UI only**, authentication is on FastAPI.
+
+The existing local in-memory `/api/games` flow is **not yet persisted** and
+not protected by account auth. Do not deploy it publicly in this state.
+See **[PostgreSQL + Accounts setup](docs/POSTGRESQL_ACCOUNTS.md)**
+for schema explanation, `.env` settings, PostgreSQL migration and tests.
+Account endpoints require a configured `DATABASE_URL` and migrated database;
+there is no implicit SQLite runtime fallback.
+
 ## Learn how it works
 
 - [Local run guide](docs/LOCAL_DEVELOPMENT.md)
