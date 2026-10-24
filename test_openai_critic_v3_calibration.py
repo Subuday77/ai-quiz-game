@@ -2,6 +2,7 @@
 
 From project root after git pull:
     python test_openai_critic_v3_calibration.py
+    python test_openai_critic_v3_calibration.py --real-game
 
 Sends only the question and requested difficulty to the model.
 Human expectations are held out locally for evaluation, not injected into
@@ -89,6 +90,46 @@ CASES = (
 )
 
 
+# Faithful transcription of the 8 screenshots from the 2026-10-22 game.
+# These cases NEVER appear in model instructions. Ranges are provisional
+# human editorial expectations, not a ground-truth measure of player ability.
+REAL_GAME_CASES = (
+    dict(id="game_01_piano", difficulty=0, category="Music",
+         stem="На каком музыкальном инструменте обычно играют с помощью клавиш?",
+         answers=("Скрипка", "Флейта", "Пианино", "Барабан"), key="C",
+         leak="pass", min_d=0, max_d=0),
+    dict(id="game_02_hola", difficulty=1, category="Languages",
+         stem="На каком языке слово «hola» используется как обычное приветствие?",
+         answers=("Итальянский", "Португальский", "Испанский", "Румынский"), key="C",
+         leak="pass", min_d=2, max_d=3),
+    dict(id="game_03_whale", difficulty=2, category="Animals",
+         stem="Какое из этих животных является самым крупным из ныне живущих на Земле?",
+         answers=("Африканский слон", "Синий кит", "Белый медведь", "Жираф"), key="B",
+         leak="pass", min_d=0, max_d=0),
+    dict(id="game_04_gearbox", difficulty=3, category="Technology",
+         stem="Какой механизм в автомобиле обычно используется для увеличения крутящего момента при трогании с места и движении на низкой скорости?",
+         answers=("Дифференциал", "Коробка передач", "Генератор", "Радиатор"), key="B",
+         leak="pass", min_d=2, max_d=3),
+    dict(id="game_05_gutenberg", difficulty=4, category="History",
+         stem="Какое изобретение обычно приписывают Иоганну Гутенбергу в Европе XV века?",
+         answers=("Паровую машину", "Печатный станок с подвижными литерами",
+                  "Телефон", "Микроскоп"), key="B",
+         leak="pass", min_d=1, max_d=2),
+    dict(id="game_06_saturn", difficulty=5, category="Astronomy",
+         stem="Какая планета Солнечной системы имеет самые большие по площади кольца?",
+         answers=("Юпитер", "Сатурн", "Уран", "Нептун"), key="B",
+         leak="pass", min_d=1, max_d=3),
+    dict(id="game_07_xfiles", difficulty=6, category="Television",
+         stem="Какой телесериал впервые сделал фразу «The truth is out there» широко известным слоганом?",
+         answers=("Twin Peaks", "The X-Files", "Lost", "Fringe"), key="B",
+         leak="pass", min_d=0, max_d=1),
+    dict(id="game_08_hanami", difficulty=7, category="Japanese culture",
+         stem="Какой японский праздник традиционно связан с любованием цветением сакуры?",
+         answers=("Танабата", "Ханами", "Сэцубун", "Обон"), key="B",
+         leak="pass", min_d=0, max_d=1),
+)
+
+
 def question_from_case(case):
     return QuizQuestion.model_validate({
         "difficulty": case["difficulty"], "question": case["stem"],
@@ -139,17 +180,23 @@ def run_case(client, case):
 
 
 def main():
+    real_game = "--real-game" in sys.argv[1:]
+    unknown = set(sys.argv[1:]) - {"--real-game"}
+    if unknown:
+        raise SystemExit(f"Unknown arguments: {sorted(unknown)}")
+    cases = REAL_GAME_CASES if real_game else CASES
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         raise SystemExit("OPENAI_API_KEY not set in the environment or project .env")
     client = OpenAI(api_key=key, timeout=TIMEOUT, max_retries=0)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    jsonl_path = ROOT / f"critic_v3_calibration_{stamp}.jsonl"
-    csv_path = ROOT / f"critic_v3_calibration_{stamp}.csv"
+    prefix = "critic_v3_real_game" if real_game else "critic_v3_calibration"
+    jsonl_path = ROOT / f"{prefix}_{stamp}.jsonl"
+    csv_path = ROOT / f"{prefix}_{stamp}.csv"
     rows = []
-    print(f"CRITIC v3 CALIBRATION | model {MODEL} | {len(CASES)} cases")
+    print(f"CRITIC v3 CALIBRATION | model {MODEL} | {len(cases)} cases")
     print("=" * 72)
-    for i, case in enumerate(CASES, 1):
+    for i, case in enumerate(cases, 1):
         try:
             row = run_case(client, case)
         except Exception as exc:
@@ -158,7 +205,7 @@ def main():
         rows.append(row)
         with jsonl_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        print(f"[{i}/{len(CASES)}] {row['case']}: "
+        print(f"[{i}/{len(cases)}] {row['case']}: "
               f"leak {row.get('leak_observed', 'ERROR')} / {case['leak']} "
               f"| distractors {row.get('distractor_observed', '?')} / "
               f"{case['min_d']}..{case['max_d']}"
@@ -181,7 +228,7 @@ def main():
     print(f"Successful: {len(ok)}/{len(rows)}")
     print(f"LEAKAGE MATCH: {sum(r['leak_match'] for r in ok)}/{len(ok)}")
     print(f"DISTRACTOR BAND MATCH: {sum(r['distractor_band_match'] for r in ok)}/{len(ok)}")
-    if len(ok) == len(CASES):
+    if len(ok) == len(cases) and not real_game:
         by_id = {r["case"]: r["distractor_observed"] for r in ok}
         pairs = [
             ("hola_near_easy", "hola_far_easy", ">"),
