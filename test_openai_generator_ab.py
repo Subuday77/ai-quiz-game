@@ -3,6 +3,7 @@
 Run from the project root in PyCharm:
     python test_openai_generator_ab.py
     python test_openai_generator_ab.py --all
+    python test_openai_generator_ab.py --level 1 --repeats 3
 
 Each A/B pair uses identical model/provider settings, language, category and
 requested difficulty. The generated facts will naturally differ. The report
@@ -17,7 +18,6 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "backend"))
@@ -28,9 +28,9 @@ from question_generator import create_question
 from question_schema import QuizQuestion
 
 
-# Fixed paired scenarios; both versions receive precisely the same input.
-# First 8 cover the range encountered in the previous human game.
-# --all additionally probes expert levels 8, 10, 12 and 15.
+# Fifteen MAIN GAME levels 0..14. Difficulty 15 is the separate bonus round.
+# Each pair gets identical model settings, language, difficulty and category.
+# Preserve the initial 0..7 categories from the earlier A/B comparison.
 SCENARIOS = (
     (0, "Musical instruments"),
     (1, "Languages and linguistics"),
@@ -41,9 +41,12 @@ SCENARIOS = (
     (6, "Television"),
     (7, "Traditions, customs, and world culture"),
     (8, "Visual arts"),
+    (9, "Modern history"),
     (10, "World geography"),
+    (11, "Literature"),
     (12, "Classical music"),
-    (15, "Ancient history"),
+    (13, "Physics"),
+    (14, "Ancient history"),
 )
 
 
@@ -52,10 +55,12 @@ def variant_order(index: int) -> tuple[str, str]:
     return ("v1", "v2") if index % 2 else ("v2", "v1")
 
 
-def generate_pair(index: int, difficulty: int, category: str, language: str):
+def generate_pair(index: int, difficulty: int, category: str, language: str,
+                  repetition: int = 1):
     rows = []
     for letter, version in zip("AB", variant_order(index)):
-        row = {"pair": index, "variant": letter, "prompt_version": version,
+        row = {"pair": index, "repeat": repetition,
+               "variant": letter, "prompt_version": version,
                "difficulty": difficulty, "category": category, "language": language,
                "status": "error", "question": "", "answers": {},
                "correct_answer": "", "error": ""}
@@ -66,7 +71,7 @@ def generate_pair(index: int, difficulty: int, category: str, language: str):
                 raise ValueError(f"Returned difficulty {question.difficulty}, expected {difficulty}")
             row.update(status="valid", question=question.question,
                        answers=question.answers, correct_answer=question.correct_answer)
-        except (Exception) as exc:
+        except Exception as exc:
             # The benchmark records transport, parsing and validation failures
             # separately. No automatic retries: one attempt per version.
             row["error"] = f"{type(exc).__name__}: {str(exc)[:220]}"
@@ -87,7 +92,8 @@ def as_markdown(rows: list[dict]) -> str:
     ]
     for row in rows:
         if row["variant"] == "A":
-            lines += [f"## Pair {row['pair']} — level {row['difficulty']} — {row['category']}", ""]
+            lines += [f"## Pair {row['pair']} — level {row['difficulty']} — "
+                      f"{row['category']} — repetition {row['repeat']}", ""]
         lines.append(f"### Variant {row['variant']}")
         if row["status"] != "valid":
             lines += [f"Generation failed: {row['error']}", ""]
@@ -114,25 +120,48 @@ def csv_row(row: dict) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pairs", type=int, default=8,
-                        help="Number of paired scenarios (default: 8, max: 12)")
-    parser.add_argument("--all", action="store_true", help="Run all 12 scenarios")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--pairs", type=int,
+                       help="First N successive game levels (default 8, max 15)")
+    scope.add_argument("--all", action="store_true",
+                       help="All 15 main-game levels 0..14 (30 API calls)")
+    scope.add_argument("--level", type=int,
+                       help="Repeat one selected main-game level 0..14")
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="Independent samples per difficulty/category (default 1, max 10)")
     parser.add_argument("--language", default="Russian", choices=list(LANGUAGE_DICT.values()))
     args = parser.parse_args()
-    count = len(SCENARIOS) if args.all else args.pairs
-    if not 1 <= count <= len(SCENARIOS):
-        parser.error(f"--pairs must be from 1 to {len(SCENARIOS)}")
+    if not 1 <= args.repeats <= 10:
+        parser.error("--repeats must be from 1 to 10")
+    if args.level is not None:
+        if not 0 <= args.level < len(SCENARIOS):
+            parser.error("--level must be from 0 to 14 (main-game questions only)")
+        scenarios = (SCENARIOS[args.level],)
+    elif args.all:
+        scenarios = SCENARIOS
+    else:
+        count = 8 if args.pairs is None else args.pairs
+        if not 1 <= count <= len(SCENARIOS):
+            parser.error(f"--pairs must be from 1 to {len(SCENARIOS)}")
+        scenarios = SCENARIOS[:count]
+    total_pairs = len(scenarios) * args.repeats
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     prefix = ROOT / f"generator_ab_{stamp}"
     rows = []
-    print(f"GENERATOR A/B | {count} pairs | {args.language} | no critic | no retries")
-    for i, (difficulty, category) in enumerate(SCENARIOS[:count], 1):
-        print(f"[{i}/{count}] level {difficulty}: {category}")
-        pair = generate_pair(i, difficulty, category, args.language)
-        rows.extend(pair)
-        for row in pair:
-            print(f"  Variant {row['variant']}: {row['status']}"
-                  + (f" ({row['error']})" if row["error"] else ""))
+    print(f"GENERATOR A/B | {total_pairs} pairs | {total_pairs * 2} calls | "
+          f"{args.language} | no critic | no retries")
+    pair_index = 0
+    for difficulty, category in scenarios:
+        for repetition in range(1, args.repeats + 1):
+            pair_index += 1
+            print(f"[{pair_index}/{total_pairs}] level {difficulty}: "
+                  f"{category} | sample {repetition}/{args.repeats}")
+            pair = generate_pair(pair_index, difficulty, category, args.language,
+                                 repetition=repetition)
+            rows.extend(pair)
+            for row in pair:
+                print(f"  Variant {row['variant']}: {row['status']}"
+                      + (f" ({row['error']})" if row["error"] else ""))
     jsonl_path = prefix.with_suffix(".jsonl")
     csv_path = prefix.with_suffix(".csv")
     md_path = prefix.with_suffix(".md")
@@ -140,7 +169,7 @@ def main():
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
-        fields = ["pair", "variant", "prompt_version", "difficulty", "category",
+        fields = ["pair", "repeat", "variant", "prompt_version", "difficulty", "category",
                   "language", "status", "question", "answer_A", "answer_B",
                   "answer_C", "answer_D", "correct_answer", "error"]
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
