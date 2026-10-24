@@ -130,6 +130,20 @@ REAL_GAME_CASES = (
 )
 
 
+# Reviewer v3 scores from the original live game (2026-10-22).
+# Used ONLY for local A/B reporting; these are never sent to the model.
+REAL_GAME_BASELINE = {
+    "game_01_piano": (0, "none"),
+    "game_02_hola": (0, "regenerate"),
+    "game_03_whale": (0, "none"),
+    "game_04_gearbox": (0, "none"),
+    "game_05_gutenberg": (2, "none"),
+    "game_06_saturn": (0, "none"),
+    "game_07_xfiles": (1, "regenerate"),
+    "game_08_hanami": (1, "none"),
+}
+
+
 def question_from_case(case):
     return QuizQuestion.model_validate({
         "difficulty": case["difficulty"], "question": case["stem"],
@@ -202,6 +216,13 @@ def main():
         except Exception as exc:
             row = {"case": case["id"], "error": f"{type(exc).__name__}: {str(exc)[:250]}",
                    "leak_match": False, "distractor_band_match": False}
+        if real_game:
+            baseline_score, baseline_critical = REAL_GAME_BASELINE[case["id"]]
+            row["baseline_score"] = baseline_score
+            row["baseline_critical"] = baseline_critical
+            if "score" in row:
+                row["score_change"] = row["score"] - baseline_score
+                row["critical_changed"] = row["critical"] != baseline_critical
         rows.append(row)
         with jsonl_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -210,6 +231,10 @@ def main():
               f"| distractors {row.get('distractor_observed', '?')} / "
               f"{case['min_d']}..{case['max_d']}"
               f"| total {row.get('score', '?')} | critical {row.get('critical', '?')}")
+        if real_game and "score" in row:
+            print(f"  BASELINE: {row['baseline_score']}/8, critical="
+                  f"{row['baseline_critical']} -> NEW: {row['score']}/8, "
+                  f"critical={row['critical']}")
         if row.get("rationale"):
             print(f"  WHY: {row['rationale']}")
         if row.get("error"):
@@ -218,7 +243,8 @@ def main():
               "distractor_expected_min", "distractor_expected_max", "distractor_observed",
               "distractor_band_match", "score", "critical", "difficulty_rating",
               "penalties", "issue_codes", "rationale", "elapsed_seconds",
-              "input_tokens", "output_tokens", "error"]
+              "input_tokens", "output_tokens", "error", "baseline_score",
+              "baseline_critical", "score_change", "critical_changed"]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -228,6 +254,11 @@ def main():
     print(f"Successful: {len(ok)}/{len(rows)}")
     print(f"LEAKAGE MATCH: {sum(r['leak_match'] for r in ok)}/{len(ok)}")
     print(f"DISTRACTOR BAND MATCH: {sum(r['distractor_band_match'] for r in ok)}/{len(ok)}")
+    if real_game:
+        flagged = [r["case"] for r in ok if r["case"] in
+                   {"game_02_hola", "game_07_xfiles"} and r["critical"] != "none"]
+        print(f"PREVIOUS SUSPECTED FALSE LEAKS STILL CRITICAL: {len(flagged)}/2"
+              + (f" ({', '.join(flagged)})" if flagged else ""))
     if len(ok) == len(cases) and not real_game:
         by_id = {r["case"]: r["distractor_observed"] for r in ok}
         pairs = [
