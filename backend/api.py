@@ -19,6 +19,7 @@ load_dotenv(find_dotenv())
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES  # noqa: E402
 from game_logic import GameState  # noqa: E402
+from local_leak_filter import check_local_leak, local_leak_mode_from_env  # noqa: E402
 from generation_policy import (GenerationPolicy, InvalidQuestionError, client_settings,
                                is_transient, provider_timeout, retry_after_seconds)  # noqa: E402
 from diagnostics import elapsed_ms, event, generation_attempt, request_id, timed_stage  # noqa: E402
@@ -155,6 +156,7 @@ def get_question(game_id: str) -> PublicQuestion:
             try:
                 policy = GenerationPolicy.from_env()
                 quality_mode = quality_mode_from_env()
+                leak_mode = local_leak_mode_from_env()
             except (ValueError, QualityConfigurationError):
                 event("generation_configuration_failed")
                 raise HTTPException(status_code=503, detail="AI provider unavailable") from None
@@ -178,6 +180,7 @@ def get_question(game_id: str) -> PublicQuestion:
                         question = QuizQuestion.model_validate(raw)
                         if question.difficulty != difficulty:
                             raise InvalidQuestionError("AI returned the wrong difficulty")
+                    check_local_leak(question, leak_mode)
                     check_quality(question, difficulty, session.language, quality_mode,
                                   deadline, policy.provider_timeout_seconds, clock=perf_counter)
                     event("generation_attempt_completed", outcome="success")
