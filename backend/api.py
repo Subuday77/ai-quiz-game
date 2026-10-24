@@ -28,9 +28,11 @@ from quality_errors import QualityConfigurationError, QualityRegenerationError  
 from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
 from persistence.auth import router as auth_router  # noqa: E402
+from persistence.analytics import router as profile_router  # noqa: E402
 
 app = FastAPI(title="AI Quiz Game", version="0.1.0")
 app.include_router(auth_router)  # Accounts are DB-backed; game sessions still in memory.
+app.include_router(profile_router)  # Derived statistics are initially empty until game DB migration.
 
 
 @app.middleware("http")
