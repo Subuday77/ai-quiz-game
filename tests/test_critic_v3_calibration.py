@@ -7,7 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from quality_schema_v3 import QualityReviewV3, audit_score
-from test_openai_critic_v3_calibration import CASES, candidate_payload, question_from_case
+from test_openai_critic_v3_calibration import (CASES, REAL_GAME_CASES,
+                                               candidate_payload, question_from_case)
 
 
 class V3EditorialCalibrationTests(unittest.TestCase):
@@ -48,8 +49,24 @@ class V3EditorialCalibrationTests(unittest.TestCase):
                 self.assertTrue(0 <= case["min_d"] <= case["max_d"] <= 3)
                 self.assertIn(case["leak"], ("pass", "fail"))
 
+    def test_real_game_replay_matches_eight_screenshots(self):
+        self.assertEqual(len(REAL_GAME_CASES), 8)
+        self.assertEqual([case["difficulty"] for case in REAL_GAME_CASES],
+                         list(range(8)))
+        cases = {case["id"]: case for case in REAL_GAME_CASES}
+        self.assertEqual(cases["game_02_hola"]["key"], "C")
+        self.assertEqual(cases["game_04_gearbox"]["key"], "B")
+        self.assertEqual(cases["game_07_xfiles"]["answers"][1], "The X-Files")
+        self.assertEqual(cases["game_08_hanami"]["answers"][1], "Ханами")
+        self.assertTrue(all(case["leak"] == "pass" for case in REAL_GAME_CASES))
+        for case in REAL_GAME_CASES:
+            with self.subTest(case=case["id"]):
+                question = question_from_case(case)
+                self.assertEqual(len(question.answers), 4)
+                self.assertIn(case["key"], "ABCD")
+
     def test_expected_labels_are_never_sent_to_reviewer(self):
-        for case in CASES:
+        for case in CASES + REAL_GAME_CASES:
             with self.subTest(case=case["id"]):
                 payload = candidate_payload(question_from_case(case))
                 self.assertEqual(set(payload), {
