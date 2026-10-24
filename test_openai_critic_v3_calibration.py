@@ -147,6 +147,20 @@ REAL_GAME_BASELINE = {
 }
 
 
+# Most recent v3 replay on 2026-10-24, distinct from the earlier live audit.
+# Baseline for experimental two-stage A/B comparison; never sent to the LLM.
+LATEST_V3_REAL_GAME = {
+    "game_01_piano": (0, "none"),
+    "game_02_hola": (0, "none"),
+    "game_03_whale": (0, "none"),
+    "game_04_gearbox": (0, "none"),
+    "game_05_gutenberg": (0, "none"),
+    "game_06_saturn": (1, "none"),
+    "game_07_xfiles": (1, "none"),
+    "game_08_hanami": (2, "none"),
+}
+
+
 def question_from_case(case):
     return QuizQuestion.model_validate({
         "difficulty": case["difficulty"], "question": case["stem"],
@@ -230,7 +244,9 @@ def main():
             row = {"case": case["id"], "error": f"{type(exc).__name__}: {str(exc)[:250]}",
                    "leak_match": False, "distractor_band_match": False}
         if real_game:
-            baseline_score, baseline_critical = REAL_GAME_BASELINE[case["id"]]
+            baseline_score, baseline_critical = (
+                LATEST_V3_REAL_GAME if two_stage else REAL_GAME_BASELINE
+            )[case["id"]]
             row["baseline_score"] = baseline_score
             row["baseline_critical"] = baseline_critical
             if "score" in row:
@@ -268,6 +284,12 @@ def main():
     print(f"Successful: {len(ok)}/{len(rows)}")
     print(f"LEAKAGE MATCH: {sum(r['leak_match'] for r in ok)}/{len(ok)}")
     print(f"DISTRACTOR BAND MATCH: {sum(r['distractor_band_match'] for r in ok)}/{len(ok)}")
+    if real_game and two_stage:
+        good = (len(ok) == 8 and sum(r["leak_match"] for r in ok) == 8
+                and sum(r["distractor_band_match"] for r in ok) >= 4
+                and all(r["critical"] == "none" for r in ok))
+        print(f"NO-REGRESSION CHECK (latest v3: 8/8 leakage, 4/8 bands, "
+              f"0 critical): {good}")
     if real_game:
         flagged = [r["case"] for r in ok if r["case"] in
                    {"game_02_hola", "game_07_xfiles"} and r["critical"] != "none"]
