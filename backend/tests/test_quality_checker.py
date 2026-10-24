@@ -392,7 +392,8 @@ class QualityApiTests(unittest.TestCase):
     def test_audit_local_findings_are_reported_without_blocking(self):
         self.generated.return_value = {**QUESTION, "question": 'Who is called "Alexandrovsky"?',
                                       "answers": {**QUESTION["answers"], "B": "Alexandrovsky"}}
-        with patch.dict("os.environ", {"AI_QUALITY_MODE": "audit"}):
+        with patch.dict("os.environ", {"AI_QUALITY_MODE": "audit",
+                                            "AI_LOCAL_LEAK_MODE": "audit"}):
             self.assertEqual(self.http.get(self.url).status_code, 200)
         self.review.assert_called_once()
         self.assertEqual(self.events("quality_review_completed")[0]["local_issue_codes"], ["answer_leak"])
