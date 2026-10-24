@@ -129,3 +129,27 @@ def summarize_answer_review(review: IndependentAnswerReview) -> dict:
         outcome = "no_correct"
     return {"outcome": outcome, "supported_choices": yes,
             "uncertain_choices": unknown, "premise": review.premise.value}
+
+
+def publication_preview(review: IndependentAnswerReview, supplied_key: str,
+                        literal_leak: bool) -> dict:
+    """Hypothetical gate result; the live API does NOT use this.
+
+    A unique supported choice is insufficient if it disagrees with the
+    generator's key, or if the stem spells out the correct choice.
+    All uncertainty is a hold/review, never a confident approval.
+    """
+    if supplied_key not in "ABCD" or len(supplied_key) != 1:
+        raise ValueError("The supplied key must be A, B, C or D")
+    summary = summarize_answer_review(review)
+    reasons = []
+    if literal_leak:
+        reasons.append("literal_answer_leak")
+    if summary["outcome"] != "single_correct":
+        reasons.append(summary["outcome"])
+    elif summary["supported_choices"] != [supplied_key]:
+        reasons.append("generator_key_mismatch")
+    return {"would_block": bool(reasons), "reasons": reasons,
+            "verified_choice": (summary["supported_choices"][0]
+                                if summary["outcome"] == "single_correct"
+                                else None)}
