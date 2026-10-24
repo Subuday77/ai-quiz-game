@@ -94,7 +94,8 @@ class QualityApiTests(unittest.TestCase):
             os.environ.pop(key, None)
         sessions.clear()
         self.enterContext(patch.dict("os.environ", {
-            "AI_QUALITY_MODE": "enforce", "AI_STRUCTURED_OUTPUT_MODE": "off",
+            "AI_QUALITY_MODE": "enforce", "AI_QUALITY_CONTRACT": "v1",
+            "AI_LOCAL_LEAK_MODE": "audit", "AI_STRUCTURED_OUTPUT_MODE": "off",
             "AI_GENERATION_MAX_ATTEMPTS": "3", "AI_GENERATION_BUDGET_SECONDS": "30",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2", "LLM_PROVIDER": "nvidia",
@@ -408,6 +409,7 @@ class ReviewerTimeoutTests(unittest.TestCase):
         for key in ("AI_QUALITY_PROVIDER", "AI_QUALITY_MODEL_ID", "AI_QUALITY_STRUCTURED_OUTPUT_MODE"):
             os.environ.pop(key, None)
         self.enterContext(patch.dict("os.environ", {
+            "AI_QUALITY_CONTRACT": "v1", "AI_LOCAL_LEAK_MODE": "audit",
             "AI_STRUCTURED_OUTPUT_MODE": "off", "OPENAI_API_KEY": SECRET,
             "OPENAI_MODEL_ID": "offline", "NVIDIA_API_KEY": SECRET,
             "NVIDIA_MODEL_ID": "offline", "AWS_REGION": "us-east-1",
