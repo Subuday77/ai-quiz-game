@@ -69,6 +69,38 @@ Open http://127.0.0.1:4200 — Angular requests /api on port 4200 and its proxy 
 
 If PowerShell blocks activation scripts, either configure process-local execution policy or run commands using the .venv Python executable directly.
 
+## Generator prompt versions and A/B test
+
+The single authoritative 0–15 difficulty scale remains in `backend/consts.py`.
+Both the unchanged legacy prompt (v1) and the revised level-calibrated prompt
+(v2) now live in `backend/agents/generator.py`. The production generator
+(`backend/question_generator.py`) selects one via
+`AI_GENERATOR_PROMPT_VERSION=v1|v2` (defaults to **v1** while v2 is tested).
+The generator's provider, model, reasoning effort, temperature, JSON contract,
+validation, and retry policy are unchanged. Critic v3 remains audit-only.
+
+From the **project root** in the Python environment (PyCharm terminal or
+PowerShell), compare the two prompts with eight blind question pairs:
+
+~~~powershell
+python -m unittest discover -s tests -v
+python test_openai_generator_ab.py
+~~~
+
+Use `python test_openai_generator_ab.py --all` for 12 pairs through difficulty
+15, or `--pairs 2` for a quick inexpensive smoke test. Each pair makes **two
+billable AI calls** using identical language, category, requested difficulty and
+model settings. The compared facts may differ due to sampling. No critic calls
+or scoring-based rejections are used. Results are written to
+`generator_ab_<timestamp>.md` (blind side-by-side questions with answers and
+version labels at the bottom), plus CSV/JSONL. Assess factual correctness,
+distractor strength, fairness and interest manually; valid JSON alone is not a
+quality win.
+
+After review, explicitly enable v2 for a local game with
+`AI_GENERATOR_PROMPT_VERSION=v2` in the project's active `.env`, then restart
+the backend. No changes to master are required or implied.
+
 ## Learn how it works
 
 - [Local run guide](docs/LOCAL_DEVELOPMENT.md)
