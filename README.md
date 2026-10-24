@@ -1,160 +1,171 @@
 # AI Quiz Game
 
-A command-line trivia game inspired by "Who Wants to Be a Millionaire?".
+A Python + Angular AI-generated trivia game (15 main questions plus a secret 16th).
 
-The app generates multiple-choice questions with an LLM, increases the difficulty after each correct answer, and ends when the player answers incorrectly or completes the configured maximum difficulty.
+Development continues in the **feature/quiz-web-foundation** branch. Do not merge it into master until local verification.
 
-## Features
+## Current local prototype
 
-- Interactive terminal quiz flow.
-- Language selection for generated questions.
-- Difficulty levels from 0 to `MAX_DIFFICULTY`.
-- Runtime tuning through `config.py`.
-- Randomized question categories without repetition within a single game.
-- Four-answer multiple-choice format.
-- Configurable LLM provider:
-  - OpenAI
-  - NVIDIA OpenAI-compatible API
-  - AWS Bedrock
+- Python FastAPI backend, Angular standalone frontend, and an Angular dev-server proxy to /api.
+- AI question generation via the existing OpenAI / NVIDIA / Bedrock adapter.
+- Pydantic validation: one question, four nonempty distinct choices (A–D), a valid answer key, and the expected difficulty. Invalid AI-generated data is retried at most 3 times.
+- Server-side game state and correct-answer verification. The current question response does **not** contain the correct answer. Answer submissions are single-use.
+- 15 levels (difficulty 0–14): bronze at 5, silver at 10, gold at 15. A no-hint run unlocks a secret difficulty-15 question with a platinum award on success.
+- No persistence yet: stars and games reset when the server restarts. The console version still works.
 
-## Project Structure
+## Repository layout
 
-```text
-.
-+-- main.py                 # Game loop and question flow
-+-- define_ai_provider.py   # LLM provider adapter
-+-- consts.py               # Prompts, constants, categories, provider keys
-+-- config.py               # Game and LLM request tuning
-+-- requirements.txt        # Python dependencies
-+-- .env.example            # Example environment configuration
-+-- .gitignore
-```
+~~~text
+ai-quiz-game/
+├── backend/
+│   ├── api.py                    # FastAPI endpoints and temporary sessions
+│   ├── question_schema.py        # Pydantic validation + public response
+│   ├── game_logic.py             # Independent game rules
+│   ├── question_generator.py     # Calls the configured AI provider
+│   ├── define_ai_provider.py     # OpenAI / NVIDIA / Bedrock adapter
+│   ├── main.py                   # Original terminal game
+│   ├── consts.py / config.py
+│   ├── requirements.txt
+│   └── tests/
+├── frontend/                     # Angular application
+├── docs/ROADMAP.md
+├── docs/LOCAL_DEVELOPMENT.md
+└── .env.example
+~~~
 
-## Requirements
+## Start locally using VS Code (Windows PowerShell)
 
-- Python 3.10 or newer
-- An API key or credentials for one supported LLM provider
+Prerequisites: Python 3.10+, Node.js 22.12+ or compatible Angular-supported LTS, npm.
 
-Install dependencies:
+**Terminal 1 — Python backend:**
 
-```bash
-pip install -r requirements.txt
-```
+~~~powershell
+git switch feature/quiz-web-foundation
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item ..\.env.example .env
+~~~
 
-## Configuration
+Edit backend/.env: set LLM_PROVIDER, the selected provider's API key and model ID (for example NVIDIA_API_KEY and NVIDIA_MODEL_ID). Never commit secrets.
 
-Create a local `.env` file from the example.
+~~~powershell
+python -m unittest discover -s tests -v
+python -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
+~~~
 
-### Windows PowerShell
+Test API: http://127.0.0.1:8000/docs and http://127.0.0.1:8000/api/health
 
-```powershell
-Copy-Item .env.example .env
-```
+**Terminal 2 — Angular:**
 
-### macOS / Linux / Git Bash
+~~~powershell
+cd frontend
+npm install
+npm start
+~~~
 
-```bash
-cp .env.example .env
-```
+Open http://127.0.0.1:4200 — Angular requests /api on port 4200 and its proxy forwards to FastAPI at port 8000. You do not need to configure CORS for this local setup.
 
-Then edit `.env` and set the provider you want to use:
+If PowerShell blocks activation scripts, either configure process-local execution policy or run commands using the .venv Python executable directly.
 
-```env
-LLM_PROVIDER=openai
-```
+## Generator prompt versions and A/B test
 
-Supported values:
+The single authoritative 0–15 difficulty scale remains in `backend/consts.py`.
+Both the unchanged legacy prompt (v1) and the revised level-calibrated prompt
+(v2) now live in `backend/agents/generator.py`. The production generator
+(`backend/question_generator.py`) selects one via
+`AI_GENERATOR_PROMPT_VERSION=v1|v2` (defaults to **v1** while v2 is tested).
+The generator's provider, model, reasoning effort, temperature, JSON contract,
+validation, and retry policy are unchanged. Critic v3 remains audit-only.
 
-- `openai`
-- `nvidia`
-- `bedrock`
+From the **project root** in the Python environment (PyCharm terminal or
+PowerShell), compare the two prompts with eight blind question pairs:
 
-Set the required credentials for the selected provider.
+~~~powershell
+python -m unittest discover -s tests -v
+python test_openai_generator_ab.py
+~~~
 
-### OpenAI
+Use `python test_openai_generator_ab.py --all` for ALL **15 main game
+levels 0..14** (15 blind pairs, 30 billable generator API calls), or
+`--pairs 2` for a quick smoke test. Level 15 is the separate bonus round,
+not part of the 15-question main game. To check whether one odd wording
+choice is a sampling accident, independently repeat its level/category with
+`python test_openai_generator_ab.py --level 1 --repeats 3` (3 extra
+blind pairs, 6 calls). Both prompts see the same language, category and
+requested difficulty in each pair; the model may choose different facts
+between pairs. One sample at a given level cannot establish whether a
+wording defect is systematic. `--repeats` can be combined with `--all`,
+but multiplies the API cost. No critic calls or scoring-based rejections
+are used. Results are written to
+`generator_ab_<timestamp>.md` (blind side-by-side questions with answers and
+version labels at the bottom), plus CSV/JSONL. Assess factual correctness,
+distractor strength, fairness and interest manually; valid JSON alone is not a
+quality win.
 
-```env
-OPENAI_API_KEY=your-key-here
-OPENAI_MODEL_ID=your-model-id
-```
+After review, explicitly enable v2 for a local game with
+`AI_GENERATOR_PROMPT_VERSION=v2` in the project's active `.env`, then restart
+the backend. No changes to master are required or implied.
 
-### NVIDIA
+## Fact-quality hardening (24 Oct 2026)
 
-```env
-NVIDIA_API_KEY=your-key-here
-NVIDIA_MODEL_ID=your-model-id
-```
+The reviewer-independent **literal answer-leak gate** is described in
+[Answer validity experiment](docs/ANSWER_VALIDITY_EXPERIMENT.md). It runs
+before the optional critic even when `AI_QUALITY_MODE=off/audit`. Its default
+is `AI_LOCAL_LEAK_MODE=enforce`, which rejects only high-confidence literal
+answer-in-stem shortcuts and uses the existing bounded regeneration budget.
+Set `AI_LOCAL_LEAK_MODE=audit` to observe without blocking if regression
+testing reveals false positives. Critic v3 stays audit-only.
 
-### AWS Bedrock
+The **key-blind four-option factual checker** is currently a separate
+experiment, NOT a live publication rule:
 
-```env
-AWS_ACCESS_KEY_ID=your-key-here
-AWS_SECRET_ACCESS_KEY=your-secret-here
-AWS_REGION=us-east-1
-BEDROCK_MODEL_ID=your-bedrock-model-id
-```
+~~~powershell
+python -m unittest discover -s tests -v
+cd backend
+python -m unittest discover -s tests -v
+cd ..
+python test_openai_answer_check.py --limit 4
+python test_openai_answer_check.py
+~~~
 
-## Game Settings
+Root tests and backend tests are different suites. The live check sends
+14 frozen examples to the configured OpenAI reviewer model (billable).
+The model receives no supplied answer key or human labels. Inspect JSONL
+results for false positives and missed multiple/no-correct-answer cases
+before allowing AI-based rejection. Persistent storage, player reports,
+tags and game telemetry will be implemented with the PostgreSQL phase.
 
-Game and LLM request settings live in `config.py`:
+## PostgreSQL accounts + question history foundation (24 Oct 2026)
 
-```python
-MAX_OUTPUT_TOKENS = 500
-MAX_DIFFICULTY = 15
-TEMPERATURE = 1.0
-```
+The dev branch now contains a versioned PostgreSQL schema
+(`backend/migrations/versions/0001_initial.py`) for username/password
+accounts, server-side sessions, topic/tag clouds, scores, stars, achievements,
+question attempts, timing, quality reviews and player dispute records.
 
-- `MAX_OUTPUT_TOKENS` controls the maximum output size requested from the LLM.
-- `MAX_DIFFICULTY` controls the final difficulty level required to complete the game.
-- `TEMPERATURE` controls response randomness for question generation.
+New endpoints: `POST /api/auth/register`, `POST /api/auth/login`,
+`GET /api/auth/me`, `POST /api/auth/logout` and
+`GET /api/profile/me/stats`. Passwords use Argon2id; opaque
+session tokens are stored as hashes and sent using HttpOnly cookies.
+Google sign-in and a SweetAlert2-based Angular form will come later;
+**SweetAlert2 is UI only**, authentication is on FastAPI.
 
-## Run
+The existing local in-memory `/api/games` flow is **not yet persisted** and
+not protected by account auth. Do not deploy it publicly in this state.
+See **[PostgreSQL + Accounts setup](docs/POSTGRESQL_ACCOUNTS.md)**
+for schema explanation, `.env` settings, PostgreSQL migration and tests.
+Account endpoints require a configured `DATABASE_URL` and migrated database;
+there is no implicit SQLite runtime fallback.
 
-Start the game:
+## Learn how it works
 
-```bash
-python main.py
-```
+- [Local run guide](docs/LOCAL_DEVELOPMENT.md)
+- [How the API and frontend communicate](docs/ARCHITECTURE.md)
+- [Roadmap and requirements](docs/ROADMAP.md)
 
-The game asks for your name and then lets you choose the language for the questions. Each correct answer advances the difficulty level and selects another unused category. One incorrect answer ends the game.
+## Known limits before production
 
-## Example
+This is a *local prototype*, not a deployed public service. In-memory sessions, no login, no database, no spending limits/rate limits, no persistent achievements and no paid hint actions yet. The existing AI provider integration has **not** been verified with a real API key in this iteration. Angular's full dependency installation/build must be verified on a connected development machine.
 
-```text
-Hello, what is your name?
-Alex
-Hi, Alex
-Let's play a game!
-
-Choose language.
-1 English
-2 Russian
-3 Hebrew
-...
-
-Selected language: English
-
-QUESTION 1:
-Which planet is known as the Red Planet?
-====================
-A. Venus
-B. Mars
-C. Jupiter
-D. Mercury
-
-B
-Correct!
-```
-
-## Environment Notes
-
-Do not commit `.env`; it contains secrets and is ignored by `.gitignore`.
-
-Use `.env.example` as the shared template for required configuration.
-
-## Main Files
-
-- `main.py` handles player input, language selection, question creation, category selection, and answer checking.
-- `define_ai_provider.py` provides a common client interface for OpenAI, NVIDIA, and Bedrock.
-- `consts.py` stores the quiz prompt, supported languages, question categories, and shared constants.
-- `config.py` stores adjustable runtime values for output length, maximum difficulty, and temperature.
+Local test suite does not use an AI API key. The user-facing question language selector does not yet translate the interface; interface localization is planned separately.

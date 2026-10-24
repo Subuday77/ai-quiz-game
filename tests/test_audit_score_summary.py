@@ -1,0 +1,95 @@
+"""Offline tests for the post-game v3 audit summarizer."""
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from analyze_quality_audit import read_audits, summarize
+
+
+class AuditSummaryTests(unittest.TestCase):
+    def test_non_audit_log_lines_ignored(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "server.log"
+            path.write_text(
+                "INFO: server started\n"
+                + json.dumps({"event": "quality_review_score", "contract": "v3",
+                              "score": 3, "critical": "none", "penalties": {
+                                  "distractors": 3, "knowledge": 0,
+                                  "suitability": 0, "wording": 0}}) + "\n"
+                + json.dumps({"event": "quality_review_score", "contract": "v2",
+                              "score": 8}) + "\n", encoding="utf-8"
+            )
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            _, critical, totals, thresholds = summarize(audits)
+            self.assertEqual(critical["none"], 1)
+            self.assertEqual(totals["distractors"], 3)
+            self.assertEqual(thresholds, {2: 1, 3: 1, 4: 0, 5: 0})
+
+    def test_multiline_powershell_log_record(self):
+        event = {
+            "timestamp": "2026-10-22T13:13:25.563220+00:00",
+            "event": "quality_review_score",
+            "contract": "v3",
+            "score": 2,
+            "critical": "none",
+            "penalties": {"distractors": 2, "knowledge": 0,
+                          "suitability": 0, "wording": 0},
+        }
+        # A JSON object broken over physical lines, with native stderr
+        # rendering around it, should still parse as one event.
+        long_record = json.dumps(event, ensure_ascii=False).replace(
+            ', "score":', ',\n "score":').replace(
+            ', "penalties":', ',\n "penalties":')
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit_v3.log"
+            path.write_text("python : INFO: started\n" + long_record +
+                            "\nINFO: next event\n", encoding="utf-8")
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(audits[0]["score"], 2)
+
+    def test_powershell_utf16_le_bom(self):
+        event = {
+            "timestamp": "2026-10-22T13:07:42+00:00",
+            "event": "quality_review_score", "contract": "v3",
+            "score": 2, "critical": "none",
+            "penalties": {"distractors": 2, "knowledge": 0,
+                          "suitability": 0, "wording": 0},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit_v3.log"
+            raw = "INFO: started\n" + json.dumps(event) + "\nINFO: done\n"
+            path.write_bytes(raw.encode("utf-16"))
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(audits[0]["score"], 2)
+
+    def test_powershell_utf16_le_without_bom(self):
+        event = {
+            "timestamp": "2026-10-22T13:07:42+00:00",
+            "event": "quality_review_score", "contract": "v3",
+            "score": 1, "critical": "none",
+            "penalties": {"distractors": 1, "knowledge": 0,
+                          "suitability": 0, "wording": 0},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "audit_v3.log"
+            raw = "INFO: started\n" + json.dumps(event) + "\nINFO: done\n"
+            path.write_bytes(raw.encode("utf-16-le"))
+            audits = read_audits(path)
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(audits[0]["score"], 1)
+
+    def test_critical_counts_even_under_threshold(self):
+        audits = [{"score": 0, "critical": "regenerate", "penalties": {
+            "distractors": 0, "knowledge": 0, "suitability": 0, "wording": 0}}]
+        _, _, _, thresholds = summarize(audits)
+        self.assertEqual(thresholds, {2: 1, 3: 1, 4: 1, 5: 1})
+
+
+if __name__ == "__main__":
+    unittest.main()

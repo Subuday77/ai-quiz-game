@@ -1,0 +1,8 @@
+{
+  "name": "quiz_quality_review",
+  "version": "1.2.0",
+  "runtime_role": "critic",
+  "output_contract": "quality_review_v1",
+  "model_config_env": "AI_QUALITY_MODEL_ID",
+  "note": "v1.2 adds only an editorial critic role prefix; rubric and examples remain evaluation assets and output contract unchanged."
+}

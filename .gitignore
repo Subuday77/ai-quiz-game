@@ -1,2 +1,18 @@
-
 .env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+node_modules/
+frontend/dist/
+dist/
+.angular/
+coverage/
+*.log
+.idea
+
+# Local generated calibration reports (may contain candidate questions/answers)
+answer_check_*.jsonl
+answer_check_*.csv

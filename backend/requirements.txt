@@ -1,0 +1,12 @@
+python-dotenv
+openai
+boto3
+colorama
+fastapi>=0.115,<1
+pydantic>=2,<3
+uvicorn[standard]>=0.30,<1
+httpx>=0.27,<1
+SQLAlchemy>=2.0,<3
+alembic>=1.14,<2
+psycopg[binary]>=3.2,<4
+argon2-cffi>=23.1,<26
