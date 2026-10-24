@@ -8,7 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from quality_schema_v3 import QualityReviewV3, audit_score
 from test_openai_critic_v3_calibration import (CASES, REAL_GAME_CASES,
-                                               candidate_payload, question_from_case)
+                                               REAL_GAME_BASELINE, candidate_payload,
+                                               question_from_case)
 
 
 class V3EditorialCalibrationTests(unittest.TestCase):
@@ -64,6 +65,13 @@ class V3EditorialCalibrationTests(unittest.TestCase):
                 question = question_from_case(case)
                 self.assertEqual(len(question.answers), 4)
                 self.assertIn(case["key"], "ABCD")
+
+    def test_real_game_baseline_only_used_for_local_comparison(self):
+        self.assertEqual(set(REAL_GAME_BASELINE),
+                         {case["id"] for case in REAL_GAME_CASES})
+        self.assertEqual(REAL_GAME_BASELINE["game_02_hola"], (0, "regenerate"))
+        self.assertEqual(REAL_GAME_BASELINE["game_07_xfiles"], (1, "regenerate"))
+        self.assertEqual(REAL_GAME_BASELINE["game_05_gutenberg"], (2, "none"))
 
     def test_expected_labels_are_never_sent_to_reviewer(self):
         for case in CASES + REAL_GAME_CASES:
