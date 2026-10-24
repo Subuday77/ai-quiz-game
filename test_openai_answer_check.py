@@ -26,7 +26,7 @@ load_dotenv(ROOT / ".env")
 
 from independent_answer_check import (
     PROMPT, SCHEMA_NAME, IndependentAnswerReview, answer_review_schema,
-    blind_payload, summarize_answer_review,
+    blind_payload, summarize_answer_review, publication_preview,
 )
 from local_leak_filter import exact_answer_leak
 from question_schema import QuizQuestion
@@ -98,6 +98,25 @@ CASES = (
 )
 
 
+# Provisional editorial release decisions, separate from outcome labels.
+# A wrong generator key and a literal stem giveaway are unsafe EVEN WHEN
+# the four-answer question has exactly one factually correct option.
+KNOWN_BLOCK_CASES = frozenset({
+    "saturn_wrong_key", "enclave_three_correct", "mrs_dalloway_direct_leak",
+    "hanno_periplus", "ebla_direct_leak", "empty_answer_set",
+    "incorrect_nickname_premise",
+})
+UNADJUDICATED_CASES = frozenset({"mussorgsky_versions"})
+
+
+def expected_publication(case_id: str) -> str:
+    if case_id in UNADJUDICATED_CASES:
+        return "review"
+    if case_id in KNOWN_BLOCK_CASES:
+        return "block"
+    return "allow"
+
+
 def payload_for_case(case: dict) -> tuple[QuizQuestion, str]:
     question = QuizQuestion.model_validate({
         "difficulty": case["level"], "question": case["stem"],
@@ -125,6 +144,10 @@ def run_case(client: OpenAI, case: dict) -> dict:
     review = IndependentAnswerReview.model_validate_json(response.output_text)
     summary = summarize_answer_review(review)
     predicted = "".join(summary["supported_choices"])
+    local_leak = exact_answer_leak(q)
+    preview = publication_preview(review, q.correct_answer, local_leak)
+    release = "block" if preview["would_block"] else "allow"
+    expected_release = expected_publication(case["id"])
     return {
         "case": case["id"], "level": case["level"],
         "expected": case["expected"], "observed": summary["outcome"],
@@ -132,7 +155,10 @@ def run_case(client: OpenAI, case: dict) -> dict:
         "expected_choices": case["accepted"], "observed_choices": predicted,
         "choices_match": predicted == case["accepted"] if case["accepted"] else None,
         "generator_key": q.correct_answer, "key_supported": q.correct_answer in predicted,
-        "local_leak": exact_answer_leak(q),
+        "local_leak": local_leak,
+        "release_preview": release, "release_reasons": preview["reasons"],
+        "expected_release": expected_release,
+        "release_match": (release == expected_release if expected_release != "review" else None),
         "per_option": {k: v.model_dump(mode="json") for k, v in review.options.items()},
         "premise": review.premise.value, "rationale": review.rationale,
         "duration_seconds": round(time.perf_counter() - start, 3),
@@ -165,7 +191,8 @@ def main():
         print(f"[{i}/{args.limit}] {case['id']} | expected={case['expected']} "
               f"| observed={row.get('observed', 'ERROR')} "
               f"| key={row.get('generator_key', '?')} "
-              f"| choices={row.get('observed_choices', '?')}")
+              f"| choices={row.get('observed_choices', '?')} "
+              f"| PREVIEW={row.get('release_preview', 'error')}")
         if "error" in row:
             print(f"    ERROR {row['error']}")
     with prefix.with_suffix(".jsonl").open("w", encoding="utf-8") as out:
@@ -174,6 +201,7 @@ def main():
     fields = ["case", "level", "expected", "observed", "status_match",
               "expected_choices", "observed_choices", "choices_match",
               "generator_key", "key_supported", "local_leak", "premise",
+              "release_preview", "release_reasons", "expected_release", "release_match",
               "rationale", "per_option", "duration_seconds", "input_tokens",
               "output_tokens", "error"]
     with prefix.with_suffix(".csv").open("w", newline="", encoding="utf-8-sig") as out:
@@ -186,8 +214,25 @@ def main():
           f"{sum(r['status_match'] for r in scored)}/{len(scored)}")
     good = [r for r in scored if r["expected"] == "single_correct"]
     flawed = [r for r in scored if r["expected"] != "single_correct"]
-    print(f"SAFE SINGLE-ANSWER ACCURACY: {sum(r['status_match'] for r in good)}/{len(good)}")
-    print(f"INVALID-ANSWER DETECTION: {sum(r['observed'] != 'single_correct' for r in flawed)}/{len(flawed)}")
+    print(f"SINGLE-CORRECT CLASS MATCH: {sum(r['status_match'] for r in good)}/{len(good)}"
+          " (NOT a publication-safety score; may contain wrong keys/leaks)")
+    print(f"NONSINGLE CLASS DETECTED: {sum(r['observed'] != 'single_correct' for r in flawed)}/{len(flawed)}")
+    release_scored = [r for r in valid if r["expected_release"] != "review"]
+    good_release = [r for r in release_scored if r["expected_release"] == "allow"]
+    defective = [r for r in release_scored if r["expected_release"] == "block"]
+    print(f"HYPOTHETICAL SAFE QUESTIONS ACCEPTED: "
+          f"{sum(r['release_preview'] == 'allow' for r in good_release)}/{len(good_release)}")
+    print(f"HYPOTHETICAL KNOWN DEFECTS BLOCKED: "
+          f"{sum(r['release_preview'] == 'block' for r in defective)}/{len(defective)}")
+    for row in valid:
+        if row["expected_release"] == "block" and row["release_preview"] != "block":
+            print(f"MISSED KNOWN DEFECT: {row['case']}")
+        if row["expected_release"] == "allow" and row["release_preview"] != "allow":
+            print(f"FALSE REJECTION: {row['case']}")
+        if row["expected_release"] == "review":
+            print(f"UNADJUDICATED: {row['case']} | preview={row['release_preview']}")
+    print("Preview combines the local literal gate, independent answer validity, "
+          "and generator-key agreement. NOT enabled for actual games.")
     print(f"JSONL: {prefix.with_suffix('.jsonl')}")
     print(f"CSV: {prefix.with_suffix('.csv')}")
     print("Experiment ONLY; no question is blocked by the independent verifier.")
