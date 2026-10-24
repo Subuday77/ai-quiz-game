@@ -53,6 +53,14 @@ correct options, no correct option, direct textual leaks, and high-level
 historical or cultural ambiguities. The borderline *Хованщина* case is
 labeled `uncertain` and excluded from known-class accuracy metrics until
 sourced adjudication; obscure examples are not eligible for training as-is.
+The reporter computes a **hypothetical publication decision** separately from
+the model's raw answer-count classification. The preview would block if:
+the local literal gate finds a leak, the checker says anything other than
+`single_correct` (including `uncertain`), or the uniquely supported answer
+does not match the generator-supplied key. This preview is **not wired into
+the live API**. The deliberately wrong-key Saturn example MUST count as a
+rejected candidate even though the factual question has one correct answer.
+
 The reporter prints missed defects and false rejections, and writes JSONL/CSV
 to the project root. No test annotations are sent to the model.
 
@@ -72,6 +80,29 @@ automatic retries. Logs/outputs are not persisted to the application's
 database. Share the JSONL to evaluate **missed severe defects** and
 **false rejection of sound questions** before any runtime integration.
 The model cannot consult external sources through this experiment.
+
+### First live result (24 Oct 2026)
+
+The original 14-case run completed without model errors. With combined
+local-literal + independent-option + key-agreement *offline preview*:
+
+- 6/6 uncontested good fixtures would have been accepted.
+- 6/7 known-defective fixtures would have been rejected.
+- **Miss:** invented historical nickname `Длиннорукий` was rationalized as
+  equivalent to the attested `Долгорукий`; the model accepted the false
+  premise. This remains a priority regression and a case for sourced checking.
+- **Under review:** `Хованщина` was accepted as uniquely Rimsky-Korsakov,
+  despite performances using both Rimsky-Korsakov and Shostakovich versions
+  during the 20th century. Conservatively excluded from the known-class
+  ratio pending editorial adjudication. It would pass the preview.
+- 9/9 `single_correct` class matches is **not** a publication-safety metric,
+  because a single correct option can still conflict with the supplied
+  answer key or be spelled out verbatim in the stem.
+
+These are tiny, curated fixtures, **not** evidence of generalization or
+an acceptable production false-negative rate. Continue in offline/audit
+experiments; do NOT enable model-driven rejection yet. No need to rerun
+the paid benchmark just to update score math.
 
 ## 3. Follow-up — persistent quality data and player reports
 
