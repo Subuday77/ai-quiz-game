@@ -87,11 +87,18 @@ python -m unittest discover -s tests -v
 python test_openai_generator_ab.py
 ~~~
 
-Use `python test_openai_generator_ab.py --all` for 12 pairs through difficulty
-15, or `--pairs 2` for a quick inexpensive smoke test. Each pair makes **two
-billable AI calls** using identical language, category, requested difficulty and
-model settings. The compared facts may differ due to sampling. No critic calls
-or scoring-based rejections are used. Results are written to
+Use `python test_openai_generator_ab.py --all` for ALL **15 main game
+levels 0..14** (15 blind pairs, 30 billable generator API calls), or
+`--pairs 2` for a quick smoke test. Level 15 is the separate bonus round,
+not part of the 15-question main game. To check whether one odd wording
+choice is a sampling accident, independently repeat its level/category with
+`python test_openai_generator_ab.py --level 1 --repeats 3` (3 extra
+blind pairs, 6 calls). Both prompts see the same language, category and
+requested difficulty in each pair; the model may choose different facts
+between pairs. One sample at a given level cannot establish whether a
+wording defect is systematic. `--repeats` can be combined with `--all`,
+but multiplies the API cost. No critic calls or scoring-based rejections
+are used. Results are written to
 `generator_ab_<timestamp>.md` (blind side-by-side questions with answers and
 version labels at the bottom), plus CSV/JSONL. Assess factual correctness,
 distractor strength, fairness and interest manually; valid JSON alone is not a
