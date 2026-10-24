@@ -119,7 +119,9 @@ class NativeRequestTests(unittest.TestCase):
             os.environ.pop(key, None)
         self.enterContext(patch.dict("os.environ", {
             "AI_STRUCTURED_OUTPUT_MODE": "off", "NVIDIA_STRUCTURED_OUTPUT_FORMAT": "guided_json",
-            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_QUALITY_MODE": "off", "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12", "AI_QUALITY_MODE": "off",
+            "AI_QUALITY_CONTRACT": "v1", "AI_LOCAL_LEAK_MODE": "audit",
+            "AI_GENERATION_MAX_ATTEMPTS": "3",
             "AI_GENERATION_BUDGET_SECONDS": "30", "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
             "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
             "OPENAI_API_KEY": SECRET, "OPENAI_MODEL_ID": MODEL,
