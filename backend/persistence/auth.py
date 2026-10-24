@@ -79,8 +79,15 @@ def validate_origin(request: Request):
     origin = request.headers.get("origin")
     if origin:
         from urllib.parse import urlsplit
-        host = urlsplit(origin).netloc.casefold()
-        if not host or host != request.headers.get("host", "").casefold():
+        parsed = urlsplit(origin)
+        expected = urlsplit(str(request.base_url))
+        # Angular dev proxy uses changeOrigin=true, so its browser Origin
+        # differs from the forwarded Host. Explicitly allow trusted frontends.
+        extra = {item.strip().rstrip("/") for item in
+                 os.environ.get("AUTH_ALLOWED_ORIGINS", "").split(",") if item.strip()}
+        allowed = {f"{expected.scheme}://{expected.netloc}", *extra}
+        if parsed.scheme not in {"http", "https"} or (
+                f"{parsed.scheme}://{parsed.netloc}" not in allowed):
             raise HTTPException(status_code=403, detail="Origin mismatch")
 
 
