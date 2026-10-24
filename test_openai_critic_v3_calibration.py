@@ -3,6 +3,7 @@
 From project root after git pull:
     python test_openai_critic_v3_calibration.py
     python test_openai_critic_v3_calibration.py --real-game
+    python test_openai_critic_v3_calibration.py --two-stage
 
 Sends only the question and requested difficulty to the model.
 Human expectations are held out locally for evaluation, not injected into
@@ -27,6 +28,8 @@ load_dotenv(ROOT / ".env")
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from question_schema import QuizQuestion
 from quality_schema_v3 import QualityReviewV3, audit_score, quality_review_v3_schema
+from agents.critic_two_stage import TWO_STAGE_PROMPT
+from quality_two_stage import TwoStageReview, score_two_stage, two_stage_schema
 
 MODEL = "gpt-5.4-mini"
 REASONING_EFFORT = "low"
@@ -158,23 +161,29 @@ def candidate_payload(question):
             "language": "Russian", "candidate": question.model_dump()}
 
 
-def run_case(client, case):
+def run_case(client, case, *, two_stage=False):
     question = question_from_case(case)
     started = time.perf_counter()
     response = client.responses.create(
         model=MODEL,
-        instructions=QUALITY_REVIEW_V3_PROMPT,
+        instructions=TWO_STAGE_PROMPT if two_stage else QUALITY_REVIEW_V3_PROMPT,
         input=json.dumps(candidate_payload(question), ensure_ascii=False),
         reasoning={"effort": REASONING_EFFORT},
         temperature=TEMPERATURE,
         max_output_tokens=MAX_OUTPUT_TOKENS,
-        text={"format": {"type": "json_schema", "name": "quality_review_v3",
-                          "strict": True, "schema": quality_review_v3_schema()}},
+        text={"format": {"type": "json_schema",
+                          "name": "quality_review_two_stage" if two_stage else "quality_review_v3",
+                          "strict": True,
+                          "schema": two_stage_schema() if two_stage else quality_review_v3_schema()}},
     )
     if response.status != "completed" or not response.output_text:
         raise RuntimeError(f"Reviewer response incomplete: {response.status}")
-    report = QualityReviewV3.model_validate_json(response.output_text)
-    score = audit_score(report, question.correct_answer)
+    if two_stage:
+        report = TwoStageReview.model_validate_json(response.output_text)
+        score = score_two_stage(report, question.difficulty, question.correct_answer)
+    else:
+        report = QualityReviewV3.model_validate_json(response.output_text)
+        score = audit_score(report, question.correct_answer)
     usage = response.usage
     return {
         "case": case["id"], "difficulty": case["difficulty"],
@@ -182,8 +191,10 @@ def run_case(client, case):
         "leak_match": report.leakage.value == case["leak"],
         "distractor_expected_min": case["min_d"],
         "distractor_expected_max": case["max_d"],
-        "distractor_observed": report.distractor_penalty,
-        "distractor_band_match": case["min_d"] <= report.distractor_penalty <= case["max_d"],
+        "distractor_observed": score["penalties"]["distractors"],
+        "distractor_band_match": case["min_d"] <= score["penalties"]["distractors"] <= case["max_d"],
+        "option_evidence": [x.model_dump() for x in report.wrong_options] if two_stage else None,
+        "iconic_association": report.iconic_key_association if two_stage else None,
         "penalties": score["penalties"], "score": score["total"],
         "critical": score["critical"], "difficulty_rating": report.difficulty.value,
         "issue_codes": [x.value for x in report.issue_codes],
@@ -195,7 +206,8 @@ def run_case(client, case):
 
 def main():
     real_game = "--real-game" in sys.argv[1:]
-    unknown = set(sys.argv[1:]) - {"--real-game"}
+    two_stage = "--two-stage" in sys.argv[1:]
+    unknown = set(sys.argv[1:]) - {"--real-game", "--two-stage"}
     if unknown:
         raise SystemExit(f"Unknown arguments: {sorted(unknown)}")
     cases = REAL_GAME_CASES if real_game else CASES
@@ -204,15 +216,16 @@ def main():
         raise SystemExit("OPENAI_API_KEY not set in the environment or project .env")
     client = OpenAI(api_key=key, timeout=TIMEOUT, max_retries=0)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = "critic_v3_real_game" if real_game else "critic_v3_calibration"
+    prefix = ("critic_two_stage_real_game" if real_game else "critic_two_stage_calibration") if two_stage else (
+        "critic_v3_real_game" if real_game else "critic_v3_calibration")
     jsonl_path = ROOT / f"{prefix}_{stamp}.jsonl"
     csv_path = ROOT / f"{prefix}_{stamp}.csv"
     rows = []
-    print(f"CRITIC v3 CALIBRATION | model {MODEL} | {len(cases)} cases")
+    print(f"CRITIC {'TWO-STAGE' if two_stage else 'v3'} CALIBRATION | model {MODEL} | {len(cases)} cases")
     print("=" * 72)
     for i, case in enumerate(cases, 1):
         try:
-            row = run_case(client, case)
+            row = run_case(client, case, two_stage=two_stage)
         except Exception as exc:
             row = {"case": case["id"], "error": f"{type(exc).__name__}: {str(exc)[:250]}",
                    "leak_match": False, "distractor_band_match": False}
@@ -244,7 +257,8 @@ def main():
               "distractor_band_match", "score", "critical", "difficulty_rating",
               "penalties", "issue_codes", "rationale", "elapsed_seconds",
               "input_tokens", "output_tokens", "error", "baseline_score",
-              "baseline_critical", "score_change", "critical_changed"]
+              "baseline_critical", "score_change", "critical_changed",
+              "option_evidence", "iconic_association"]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -266,11 +280,20 @@ def main():
             ("saturn_famous_medium", "saturn_easy", ">"),
             ("gutenberg_high", "gutenberg_medium", ">="),
         ]
+        pair_matches = 0
         for hard, easy, op in pairs:
             matched = (by_id[hard] > by_id[easy] if op == ">" else
                        by_id[hard] >= by_id[easy])
+            pair_matches += matched
             print(f"CONTRAST {hard} {op} {easy}: {matched} "
                   f"({by_id[hard]} vs {by_id[easy]})")
+        if two_stage:
+            leak_matches = sum(r["leak_match"] for r in ok)
+            bands = sum(r["distractor_band_match"] for r in ok)
+            print(f"NO-REGRESSION CHECK (v3 baseline: 12/12 leakage, 9/12 bands, "
+                  f"2/3 pairs): {leak_matches == 12 and bands >= 9 and pair_matches == 3}")
+            if leak_matches != 12 or bands < 9 or pair_matches < 3:
+                print("Experimental mechanism NOT validated; keep existing v3.")
     print(f"JSONL: {jsonl_path}\nCSV: {csv_path}")
 
 
