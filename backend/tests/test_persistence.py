@@ -197,6 +197,25 @@ class AccountAPITests(unittest.TestCase):
         with Session(self.eng) as db:
             self.assertEqual(db.scalar(select(func.count(User.id))), 0)
 
+    def test_angular_proxy_origin_can_be_allowlisted(self):
+        with patch.dict(os.environ, {
+            "AUTH_ALLOWED_ORIGINS": "http://localhost:4200,http://127.0.0.1:4200"
+        }):
+            response = self.client.post("/api/auth/register", json=self.creds,
+                                        headers={"Origin": "http://localhost:4200",
+                                                 "Host": "127.0.0.1:8000"})
+        self.assertEqual(response.status_code, 201, response.text)
+
+    def test_statistics_require_login_and_derive_empty_profile(self):
+        self.assertEqual(self.client.get("/api/profile/me/stats").status_code, 401)
+        self.assertEqual(self.register().status_code, 201)
+        data = self.client.get("/api/profile/me/stats").json()
+        self.assertEqual(data["games_played"], 0)
+        self.assertEqual(data["total_score"], 0)
+        self.assertEqual(data["star_awards"], {})
+        self.assertEqual(data["wallet_balance"], 0)
+        self.assertEqual(data["topics"], [])
+
     def test_input_validation(self):
         self.assertEqual(self.client.post("/api/auth/register", json={
             "username": "a$", "password": "short"
