@@ -108,6 +108,35 @@ After review, explicitly enable v2 for a local game with
 `AI_GENERATOR_PROMPT_VERSION=v2` in the project's active `.env`, then restart
 the backend. No changes to master are required or implied.
 
+## Fact-quality hardening (24 Oct 2026)
+
+The reviewer-independent **literal answer-leak gate** is described in
+[Answer validity experiment](docs/ANSWER_VALIDITY_EXPERIMENT.md). It runs
+before the optional critic even when `AI_QUALITY_MODE=off/audit`. Its default
+is `AI_LOCAL_LEAK_MODE=enforce`, which rejects only high-confidence literal
+answer-in-stem shortcuts and uses the existing bounded regeneration budget.
+Set `AI_LOCAL_LEAK_MODE=audit` to observe without blocking if regression
+testing reveals false positives. Critic v3 stays audit-only.
+
+The **key-blind four-option factual checker** is currently a separate
+experiment, NOT a live publication rule:
+
+~~~powershell
+python -m unittest discover -s tests -v
+cd backend
+python -m unittest discover -s tests -v
+cd ..
+python test_openai_answer_check.py --limit 4
+python test_openai_answer_check.py
+~~~
+
+Root tests and backend tests are different suites. The live check sends
+14 frozen examples to the configured OpenAI reviewer model (billable).
+The model receives no supplied answer key or human labels. Inspect JSONL
+results for false positives and missed multiple/no-correct-answer cases
+before allowing AI-based rejection. Persistent storage, player reports,
+tags and game telemetry will be implemented with the PostgreSQL phase.
+
 ## Learn how it works
 
 - [Local run guide](docs/LOCAL_DEVELOPMENT.md)
