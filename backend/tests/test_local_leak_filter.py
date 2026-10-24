@@ -8,6 +8,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 BACKEND = Path(__file__).resolve().parents[1]
+ROOT = BACKEND.parent
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(BACKEND))
 
 from api import app, sessions
