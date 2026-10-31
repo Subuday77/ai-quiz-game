@@ -44,6 +44,9 @@ export class LocalizationStore {
   messageIndex = 0;
   private messageCycle: Subscription | null = null;
   private dictionary: Record<string, string> = {};
+  // Per-app-session RAM cache. Only complete, validated server dictionaries
+  // enter it. A new browser page creates a new store and revalidates via API.
+  private readonly ready = new Map<string, Record<string, string>>();
   private requestVersion = 0;
   private active: Subscription | null = null;
   private readonly maxFallbackPolls = 12;
@@ -68,10 +71,31 @@ export class LocalizationStore {
     this.messageCycle = null;
   }
 
+  /** Evict a cached language after a successful server-side translation reset.
+   * 'all' clears the session cache; the canonical English source remains in
+   * PostgreSQL/API and can be fetched again if needed.
+   */
+  invalidate(code: string | 'all'): void {
+    if (code === 'all') this.ready.clear();
+    else this.ready.delete(code);
+  }
+
   load(code: string, onSettled?: (successful: boolean) => void, force = false): void {
     if (!isSupported(code)) code = 'en';
-    if (this.code === code && Object.keys(this.dictionary).length > 0 &&
-        !this.loading && !force) {
+    // A reset or explicit refresh must never re-use a pre-reset dictionary.
+    if (force) this.ready.delete(code);
+    const cached = force ? undefined : this.ready.get(code);
+    if (cached) {
+      // A cache hit is a synchronous, atomic switch: no HTTP request, no
+      // overlay, and no flash of another language or text direction.
+      ++this.requestVersion;
+      this.active?.unsubscribe();
+      this.stopMessageCycle();
+      this.dictionary = cached;
+      this.code = code;
+      this.requestedCode = code;
+      this.loading = false;
+      this.fallback = false;
       onSettled?.(true);
       return;
     }
@@ -118,8 +142,11 @@ export class LocalizationStore {
             return;
           }
 
-          // Commit new language + content together in one Angular turn.
-          this.dictionary = { ...result.dictionary };
+          // Only complete server dictionaries enter the RAM cache.
+          // Commit language and strings atomically in the same Angular turn.
+          const completed = { ...result.dictionary };
+          this.ready.set(code, completed);
+          this.dictionary = completed;
           this.code = code;
           this.requestedCode = code;
           this.fallback = false;
@@ -147,6 +174,7 @@ export class LocalizationStore {
   destroy(): void {
     this.stopMessageCycle();
     this.active?.unsubscribe();
+    this.ready.clear();
     this.requestVersion++;
   }
 }
