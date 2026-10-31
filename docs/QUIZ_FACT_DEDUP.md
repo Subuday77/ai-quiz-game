@@ -185,9 +185,9 @@ key. Their score breakdown is still logged for debugging.
 
 With AI_QUALITY_MODE=audit (as observed in the user's live trace), editorial
 penalties and even editor-reported difficulty remain diagnostic; they do not
-automatically reject an otherwise valid tagged question. With enforce, critical
-editorial findings reject, but numeric score thresholds remain previews only.
-Turning score thresholds into policy should be a separately calibrated change.
+automatically reject an otherwise valid tagged question. With enforce, critical editorial findings reject; in tagged v4
+a weighted editorial score of at least 3.25 now also triggers regeneration.
+For non-tagged v3 the numeric thresholds are still diagnostic only.
 
 Developer SQL:
 
@@ -203,6 +203,37 @@ Developer SQL:
     WHERE q.prompt_version = 'tagged-v2'
     ORDER BY q.created_at DESC
     LIMIT 50;
+
+## Weighted difficulty in tagged reviewer (v4)
+
+The tagged v4 reviewer keeps the strict existing critic JSON schema unchanged:
+`knowledge_penalty` stays an integer 0..2, and `difficulty` stays an enum.
+Only the **server-side TAGGED score** changes; legacy/v3 audit scoring is
+untouched.
+
+Difficulty is subjective, so its contribution is deliberately tiny:
+- No difficulty mismatch and raw knowledge penalty 0: **0**.
+- `too_easy`, `too_hard`, `difficulty_mismatch`, or raw knowledge penalty 1:
+  **0.25**.
+- Raw knowledge penalty 2: **0.5** maximum.
+
+This replaces, rather than adds to, the old 0..2-point knowledge contribution.
+The other categories retain their scoring: distractors 0..3, suitability
+0..2, wording 0..1. `assessment.penalties.knowledge` reports the weighted
+quarter-point value, `assessment.raw_penalties.knowledge` the model's
+original 0..2 answer. Scores are computed in Python, not by the LLM.
+
+An editorial score of **3.25 or more** is sufficient to regenerate a
+tagged question **only when `AI_QUALITY_MODE=enforce`**. For example, 3
+other penalty points + 0.25 difficulty = 3.25, whereas 3 other points by
+themselves are still accepted unless a separate critical fault applies.
+Difficulty alone cannot exceed 0.5 and can NEVER cause rejection.
+
+With `AI_QUALITY_MODE=audit`, scoring remains purely diagnostic,
+including the threshold preview. Tagged fact/tag correctness and semantic
+duplicate checks still reject in all modes. Critical factual failures in
+`enforce` still reject independently of numerical penalties. No
+database migration or AI JSON schema change is required.
 
 ## DEBUG: all generated candidate traces
 
