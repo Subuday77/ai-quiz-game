@@ -7,7 +7,7 @@ from typing import Any
 from config import MAX_DIFFICULTY, MAX_OUTPUT_TOKENS, TEMPERATURE
 from consts import client
 from agents.generator import GENERATOR_PROMPT_V1, GENERATOR_PROMPT_V2
-from diagnostics import timed_stage
+from diagnostics import debug_event, timed_stage
 from provider_result import completed_text
 
 
@@ -81,7 +81,14 @@ def create_question(complexity: int, language: str, category: str,
     response = provider_client.responses.create(**request)
     text = completed_text(response)
     with timed_stage("question_json_parse"):
-        return json.loads(normalize_output(text))
+        try:
+            return json.loads(normalize_output(text))
+        except json.JSONDecodeError:
+            # A malformed completion never reaches Pydantic. Log only a
+            # bounded excerpt, and ONLY when AI_GENERATION_DEBUG=true.
+            debug_event("question_candidate_invalid_json",
+                        response_excerpt=text[:3000], response_length=len(text))
+            raise
 
 
 def normalize_output(text: str) -> str:
