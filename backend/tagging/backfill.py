@@ -15,14 +15,14 @@ from dotenv import load_dotenv
 # Provider selection is resolved at import time: load the project .env FIRST.
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.orm import Session
 
 from config import MAX_OUTPUT_TOKENS
 from define_ai_provider import LLMClient
 from output_contracts import OutputContract
 from persistence.database import engine
-from persistence.models import Question, QuestionFact
+from persistence.models import Question, QuestionFact, QuestionTag, Tag
 from provider_result import completed_text
 from quality_configuration import ReviewerSettings
 from question_generator import normalize_output
@@ -102,10 +102,21 @@ def main() -> None:
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     with Session(engine(), autoflush=False, expire_on_commit=False) as db:
+        has_entity = (
+            select(QuestionTag.question_id).join(Tag, Tag.id == QuestionTag.tag_id)
+            .where(QuestionTag.question_id == Question.id, Tag.kind == "entity")
+            .exists()
+        )
+        has_concept = (
+            select(QuestionTag.question_id).join(Tag, Tag.id == QuestionTag.tag_id)
+            .where(QuestionTag.question_id == Question.id, Tag.kind == "concept")
+            .exists()
+        )
         missing = (
             select(Question)
             .outerjoin(QuestionFact, QuestionFact.question_id == Question.id)
-            .where(QuestionFact.question_id.is_(None))
+            .where(or_(QuestionFact.question_id.is_(None),
+                       ~has_entity, ~has_concept))
             .order_by(Question.created_at, Question.id)
         )
         remaining = db.scalar(select(func.count()).select_from(missing.subquery())) or 0
@@ -132,9 +143,8 @@ def main() -> None:
                 continue
             try:
                 # Resumable: another worker might have tagged this question already.
-                if db.get(QuestionFact, question.id) is None:
-                    save_metadata(db, question, tagged, origin="backfill")
-                    db.commit()
+                save_metadata(db, question, tagged, origin="backfill")
+                db.commit()
                 completed += 1
             except Exception as exc:
                 db.rollback()
