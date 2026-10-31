@@ -11,7 +11,7 @@ SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 def canonical(value: str) -> str:
     """Validate stable English ASCII slug; do not silently transliterate facts."""
-    if not isinstance(value, str) or len(value) > 160 or not SLUG_PATTERN.fullmatch(value):
+    if not isinstance(value, str) or len(value) > 140 or not SLUG_PATTERN.fullmatch(value):
         raise ValueError("Canonical tags/facts must use lowercase English kebab-case")
     return value
 
