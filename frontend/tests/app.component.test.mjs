@@ -33,13 +33,13 @@ const question = {
 };
 
 function setup({ warning = 8000, timeout = 45000, settingsError = false,
-                 signedIn = true, starAwards = {} } = {}) {
+                 signedIn = true, starAwards = {}, answered = 0, correct = 0 } = {}) {
   const requests = [];
   const posts = [];
   const profile = {
     games_played: 1, total_score: 0, best_round_score: 0,
     wallet_balance: 0, star_awards: { ...starAwards }, achievements: [],
-    answered_questions: 0, correct_answers: 0,
+    answered_questions: answered, correct_answers: correct,
   };
   const http = {
     get(url) {
@@ -82,6 +82,18 @@ test('checks session and loads all-time stars from PostgreSQL stats API', () => 
   assert.deepEqual(app.totalStars, { bronze: 4, silver: 0, gold: 2, platinum: 0 });
   assert.equal(app.authLoading, false);
   assert.equal(app.gamesPlayed, 1);
+});
+
+test('lifetime count includes only correct answers, not incorrect attempts', () => {
+  const { app } = setup({ answered: 13, correct: 11 });
+  assert.equal(app.correctAnswers, 11);
+  assert.equal(app.gamesPlayed, 1);
+  assert.equal(app.answeredQuestions, undefined);
+});
+
+test('password length hint is only used when registering', () => {
+  assert.match(source, /isRegister \? ' placeholder="At least 8 characters"' : ''/);
+  assert.doesNotMatch(source, /maxlength="256" placeholder="At least 8 characters"/);
 });
 
 test('guest cannot create an unprotected v2 game', () => {
