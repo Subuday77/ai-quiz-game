@@ -38,6 +38,7 @@ export class LocalizationStore {
   loading = true;
   fallback = false;
   private dictionary: Record<string, string> = {};
+  private english: Record<string, string> = {};
   private requestVersion = 0;
   private active: Subscription | null = null;
 
@@ -50,6 +51,8 @@ export class LocalizationStore {
   load(code: string): void {
     if (!isSupported(code)) code = 'en';
     this.code = code;
+    // Do not display the previous language while switching or after failure.
+    this.dictionary = { ...this.english };
     this.loading = true;
     this.fallback = false;
     const version = ++this.requestVersion;
@@ -60,12 +63,14 @@ export class LocalizationStore {
       next: (result) => {
         if (version !== this.requestVersion || result.language_code !== code) return;
         this.dictionary = result.dictionary;
+        if (code === 'en') this.english = { ...result.dictionary };
         this.fallback = result.fallback;
         this.loading = false;
       },
       error: () => {
         if (version !== this.requestVersion) return;
-        // Keep last known strings when the API is down.
+        // Fall back to the known English master; never show another language.
+        this.dictionary = { ...this.english };
         this.loading = false;
         this.fallback = true;
       },
