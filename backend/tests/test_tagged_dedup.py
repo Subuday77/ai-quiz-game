@@ -240,3 +240,61 @@ class TaggedCriticTests(unittest.TestCase):
         with self.assertRaises(QualityRegenerationError):
             self.check({**self.verdict, "semantic_duplicate": True,
                         "duplicate_match": "prior-id"}, QualityMode.AUDIT)
+
+
+class TaggedGenerationPolicyTests(unittest.TestCase):
+    """Python rejection wins even if a mocked reviewer would approve."""
+
+    def setUp(self):
+        from test_tagged_dedup import candidate as make_candidate
+        self.duplicate = make_candidate()
+        self.new_fact = make_candidate(relation="nobel-prize-reason",
+                                       concept="scientific-awards",
+                                       answer="photoelectric-effect")
+        self.history = [HistoryItem(
+            question_id="old", category_slug=category_slug("History"),
+            question_text=self.duplicate.question, fact_key=self.duplicate.fact.key,
+            subject=self.duplicate.fact.subject, relation=self.duplicate.fact.relation,
+            object=self.duplicate.fact.object,
+            tags={"entity": tuple(self.duplicate.tags.entity),
+                  "concept": tuple(self.duplicate.tags.concept),
+                  "keyword": tuple(self.duplicate.tags.keyword)},
+        )]
+        self.enterContext(patch.dict(os.environ, {
+            "AI_QUALITY_MODE": "off", "AI_LOCAL_LEAK_MODE": "off",
+            "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12",
+            "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
+            "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
+        }))
+        self.generate = self.enterContext(patch("api.create_question"))
+        self.review = self.enterContext(patch("tagging.review.check_tagged_quality"))
+        self.enterContext(patch("api.sleep"))
+
+    def test_python_rejection_precedes_critic_and_next_retry_has_exclusion(self):
+        from api import generate_valid_question
+        self.generate.side_effect = [
+            self.duplicate.model_dump(),
+            self.new_fact.model_dump(),
+        ]
+        accepted = generate_valid_question(
+            0, "English", "History", tag_history=self.history, tag_context=[],
+        )
+        self.assertEqual(accepted.fact.key, self.new_fact.fact.key)
+        self.assertEqual(self.generate.call_count, 2)
+        self.review.assert_called_once()
+        second_context = self.generate.call_args_list[1].kwargs["tag_context"]
+        self.assertEqual(second_context[-1]["subject"], "albert-einstein")
+        self.assertEqual(second_context[-1]["relation"], "birth-year")
+
+    def test_exhausted_duplicates_return_error_and_never_reach_reviewer(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        self.generate.return_value = self.duplicate.model_dump()
+        with self.assertRaises(HTTPException) as raised:
+            generate_valid_question(0, "English", "History",
+                                    tag_history=self.history, tag_context=[])
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(self.generate.call_count, 3)
+        self.review.assert_not_called()
