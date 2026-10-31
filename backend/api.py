@@ -148,7 +148,8 @@ def game_info(game_id: str) -> GameInfo:
                         correct_main_answers=session.state.correct_main_answers)
 
 
-def generate_valid_question(difficulty: int, language: str, category: str) -> QuizQuestion:
+def generate_valid_question(difficulty: int, language: str, category: str, *,
+                            tag_history=None, tag_context=None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
         policy = GenerationPolicy.from_env()
@@ -157,6 +158,15 @@ def generate_valid_question(difficulty: int, language: str, category: str) -> Qu
     except (ValueError, QualityConfigurationError):
         event("generation_configuration_failed")
         raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+    # No new behavior for legacy games. Tagged PostgreSQL games pass an
+    # explicit history list (empty for new users); never pass private history
+    # or metadata to the player-facing response.
+    tagged = tag_history is not None
+    if tagged:
+        from tagging.contract import TaggedQuestion
+        from tagging.core import DuplicateQuestionError, require_unique, critic_neighbors
+        from tagging.review import check_tagged_quality
+        exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
     event("generation_policy", budget_ms=policy.budget_seconds * 1000,
           max_attempts=policy.max_attempts,
@@ -172,16 +182,37 @@ def generate_valid_question(difficulty: int, language: str, category: str) -> Qu
         failure_status = 503
         delay_hint = None
         try:
-            raw = create_question(difficulty, language, category)
+            raw = (create_question(difficulty, language, category, tag_context=exclusions)
+                   if tagged else create_question(difficulty, language, category))
             with timed_stage("question_validation"):
-                question = QuizQuestion.model_validate(raw)
+                question = (TaggedQuestion.model_validate(raw) if tagged
+                            else QuizQuestion.model_validate(raw))
                 if question.difficulty != difficulty:
                     raise InvalidQuestionError("AI returned the wrong difficulty")
+            # Strict deterministic Python check runs BEFORE the paid critic.
+            if tagged:
+                require_unique(question, tag_history)
             check_local_leak(question, leak_mode)
-            check_quality(question, difficulty, language, quality_mode,
-                          deadline, policy.provider_timeout_seconds, clock=perf_counter)
+            if tagged:
+                check_tagged_quality(question, requested_difficulty=difficulty,
+                                     language=language, category=category,
+                                     neighbors=critic_neighbors(question, tag_history),
+                                     mode=quality_mode, deadline=deadline,
+                                     timeout_seconds=policy.provider_timeout_seconds,
+                                     clock=perf_counter)
+            else:
+                check_quality(question, difficulty, language, quality_mode,
+                              deadline, policy.provider_timeout_seconds, clock=perf_counter)
             event("generation_attempt_completed", outcome="success")
             break
+        except DuplicateQuestionError as exc:
+            failure_status = 502
+            event("generation_attempt_completed", outcome="duplicate_rejected")
+            # Give the next attempt a concrete additional exclusion.
+            exclusions.append({"subject": question.fact.subject,
+                               "relation": question.fact.relation,
+                               "object": question.fact.object,
+                               "rejected": True})
         except QualityRegenerationError:
             failure_status = 502
             event("generation_attempt_completed", outcome="quality_rejected")
