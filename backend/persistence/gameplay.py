@@ -90,8 +90,10 @@ def pending_question(db: Session, *, run_id: UUID) -> tuple[QuestionAttempt, Que
     return attempt, question
 
 
-def _fingerprint(question: QuizQuestion) -> str:
-    payload = {"question": question.question.strip(), "answers": question.answers}
+def _fingerprint(question: QuizQuestion, category: str) -> str:
+    # Same wording at another difficulty/topic is a separate immutable candidate.
+    payload = {"question": question.question.strip(), "answers": question.answers,
+               "difficulty": question.difficulty, "category": category}
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -122,7 +124,7 @@ def offer_question(
         topic = db.scalar(select(Topic).where(Topic.slug == category_slug(category)))
         if topic is None:
             raise TopicsNotSeeded("Run python -m persistence.seed_topics first")
-        fingerprint = _fingerprint(question)
+        fingerprint = _fingerprint(question, category)
         stored = db.scalar(
             select(Question).where(
                 Question.language == run.language,
