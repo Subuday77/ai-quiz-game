@@ -777,3 +777,97 @@ test('failed translations never enter the RAM cache', () => {
   assert.equal(attempts, 2);
   store.destroy();
 });
+
+
+test('duplicate exhaustion presents a translated recovery panel, retry keeps the game', () => {
+  const { app, requests, posts, scheduler } = setup();
+  app.screen = 'feedback';
+  app.feedback = { phase: 'main', correct: true, correct_main_answers: 7 };
+  app.current = question;
+  app.progress = 7;
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'duplicate_exhausted' } },
+    }));
+  });
+  assert.equal(app.duplicateExhausted, true);
+  assert.equal(app.error, 'game.duplicateExhausted');
+  assert.match(app.locale.t(app.error), /unique question/i);
+  assert.equal(app.canRetryQuestion, true);
+  assert.equal(app.screen, 'question');
+  assert.equal(app.current, null);
+  assert.equal(app.feedback, null);
+  assert.equal(app.gameId, 'existing-game');
+  assert.equal(app.progress, 7);
+  assert.equal(posts.length, 0);
+  scheduler.run(() => {
+    app.retryQuestion();
+    assert.equal(app.duplicateExhausted, false);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].url, requests[0].url);
+    succeed(requests[1]);
+  });
+  assert.equal(app.error, '');
+  assert.equal(app.screen, 'question');
+  assert.equal(app.gameId, 'existing-game');
+  assert.equal(app.canRetryQuestion, false);
+  assert.equal(posts.length, 0);
+});
+
+test('Back to menu preserves the unfinished game and Resume uses the same ID', () => {
+  const { app, requests, posts, scheduler } = setup();
+  app.progress = 11;
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'duplicate_exhausted' } },
+    }));
+  });
+  app.returnToMenuAfterDuplicate();
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(app.gameId, 'existing-game');
+  assert.equal(app.progress, 11);
+  assert.equal(app.error, '');
+  assert.equal(app.duplicateExhausted, false);
+  assert.equal(app.canRetryQuestion, false);
+  assert.equal(posts.length, 0);
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(requests[1].url, requests[0].url);
+    succeed(requests[1]);
+  });
+  assert.equal(app.gameId, 'existing-game');
+  assert.equal(app.progress, 11);
+  assert.equal(posts.length, 0);
+});
+
+test('only the dedicated duplicate_exhausted error triggers the special panel', () => {
+  for (const error of [
+    { status: 409, error: { detail: 'Game state changed' } },
+    { status: 502, error: { detail: { code: 'different_error' } } },
+    { status: 503, error: { detail: 'AI unavailable' } },
+  ]) {
+    const { app, requests, scheduler } = setup();
+    scheduler.run(() => {
+      app.loadQuestion();
+      requests[0].subject.error(new HttpErrorResponse(error));
+    });
+    assert.equal(app.duplicateExhausted, false);
+    assert.notEqual(app.error, 'game.duplicateExhausted');
+    assert.equal(app.canRetryQuestion, true);
+  }
+});
+
+test('duplicate recovery shows two accessible translated actions, not generic retry', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /class="duplicate-recovery" \*ngIf="duplicateExhausted" role="alert"/);
+  assert.match(template, /locale\.t\('game\.duplicateExhausted'\)/);
+  assert.match(template, /\(click\)="retryQuestion\(\)"[\s\S]*?game\.duplicateRetry/);
+  assert.match(template, /\(click\)="returnToMenuAfterDuplicate\(\)"[\s\S]*?game\.returnToMenu/);
+  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"/);
+  for (const key of ['game.duplicateExhausted', 'game.duplicateRetry', 'game.returnToMenu']) {
+    assert.ok(english[key], key + ' must be in the AI localization source');
+  }
+});
