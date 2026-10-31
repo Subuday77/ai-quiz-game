@@ -149,6 +149,7 @@ def game_info(game_id: str) -> GameInfo:
 
 
 from tagging.core import DuplicateQuestionError, SemanticDuplicateError
+from tagging.debug import debug_rejected_candidate
 
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
@@ -195,6 +196,11 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         event("generation_attempt_started")
         failure_status = 503
         delay_hint = None
+        raw = None
+        question = None
+        rejection_reason = None
+        rejection_error_type = None
+        duplicate_reason = None
         try:
             raw = (create_question(difficulty, language, category, tag_context=exclusions)
                    if tagged else create_question(difficulty, language, category))
@@ -233,7 +239,11 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                               deadline, policy.provider_timeout_seconds, clock=perf_counter)
             event("generation_attempt_completed", outcome="success")
             break
-        except (DuplicateQuestionError, SemanticDuplicateError):
+        except (DuplicateQuestionError, SemanticDuplicateError) as exc:
+            rejection_reason = "duplicate_rejected"
+            rejection_error_type = type(exc).__name__
+            if isinstance(exc, DuplicateQuestionError):
+                duplicate_reason = str(exc)
             duplicate_rejections += 1
             failure_status = 502
             event("generation_attempt_completed", outcome="duplicate_rejected")
@@ -242,7 +252,9 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                "relation": question.fact.relation,
                                "object": question.fact.object,
                                "rejected": True})
-        except QualityRegenerationError:
+        except QualityRegenerationError as exc:
+            rejection_reason = "quality_rejected"
+            rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
             if tagged:
@@ -252,11 +264,15 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                    "rejected": True})
             event("generation_attempt_completed", outcome="quality_rejected")
         except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
+            rejection_reason = "invalid_question"
+            rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
             event("generation_attempt_completed", outcome="invalid_question",
                   error_type=type(exc).__name__)
         except Exception as exc:
+            rejection_reason = "provider_failure"
+            rejection_error_type = type(exc).__name__
             other_failures += 1
             retryable = is_transient(exc)
             event("generation_attempt_completed", outcome="provider_failure",
@@ -265,6 +281,15 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 raise HTTPException(status_code=503, detail="AI provider unavailable") from None
             delay_hint = retry_after_seconds(exc)
         finally:
+            # Attach the current request/attempt context before resetting it.
+            # No candidate bodies, answers, or critic rationales reach INFO logs.
+            if rejection_reason and (question is not None or raw is not None):
+                debug_rejected_candidate(
+                    question if question is not None else raw,
+                    reason=rejection_reason,
+                    error_type=rejection_error_type or "Unknown",
+                    duplicate_reason=duplicate_reason,
+                )
             generation_attempt.reset(token)
             provider_timeout.reset(timeout_token)
         detail = ("AI could not generate a valid question" if failure_status == 502
