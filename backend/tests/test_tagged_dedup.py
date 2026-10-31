@@ -210,6 +210,7 @@ class TaggedPersistenceTests(unittest.TestCase):
         })
         offer_question(self.db, run_id=self.first_run.id, user_id=self.alice,
                        question=plain, category="History", provider="test", model="stub")
+        self.db.rollback()
         output = StringIO()
         with patch("tagging.backfill.engine", return_value=self.engine), \
              patch("tagging.backfill.LLMClient") as ai, \
@@ -235,6 +236,7 @@ class TaggedPersistenceTests(unittest.TestCase):
                        question=plain, category="History", provider="test", model="stub")
         with self.assertRaises(HistoryNotTagged):
             history_for_user(self.db, self.alice)
+        self.db.rollback()
         with patch("tagging.backfill.engine", return_value=self.engine), \
              patch("tagging.backfill._extract", return_value=candidate()) as extractor, \
              patch("sys.argv", ["backfill", "--apply", "--limit", "1"]), \
@@ -244,6 +246,7 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.db.expire_all()
         self.assertEqual(len(history_for_user(self.db, self.alice)), 1)
         self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionFact)), 1)
+        self.db.rollback()
         # Already processed metadata is left in place on a subsequent run.
         with patch("tagging.backfill.engine", return_value=self.engine), \
              patch("tagging.backfill._extract") as extractor, \
