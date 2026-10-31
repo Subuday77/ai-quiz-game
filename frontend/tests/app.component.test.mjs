@@ -440,6 +440,42 @@ test('language changes are atomic: no English flash while another translation lo
   store.destroy();
 });
 
+test('German to French uses no intermediate English for ready cached locales', () => {
+  const french = new Subject();
+  const germanDictionary = { ...english, 'hero.ready': 'Bereit zum Spielen?' };
+  const frenchDictionary = { ...english, 'hero.ready': 'Prêt à jouer ?' };
+  const http = {
+    get(url) {
+      if (url.endsWith('/en')) return of({
+        language_code: 'en', dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0,
+      });
+      if (url.endsWith('/de')) return of({
+        language_code: 'de', dictionary: germanDictionary,
+        source_version: 'v1', fallback: false, missing_count: 0,
+      });
+      if (url.endsWith('/fr')) return french.asObservable();
+      throw new Error('Unexpected request: ' + url);
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  assert.equal(store.t('hero.ready'), 'Bereit zum Spielen?');
+
+  store.load('fr');
+  assert.equal(store.loading, true);
+  assert.equal(store.code, 'de');
+  assert.equal(store.t('hero.ready'), 'Bereit zum Spielen?');
+  french.next({ language_code: 'fr', dictionary: frenchDictionary,
+    source_version: 'v1', fallback: false, missing_count: 0 });
+  french.complete();
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'fr');
+  assert.equal(store.t('hero.ready'), 'Prêt à jouer ?');
+  store.destroy();
+});
+
 test('incomplete translations keep prior screen and spinner until ready', () => {
   const requests = [];
   const http = {
