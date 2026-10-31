@@ -167,7 +167,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     tagged = tag_history is not None
     if tagged:
         from tagging.contract import TaggedQuestion
-        from tagging.core import require_unique, critic_neighbors
+        from tagging.core import require_unique, critic_neighbors, threshold
         from tagging.review import check_tagged_quality
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
@@ -205,7 +205,20 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                     raise InvalidQuestionError("AI returned the wrong difficulty")
             # Strict deterministic Python check runs BEFORE the paid critic.
             if tagged:
-                require_unique(question, tag_history)
+                try:
+                    closest = require_unique(question, tag_history)
+                except DuplicateQuestionError as duplicate:
+                    event("tag_similarity_score", score=duplicate.score,
+                          threshold=threshold(), reason=str(duplicate),
+                          rejected=True)
+                    raise
+                question._duplicate_assessment = {
+                    "score": closest.score if closest else 0,
+                    "threshold": threshold(),
+                    "reason": closest.reason if closest else "no_history",
+                }
+                event("tag_similarity_score", **question._duplicate_assessment,
+                      rejected=False)
             check_local_leak(question, leak_mode)
             if tagged:
                 check_tagged_quality(question, requested_difficulty=difficulty,
