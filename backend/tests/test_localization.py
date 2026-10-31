@@ -11,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 from api import app
 from localization.catalog import LANGUAGES, english_dictionary, source_hash
 from localization.client import LocalizationUnavailable
+from localization.dev_tools import reset_available
+from starlette.requests import Request
 from localization.service import dictionary_response
 from persistence.database import get_db
 from persistence.models import Base, UiLocaleSync, UiTranslation
@@ -141,6 +143,7 @@ class LocalizationApiTests(unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {
             "AUTH_COOKIE_SECURE": "false",
             "AI_LOCALIZER_BASE_URL": "",
+            "LOCALIZATION_RESET_ENABLED": "false",
         }))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -184,6 +187,88 @@ class LocalizationApiTests(unittest.TestCase):
             "/api/localization/preference", json={"language_code": "ru"},
             headers={"Origin": "https://attacker.example"},
         ).status_code, 403)
+
+
+    def test_reset_capability_is_disabled_by_default_and_requires_login(self):
+        self.assertEqual(self.client.get(
+            "/api/localization/reset-capability"
+        ).status_code, 401)
+        self.assertEqual(self.client.post(
+            "/api/localization/reset", json={"language_code": "de"}
+        ).status_code, 401)
+        registration = self.client.post("/api/auth/register", json={
+            "username": "TestReset", "password": "offline-test-password-2026!",
+        })
+        self.assertEqual(registration.status_code, 201, registration.text)
+        self.assertEqual(self.client.get(
+            "/api/localization/reset-capability"
+        ).json(), {"enabled": False})
+        self.assertEqual(self.client.post(
+            "/api/localization/reset", json={"language_code": "de"}
+        ).status_code, 404)
+
+    def test_reset_removes_only_selected_locale_and_retains_users(self):
+        registration = self.client.post("/api/auth/register", json={
+            "username": "TestReset", "password": "offline-test-password-2026!",
+        })
+        self.assertEqual(registration.status_code, 201, registration.text)
+        with Session(self.engine) as db:
+            for code in ("de", "fr"):
+                db.add(UiTranslation(
+                    locale_code=code, string_key="hero.ready",
+                    source_hash=source_hash(english_dictionary()["hero.ready"]),
+                    text=f"translated {code}",
+                ))
+                db.add(UiLocaleSync(locale_code=code))
+            db.commit()
+
+        with patch("localization.dev_tools.reset_available", return_value=True):
+            response = self.client.post(
+                "/api/localization/reset", json={"language_code": "de"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["removed_count"], 1)
+            self.assertEqual(self.client.post(
+                "/api/localization/reset", json={"language_code": "en"}
+            ).status_code, 422)
+            self.assertEqual(self.client.post(
+                "/api/localization/reset", json={"language_code": "xx"}
+            ).status_code, 422)
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(UiTranslation, ("de", "hero.ready")))
+            self.assertIsNone(db.get(UiLocaleSync, "de"))
+            self.assertIsNotNone(db.get(UiTranslation, ("fr", "hero.ready")))
+            self.assertIsNotNone(db.get(UiLocaleSync, "fr"))
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+
+        with patch("localization.dev_tools.reset_available", return_value=True):
+            response = self.client.post(
+                "/api/localization/reset", json={"language_code": "all"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["removed_count"], 1)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(UiTranslation)), 0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(UiLocaleSync)), 0)
+
+    def test_reset_guard_needs_opt_in_and_loopback_address(self):
+        # The guard is independently tested; reset endpoints also check login
+        # and validate Origin. A spoofed Host alone cannot enable the tool.
+        scope = {
+            "type": "http", "scheme": "http", "method": "POST",
+            "path": "/api/localization/reset", "query_string": b"",
+            "headers": [(b"host", b"127.0.0.1:8000")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 8000),
+        }
+        req = Request(scope)
+        with patch.dict(os.environ, {"LOCALIZATION_RESET_ENABLED": "true"}):
+            self.assertTrue(reset_available(req))
+            remote = dict(scope)
+            remote["client"] = ("192.0.2.2", 12345)
+            self.assertFalse(reset_available(Request(remote)))
+        with patch.dict(os.environ, {"LOCALIZATION_RESET_ENABLED": "false"}):
+            self.assertFalse(reset_available(req))
 
 
 if __name__ == "__main__":
