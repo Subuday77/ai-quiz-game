@@ -5,10 +5,17 @@
 
     <div class="ui-language-control">
       <label for="ui-language">{{ locale.t('account.interfaceLanguage') }}</label>
-      <select id="ui-language" [ngModel]="locale.code" (ngModelChange)="setUiLanguage($event)"
+      <select id="ui-language" [ngModel]="locale.requestedCode" (ngModelChange)="setUiLanguage($event)"
               [disabled]="locale.loading" aria-label="Interface language">
         <option *ngFor="let language of uiLanguages" [value]="language.code">{{ language.nativeName }}</option>
       </select>
+    </div>
+
+    <div class="dev-translation-tools" *ngIf="account && resetEnabled">
+      <button class="account-button dev-reset-button" type="button" (click)="resetTranslations()"
+              [disabled]="resetBusy || locale.loading || authBusy">
+        <span aria-hidden="true">↻</span> {{ locale.t('localization.resetButton') }}
+      </button>
     </div>
 
     <div class="account-controls" aria-label="Player account">
@@ -140,3 +147,19 @@
   </section>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>
+<!-- The old interface stays unchanged underneath. A complete new dictionary
+     replaces it only after loading; no intermediate English screen is shown. -->
+<div class="localization-overlay" *ngIf="locale.loading" role="status" aria-live="polite"
+     aria-label="Localizing the website" aria-busy="true">
+  <div class="localization-stage">
+    <div class="localization-orb" aria-hidden="true">
+      <span class="localization-globe">✧</span>
+    </div>
+    <div class="localization-status-line" aria-hidden="true">
+      <span *ngFor="let message of localizationStatus; let i = index"
+            class="localization-phrase" [style.--phrase-index]="i"
+            [attr.dir]="message.rtl ? 'rtl' : 'ltr'">{{ message.text }}</span>
+    </div>
+    <span class="sr-only">Localizing the website. Please wait.</span>
+  </div>
+</div>
