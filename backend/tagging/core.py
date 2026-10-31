@@ -13,6 +13,10 @@ from tagging.contract import TaggedQuestion
 class DuplicateQuestionError(InvalidQuestionError):
     """Candidate duplicates an already displayed user fact/question."""
 
+    def __init__(self, reason: str, *, score: int | None = None):
+        super().__init__(reason)
+        self.score = score
+
 
 class SemanticDuplicateError(QualityRegenerationError):
     """The tag-aware critic found the same previously encountered knowledge."""
@@ -91,7 +95,7 @@ def require_unique(candidate: TaggedQuestion, history: list[HistoryItem],
     highest = ordered[0] if ordered else None
     if highest and (highest.reason == "same_fact" or
                     highest.score >= (threshold() if limit is None else limit)):
-        raise DuplicateQuestionError(highest.reason)
+        raise DuplicateQuestionError(highest.reason, score=highest.score)
     return highest
 
 
