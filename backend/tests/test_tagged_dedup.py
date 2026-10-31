@@ -257,6 +257,31 @@ class TaggedPersistenceTests(unittest.TestCase):
 
 
 
+    def test_backfill_repairs_missing_tag_links_without_deleting_existing_fact(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from sqlalchemy import delete
+        from tagging import backfill
+        _, stored = self.offer(self.first_run, self.alice, candidate())
+        previous = self.db.get(QuestionFact, stored.id).fact_key
+        self.db.execute(delete(QuestionTag))
+        self.db.commit()
+        with self.assertRaises(HistoryNotTagged):
+            history_for_user(self.db, self.alice)
+        self.db.rollback()
+        with patch("tagging.backfill.engine", return_value=self.engine), \
+             patch("tagging.backfill._extract", return_value=candidate()) as extractor, \
+             patch("sys.argv", ["backfill", "--apply", "--limit", "1"]), \
+             redirect_stdout(StringIO()):
+            backfill.main()
+        extractor.assert_called_once()
+        self.db.expire_all()
+        self.assertEqual(self.db.get(QuestionFact, stored.id).fact_key, previous)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionTag)), 3)
+        self.assertEqual(len(history_for_user(self.db, self.alice)), 1)
+
+
+
 class TaggedCriticTests(unittest.TestCase):
     def setUp(self):
         self.verdict = {
