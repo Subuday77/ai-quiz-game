@@ -53,12 +53,13 @@ def _render(source: dict[str, str], cached: dict[str, tuple[str, str]]) -> tuple
 def _claim_lease(db: Session, code: str) -> str | None:
     # Make the per-language guard row with a savepoint. Another worker may
     # create it simultaneously; the unique constraint decides who owns it.
-    try:
-        with db.begin_nested():
-            db.add(UiLocaleSync(locale_code=code, updated_at=_now()))
-            db.flush()
-    except IntegrityError:
-        pass
+    if db.get(UiLocaleSync, code) is None:
+        try:
+            with db.begin_nested():
+                db.add(UiLocaleSync(locale_code=code, updated_at=_now()))
+                db.flush()
+        except IntegrityError:
+            pass  # Another worker won the first-insert race.
 
     state = db.scalar(
         select(UiLocaleSync).where(UiLocaleSync.locale_code == code).with_for_update()
