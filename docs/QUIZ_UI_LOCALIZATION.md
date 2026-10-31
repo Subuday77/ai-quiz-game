@@ -124,3 +124,80 @@ The code and offline tests are in the feature branch, but tests and the
 Angular build must still be run locally on the user's Windows machine.
 No migration has been executed against the user's PostgreSQL automatically.
 Do not merge to `master` or deploy to Render until those checks pass.
+
+
+## Switching languages without flashing English
+
+The Angular localization store commits the **language code and complete
+dictionary together**. While a new language loads, the previous page remains
+unchanged and a full-screen loading overlay prevents clicking stale controls.
+Its illuminated two-orbit spinner has rotating status messages in **all eleven
+native languages** (English, German, French, Spanish, Italian, Portuguese,
+Russian, Hebrew, Arabic, Japanese, Chinese).
+
+Already prepared languages switch as soon as their dictionary response arrives.
+Incomplete or temporarily unavailable translations are not installed as a new
+English-looking interface. The client briefly polls for an in-progress
+translation (up to 12 retries with 2.5-second gaps); if it cannot complete,
+the old language stays selected and a visible error message is shown.
+On the next attempt, the user can try again; failed/partial results are never
+stored as an approved language preference.
+
+The question language is still fully independent. Switching interface
+direction never changes question text or an in-progress game.
+
+## Optional LOCAL-ONLY translation reset button
+
+This is a **temporary development utility**, not a normal user feature.
+By default the button and the write endpoint are disabled. To enable it only
+for local testing, set in the untracked root `.env`:
+
+```dotenv
+LOCALIZATION_RESET_ENABLED=true
+```
+
+Restart the local FastAPI service. Use the local Angular address
+`http://127.0.0.1:4200` and sign in. A small **Reset translations (dev)**
+button appears near the interface-language selector.
+
+When pressed, SweetAlert2 explains in plain language:
+
+> The site keeps translations in a shared database. Removing a language
+> deletes the translations already saved for everyone. The next time someone
+> opens it, AI Localizer will be asked to translate it again. That may cost
+> money. Player accounts, questions and results are not deleted.
+
+Choose a single non-English language or **all translated languages**, then
+confirm. The button calls `POST /api/localization/reset` with
+`{"language_code":"de"}` or `{"language_code":"all"}`. It deletes matching
+records in `ui_translations` and `ui_locale_sync`, **not** the English source,
+users, questions, game results, or the account's language preference.
+
+A reset does **not** change the page immediately; when the current language
+was cleared, it is re-fetched with the full-screen spinner. Other languages
+are generated the next time someone selects them.
+
+The backend requires **all three** before a reset is allowed: an authenticated
+Quiz session, `LOCALIZATION_RESET_ENABLED=true`, and a request that comes
+from loopback (`127.0.0.1`, `::1` or `localhost`), with the usual Origin
+check for cookie-authenticated POSTs. The capability endpoint
+`GET /api/localization/reset-capability` reports availability to a signed-in
+user. Do not set this flag on Render or other public services.
+
+To disable the control again, use `LOCALIZATION_RESET_ENABLED=false` and
+restart FastAPI. No migration or manual SQL is needed.
+
+## Acceptance checks for this change
+
+1. Switch Deutsch to Français after both languages have been generated:
+   German should remain until French replaces it, without an English flash.
+2. Pick a new language: a full-screen spinner should rotate with messages
+   in multiple languages while the remote translation runs.
+3. Deliberately stop the Localizer, select an uncached language, and ensure
+   the prior language stays displayed if translation fails.
+4. With reset disabled, no reset button should appear. Its API must reject
+   a POST even if someone constructs the request manually.
+5. Enable reset locally, sign in, clear German, and verify French stays
+   cached. Selecting German should produce a fresh translation.
+6. Clear all translations and verify the English master and all quiz/player
+   data remain intact.
