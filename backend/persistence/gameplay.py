@@ -1,0 +1,209 @@
+"""Transactional persistence for quiz rounds.
+
+This layer does not call an LLM or construct HTTP responses. Only validated
+QuizQuestion instances may be passed to offer_question; generation/quality
+checks are the responsibility of the caller. A running game can be reloaded
+from PostgreSQL without a Python process-local sessions dictionary.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime, timezone
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from game_logic import AnswerResult, GameState
+from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic
+from persistence.seed_topics import category_slug
+from question_schema import Choice, QuizQuestion
+
+
+class GameNotFound(LookupError):
+    """The round is absent, or it is not owned by the requester."""
+
+
+class GameConflict(RuntimeError):
+    """The requested state transition is invalid."""
+
+
+class TopicsNotSeeded(RuntimeError):
+    """A known category is missing from the PostgreSQL topic catalog."""
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def create_game(db: Session, *, user_id: UUID, language: str) -> GameRun:
+    """Commit a new player-owned round. Authentication is done by the caller."""
+    run = GameRun(user_id=user_id, language=language, status="main")
+    db.add(run)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(run)
+    return run
+
+
+def owned_game(db: Session, *, run_id: UUID, user_id: UUID,
+               for_update: bool = False) -> GameRun:
+    query = select(GameRun).where(GameRun.id == run_id, GameRun.user_id == user_id)
+    if for_update:
+        query = query.with_for_update()
+    run = db.scalar(query)
+    if run is None:
+        raise GameNotFound("Game not found")
+    return run
+
+
+def game_state(run: GameRun) -> GameState:
+    """Rebuild pure game progression from persisted columns."""
+    return GameState(
+        correct_main_answers=run.correct_main_answers,
+        hints_used=run.hints_used,
+        phase=run.status,
+        bonus_correct=run.bonus_correct,
+    )
+
+
+def pending_question(db: Session, *, run_id: UUID) -> tuple[QuestionAttempt, Question] | None:
+    attempt = db.scalar(
+        select(QuestionAttempt)
+        .where(QuestionAttempt.run_id == run_id,
+               QuestionAttempt.answered_at.is_(None))
+        .order_by(QuestionAttempt.number.desc())
+    )
+    if attempt is None:
+        return None
+    question = db.get(Question, attempt.question_id)
+    if question is None:
+        raise GameConflict("Question missing from persisted round")
+    return attempt, question
+
+
+def _fingerprint(question: QuizQuestion) -> str:
+    payload = {"question": question.question.strip(), "answers": question.answers}
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def offer_question(
+    db: Session, *, run_id: UUID, user_id: UUID,
+    question: QuizQuestion, category: str,
+    provider: str, model: str,
+    prompt_version: str = "v1", schema_version: str = "question_v1",
+) -> tuple[QuestionAttempt, Question]:
+    """Store one already-validated candidate, or return the cached pending one.
+
+    The row lock serializes concurrent requests for the same run on PostgreSQL.
+    Model calls should happen OUTSIDE this transaction, before invoking this
+    function, so slow generation does not hold the game row lock.
+    """
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status not in ("main", "bonus"):
+            raise GameConflict("Game has ended")
+        cached = pending_question(db, run_id=run.id)
+        if cached:
+            db.commit()
+            return cached
+        expected_difficulty = game_state(run).current_difficulty
+        if question.difficulty != expected_difficulty:
+            raise GameConflict("Wrong question difficulty for current game state")
+        topic = db.scalar(select(Topic).where(Topic.slug == category_slug(category)))
+        if topic is None:
+            raise TopicsNotSeeded("Run python -m persistence.seed_topics first")
+        fingerprint = _fingerprint(question)
+        stored = db.scalar(
+            select(Question).where(
+                Question.language == run.language,
+                Question.fingerprint == fingerprint,
+            )
+        )
+        if stored is not None:
+            if (stored.correct_key != question.correct_answer
+                    or stored.status != "approved"):
+                raise GameConflict("Existing question is conflicting or not approved")
+        else:
+            stored = Question(
+                topic_id=topic.id, language=run.language,
+                requested_difficulty=question.difficulty,
+                text=question.question, choices=question.answers,
+                correct_key=question.correct_answer, fingerprint=fingerprint,
+                status="approved", generator_provider=provider,
+                generator_model=model, prompt_version=prompt_version,
+                schema_version=schema_version,
+            )
+            db.add(stored)
+            db.flush()
+        next_number = run.correct_main_answers + 1
+        attempt = QuestionAttempt(
+            run_id=run.id, question_id=stored.id,
+            number=next_number,
+            requested_difficulty=expected_difficulty,
+        )
+        db.add(attempt)
+        db.commit()
+        db.refresh(attempt)
+        return attempt, stored
+    except Exception:
+        db.rollback()
+        raise
+
+
+def record_answer(
+    db: Session, *, run_id: UUID, user_id: UUID,
+    question_id: UUID, selected: Choice,
+) -> tuple[AnswerResult, str]:
+    """Accept a single answer, commit progress and star award atomically.
+
+    No wallet credits or arbitrary score formula are invented here.
+    A replay fails before any mutation. Locking works across web workers on
+    PostgreSQL and the unique star constraint is a second safety net.
+    """
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status not in ("main", "bonus"):
+            raise GameConflict("Game has ended")
+        cached = pending_question(db, run_id=run.id)
+        if cached is None:
+            raise GameConflict("No matching unanswered question")
+        attempt, question = cached
+        if question.id != question_id:
+            raise GameConflict("No matching unanswered question")
+
+        now = _now()
+        state = game_state(run)
+        is_correct = selected == question.correct_key
+        result = state.submit_answer(is_correct)
+
+        attempt.answered_at = now
+        attempt.selected_key = selected
+        attempt.is_correct = is_correct
+        attempt.answer_duration_ms = max(
+            0, int((now - _aware(attempt.shown_at)).total_seconds() * 1000)
+        )
+        run.correct_main_answers = state.correct_main_answers
+        run.hints_used = state.hints_used
+        run.status = state.phase
+        run.bonus_correct = state.bonus_correct
+        if state.phase in ("completed", "lost"):
+            run.finished_at = now
+        if result.achievement:
+            db.add(StarAward(
+                user_id=user_id, run_id=run.id, tier=result.achievement
+            ))
+        db.commit()
+        return result, question.correct_key
+    except Exception:
+        db.rollback()
+        raise
