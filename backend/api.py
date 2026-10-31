@@ -149,7 +149,7 @@ def game_info(game_id: str) -> GameInfo:
 
 
 from tagging.core import DuplicateQuestionError, SemanticDuplicateError
-from tagging.debug import debug_rejected_candidate
+from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
@@ -237,6 +237,10 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             else:
                 check_quality(question, difficulty, language, quality_mode,
                               deadline, policy.provider_timeout_seconds, clock=perf_counter)
+            # Include successful candidates as well as rejections in the
+            # opt-in DEBUG trace, with the exact critic verdict and answer.
+            # This is pre-persistence acceptance, not a claim of DB commit.
+            debug_accepted_candidate(question)
             event("generation_attempt_completed", outcome="success")
             break
         except (DuplicateQuestionError, SemanticDuplicateError) as exc:
