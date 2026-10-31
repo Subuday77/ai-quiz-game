@@ -100,15 +100,31 @@ def generator_context(history: list[HistoryItem], category_slug: str) -> list[di
              "tags": item.tags} for item in selected[:35]]
 
 
-def critic_neighbors(candidate: TaggedQuestion, history: list[HistoryItem]) -> list[dict]:
+def critic_neighbors(candidate: TaggedQuestion, history: list[HistoryItem],
+                     *, category_slug: str = "") -> list[dict]:
+    """Include best tag matches AND recent same-category questions.
+
+    The second group helps the critic recognize aliases across languages
+    when different model runs supplied inconsistent English entity slugs.
+    """
     lookup = {item.question_id: item for item in history}
-    result = []
-    for s in rank(candidate, history)[:5]:
-        if s.score == 0:
+    picked: list[HistoryItem] = []
+    seen: set[str] = set()
+    for score in rank(candidate, history)[:6]:
+        if score.score <= 0:
+            continue
+        item = lookup[score.previous_id]
+        if item.question_id not in seen:
+            picked.append(item)
+            seen.add(item.question_id)
+    for item in reversed(history):
+        if len(picked) >= 10:
             break
-        item = lookup[s.previous_id]
-        result.append({"question_id": item.question_id, "question": item.question_text,
-                       "fact_key": item.fact_key, "subject": item.subject,
-                       "relation": item.relation, "object": item.object,
-                       "score": s.score})
-    return result
+        if item.category_slug == category_slug and item.question_id not in seen:
+            picked.append(item)
+            seen.add(item.question_id)
+    return [{
+        "question_id": item.question_id, "question": item.question_text,
+        "fact_key": item.fact_key, "subject": item.subject,
+        "relation": item.relation, "object": item.object,
+    } for item in picked]
