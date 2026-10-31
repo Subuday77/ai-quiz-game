@@ -38,8 +38,10 @@ app.include_router(profile_router)  # Derived statistics are initially empty unt
 @app.middleware("http")
 async def question_diagnostics(request: Request, call_next):
     parts = request.url.path.split("/")
-    if not (request.method == "GET" and len(parts) == 5
-            and parts[1:3] == ["api", "games"] and parts[4] == "question"):
+    if not (request.method == "GET" and (
+            (len(parts) == 5 and parts[1:3] == ["api", "games"] and parts[4] == "question")
+            or (len(parts) == 6 and parts[1:4] == ["api", "v2", "games"] and parts[5] == "question")
+    )):
         return await call_next(request)
     diagnostic_id = str(uuid4())
     token = request_id.set(diagnostic_id)
@@ -142,6 +144,77 @@ def game_info(game_id: str) -> GameInfo:
                         correct_main_answers=session.state.correct_main_answers)
 
 
+def generate_valid_question(difficulty: int, language: str, category: str) -> QuizQuestion:
+    """Run the shared bounded AI generation, validation, leak and quality policy."""
+    try:
+        policy = GenerationPolicy.from_env()
+        quality_mode = quality_mode_from_env()
+        leak_mode = local_leak_mode_from_env()
+    except (ValueError, QualityConfigurationError):
+        event("generation_configuration_failed")
+        raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+    deadline = perf_counter() + policy.budget_seconds
+    event("generation_policy", budget_ms=policy.budget_seconds * 1000,
+          max_attempts=policy.max_attempts,
+          provider_timeout_ms=policy.provider_timeout_seconds * 1000, sdk_max_retries=0)
+    for attempt in range(1, policy.max_attempts + 1):
+        remaining = deadline - perf_counter()
+        if remaining <= 0:
+            event("generation_budget_exhausted")
+            raise HTTPException(status_code=503, detail="AI provider unavailable")
+        token = generation_attempt.set(attempt)
+        timeout_token = provider_timeout.set(min(policy.provider_timeout_seconds, remaining))
+        event("generation_attempt_started")
+        failure_status = 503
+        delay_hint = None
+        try:
+            raw = create_question(difficulty, language, category)
+            with timed_stage("question_validation"):
+                question = QuizQuestion.model_validate(raw)
+                if question.difficulty != difficulty:
+                    raise InvalidQuestionError("AI returned the wrong difficulty")
+            check_local_leak(question, leak_mode)
+            check_quality(question, difficulty, language, quality_mode,
+                          deadline, policy.provider_timeout_seconds, clock=perf_counter)
+            event("generation_attempt_completed", outcome="success")
+            break
+        except QualityRegenerationError:
+            failure_status = 502
+            event("generation_attempt_completed", outcome="quality_rejected")
+        except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
+            failure_status = 502
+            event("generation_attempt_completed", outcome="invalid_question",
+                  error_type=type(exc).__name__)
+        except Exception as exc:
+            retryable = is_transient(exc)
+            event("generation_attempt_completed", outcome="provider_failure",
+                  error_type=type(exc).__name__, retryable=retryable)
+            if not retryable:
+                raise HTTPException(status_code=503, detail="AI provider unavailable") from None
+            delay_hint = retry_after_seconds(exc)
+        finally:
+            generation_attempt.reset(token)
+            provider_timeout.reset(timeout_token)
+        detail = ("AI could not generate a valid question" if failure_status == 502
+                  else "AI provider unavailable")
+        if attempt == policy.max_attempts:
+            event("generation_retries_exhausted", attempts=attempt)
+            raise HTTPException(status_code=failure_status, detail=detail)
+        delay = policy.backoff(attempt)
+        # Do not retry sooner than the server requests, or sleep beyond our limits.
+        if delay_hint is not None:
+            if delay_hint > policy.backoff_max_seconds:
+                event("generation_retry_suppressed", reason="retry_after_exceeds_limit")
+                raise HTTPException(status_code=failure_status, detail=detail)
+            delay = max(delay, delay_hint)
+        if delay >= deadline - perf_counter():
+            event("generation_budget_exhausted")
+            raise HTTPException(status_code=failure_status, detail=detail)
+        event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
+        sleep(delay)
+    return question
+
+
 @app.get("/api/games/{game_id}/question", response_model=PublicQuestion)
 def get_question(game_id: str) -> PublicQuestion:
     session = find_session(game_id)
@@ -157,73 +230,7 @@ def get_question(game_id: str) -> PublicQuestion:
                 raise HTTPException(status_code=500, detail="No unused categories")
             difficulty = session.state.current_difficulty
             category = session.categories[-1]
-            try:
-                policy = GenerationPolicy.from_env()
-                quality_mode = quality_mode_from_env()
-                leak_mode = local_leak_mode_from_env()
-            except (ValueError, QualityConfigurationError):
-                event("generation_configuration_failed")
-                raise HTTPException(status_code=503, detail="AI provider unavailable") from None
-            deadline = perf_counter() + policy.budget_seconds
-            event("generation_policy", budget_ms=policy.budget_seconds * 1000,
-                  max_attempts=policy.max_attempts,
-                  provider_timeout_ms=policy.provider_timeout_seconds * 1000, sdk_max_retries=0)
-            for attempt in range(1, policy.max_attempts + 1):
-                remaining = deadline - perf_counter()
-                if remaining <= 0:
-                    event("generation_budget_exhausted")
-                    raise HTTPException(status_code=503, detail="AI provider unavailable")
-                token = generation_attempt.set(attempt)
-                timeout_token = provider_timeout.set(min(policy.provider_timeout_seconds, remaining))
-                event("generation_attempt_started")
-                failure_status = 503
-                delay_hint = None
-                try:
-                    raw = create_question(difficulty, session.language, category)
-                    with timed_stage("question_validation"):
-                        question = QuizQuestion.model_validate(raw)
-                        if question.difficulty != difficulty:
-                            raise InvalidQuestionError("AI returned the wrong difficulty")
-                    check_local_leak(question, leak_mode)
-                    check_quality(question, difficulty, session.language, quality_mode,
-                                  deadline, policy.provider_timeout_seconds, clock=perf_counter)
-                    event("generation_attempt_completed", outcome="success")
-                    break
-                except QualityRegenerationError:
-                    failure_status = 502
-                    event("generation_attempt_completed", outcome="quality_rejected")
-                except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
-                    failure_status = 502
-                    event("generation_attempt_completed", outcome="invalid_question",
-                          error_type=type(exc).__name__)
-                except Exception as exc:
-                    retryable = is_transient(exc)
-                    event("generation_attempt_completed", outcome="provider_failure",
-                          error_type=type(exc).__name__, retryable=retryable)
-                    if not retryable:
-                        raise HTTPException(status_code=503, detail="AI provider unavailable") from None
-                    delay_hint = retry_after_seconds(exc)
-                finally:
-                    generation_attempt.reset(token)
-                    provider_timeout.reset(timeout_token)
-                detail = ("AI could not generate a valid question" if failure_status == 502
-                          else "AI provider unavailable")
-                if attempt == policy.max_attempts:
-                    event("generation_retries_exhausted", attempts=attempt)
-                    raise HTTPException(status_code=failure_status, detail=detail)
-                delay = policy.backoff(attempt)
-                # Do not retry sooner than the server requests, or sleep beyond our limits.
-                if delay_hint is not None:
-                    if delay_hint > policy.backoff_max_seconds:
-                        event("generation_retry_suppressed", reason="retry_after_exceeds_limit")
-                        raise HTTPException(status_code=failure_status, detail=detail)
-                    delay = max(delay, delay_hint)
-                if delay >= deadline - perf_counter():
-                    event("generation_budget_exhausted")
-                    raise HTTPException(status_code=failure_status, detail=detail)
-                event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
-                sleep(delay)
-            session.question = question
+            session.question = generate_valid_question(difficulty, session.language, category)
             session.question_id = str(uuid4())
             session.categories.pop()
         else:
@@ -253,3 +260,9 @@ def submit_answer(game_id: str, payload: AnswerInput) -> AnswerFeedback:
                               phase=outcome.phase,
                               correct_main_answers=session.state.correct_main_answers,
                               achievement=outcome.achievement)
+
+
+# Versioned authenticated API. Legacy /api/games stays available until
+# Angular is migrated and the in-memory API tests have been retired.
+from persistence.game_routes import router as persistent_games_router  # noqa: E402
+app.include_router(persistent_games_router)
