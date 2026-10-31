@@ -55,6 +55,7 @@ class AccountOut(BaseModel):
     username: str
     display_name: str | None = None
     preferred_language: str
+    ui_language: str
     theme_key: str
 
     model_config = ConfigDict(from_attributes=True)
