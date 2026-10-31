@@ -544,3 +544,16 @@ test('reset control is visible only when backend enables development mode', () =
   assert.equal(enabled.app.resetEnabled, true);
   assert.equal(enabled.app.locale.code, 'en');
 });
+
+test('localization spinner still moves and captions rotate in reduced-motion mode', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(css, /@keyframes locale-orbit/);
+  assert.match(css, /@keyframes locale-phrase-cycle/);
+  assert.match(css, /@keyframes locale-phrase-crossfade/);
+  const reduced = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(reduced, 'Reduced-motion styles should exist');
+  assert.doesNotMatch(reduced, /animation:\s*none|display:\s*none/);
+  assert.match(reduced, /animation-duration:\s*6s/);
+  assert.match(reduced, /animation-duration:\s*8s/);
+  assert.match(reduced, /animation-name:\s*locale-phrase-crossfade/);
+});
