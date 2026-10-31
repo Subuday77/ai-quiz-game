@@ -6,11 +6,16 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from generation_policy import InvalidQuestionError
+from quality_errors import QualityRegenerationError
 from tagging.contract import TaggedQuestion
 
 
 class DuplicateQuestionError(InvalidQuestionError):
     """Candidate duplicates an already displayed user fact/question."""
+
+
+class SemanticDuplicateError(QualityRegenerationError):
+    """The tag-aware critic found the same previously encountered knowledge."""
 
 
 class HistoryNotTagged(RuntimeError):
