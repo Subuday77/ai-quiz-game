@@ -233,6 +233,8 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertEqual(review.checker_type, "ai_tagged_critic")
         self.assertEqual(review.provider, "openai")
         self.assertEqual(review.details["assessment"]["total"], 3)
+        self.assertEqual(review.details["python_duplicate_check"]["score"], 0)
+        self.assertEqual(review.details["python_duplicate_check"]["threshold"], 70)
         self.assertEqual(review.details["verdict"]["difficulty"], "too_easy")
         self.assertEqual(review.details["verdict"]["rationale"],
                          "The question is simple and awkwardly worded.")
@@ -512,6 +514,37 @@ class TaggedGenerationPolicyTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail, {"code": "duplicate_exhausted"})
         self.assertEqual(self.review.call_count, 3)
+
+    def test_python_similarity_score_and_threshold_are_logged_before_critic(self):
+        from api import generate_valid_question
+        self.generate.return_value = self.new_fact.model_dump()
+        with patch("api.event") as recorded:
+            result = generate_valid_question(
+                0, "English", "History", tag_history=self.history, tag_context=[]
+            )
+        events = [call.kwargs for call in recorded.call_args_list
+                  if call.args[0] == "tag_similarity_score"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["score"], 20)
+        self.assertEqual(events[0]["threshold"], 70)
+        self.assertEqual(events[0]["reason"], "entity")
+        self.assertFalse(events[0]["rejected"])
+        self.assertEqual(result._duplicate_assessment["score"], 20)
+
+    def test_rejected_duplicate_score_is_logged_with_threshold(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        self.generate.return_value = self.duplicate.model_dump()
+        with patch("api.event") as recorded:
+            with self.assertRaises(HTTPException):
+                generate_valid_question(0, "English", "History",
+                                        tag_history=self.history, tag_context=[])
+        events = [call.kwargs for call in recorded.call_args_list
+                  if call.args[0] == "tag_similarity_score"]
+        self.assertEqual(len(events), 3)
+        self.assertEqual(events[0]["score"], 100)
+        self.assertEqual(events[0]["threshold"], 70)
+        self.assertTrue(all(event["rejected"] for event in events))
 
     def test_mixed_invalid_question_and_duplicate_errors_keep_generic_failure(self):
         from api import generate_valid_question
