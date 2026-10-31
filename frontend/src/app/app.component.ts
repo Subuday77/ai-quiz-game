@@ -181,32 +181,50 @@ export class AppComponent implements OnInit, OnDestroy {
       const { default: Swal } = await import('sweetalert2');
       const isRegister = mode === 'register';
       const result = await Swal.fire({
-        title: isRegister ? 'Create your account' : 'Sign in to AI Quiz',
+        titleText: this.locale.t(isRegister ? 'auth.titleRegister' : 'auth.titleLogin'),
+        // Labels are populated via textContent, never by interpolating AI text into HTML.
         html:
           '<div class="quiz-auth-fields">' +
-            '<label for="quiz-auth-username">Username</label>' +
-            '<input id="quiz-auth-username" class="swal2-input" type="text" ' +
-              'autocomplete="username" maxlength="30" placeholder="Your username">' +
-            '<label for="quiz-auth-password">Password</label>' +
+            '<label id="quiz-label-username" for="quiz-auth-username"></label>' +
+            '<input id="quiz-auth-username" class="swal2-input" type="text" autocomplete="username" maxlength="30">' +
+            '<label id="quiz-label-password" for="quiz-auth-password"></label>' +
             '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
-              'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" ' +
-              'maxlength="256"' + (isRegister ? ' placeholder="At least 8 characters"' : '') + '>' +
+              'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
             (isRegister ?
-              '<label for="quiz-auth-confirm">Confirm password</label>' +
+              '<label id="quiz-label-confirm" for="quiz-auth-confirm"></label>' +
               '<input id="quiz-auth-confirm" class="swal2-input" type="password" ' +
-                'autocomplete="new-password" maxlength="256" placeholder="Repeat password">'
+                'autocomplete="new-password" maxlength="256">'
               : '') +
           '</div>',
+        didOpen: () => {
+          const popup = Swal.getPopup();
+          const label = (id: string, key: string) => {
+            const element = popup?.querySelector<HTMLElement>('#' + id);
+            if (element) element.textContent = this.locale.t(key);
+          };
+          const hint = (id: string, key: string) => {
+            const element = popup?.querySelector<HTMLInputElement>('#' + id);
+            if (element) element.placeholder = this.locale.t(key);
+          };
+          label('quiz-label-username', 'auth.username');
+          label('quiz-label-password', 'auth.password');
+          hint('quiz-auth-username', 'auth.usernamePlaceholder');
+          if (isRegister) {
+            label('quiz-label-confirm', 'auth.confirm');
+            hint('quiz-auth-password', 'auth.passwordHint');
+            hint('quiz-auth-confirm', 'auth.repeatPlaceholder');
+          }
+        },
         customClass: {
           popup: 'quiz-auth-popup',
           confirmButton: 'quiz-auth-confirm',
         },
         background: '#1b1e3e',
         color: '#f1f3ff',
-        confirmButtonText: isRegister ? 'Create account' : 'Sign in',
+        confirmButtonText: this.locale.t(isRegister ? 'auth.submitRegister' : 'auth.submitLogin'),
         confirmButtonColor: '#8170d8',
         showCancelButton: true,
-        cancelButtonText: 'Cancel',
+        cancelButtonText: this.locale.t('auth.cancel'),
         focusConfirm: false,
         showLoaderOnConfirm: true,
         allowOutsideClick: () => !Swal.isLoading(),
