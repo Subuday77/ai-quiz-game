@@ -194,3 +194,82 @@ class DebugGenerationTests(unittest.TestCase):
         [row] = trace_lines(logger)
         self.assertEqual(row["event"], "question_candidate_invalid_json")
         self.assertEqual(row["response_excerpt"], '{"question": invalid')
+
+
+    def test_accepted_candidate_logs_full_question_and_critic_verdict(self):
+        from api import generate_valid_question
+        verdict = {
+            "facts": "pass", "options": "pass", "language": "pass",
+            "leakage": "pass", "difficulty": "too_easy",
+            "independent_answer": "B", "issue_codes": [],
+            "distractor_penalty": 1, "knowledge_penalty": 0,
+            "suitability_penalty": 1, "wording_penalty": 1,
+            "rationale": "Question is valid but too easy and awkwardly phrased.",
+            "tags_valid": "pass", "fact_valid": "pass",
+            "semantic_duplicate": False, "duplicate_match": "",
+        }
+        with self.settings(), \
+             patch("api.create_question", return_value=candidate().model_dump()), \
+             patch("tagging.review.ReviewerSettings.from_env", return_value=Mock(
+                 provider="openai", model_id="critic-mock", structured_output_mode="strict",
+             )), \
+             patch("tagging.review.LLMClient"), \
+             patch("tagging.review.completed_text", return_value=json.dumps(verdict)), \
+             patch("diagnostics.debug_log.debug") as logger:
+            result = generate_valid_question(0, "English", "History",
+                                             tag_history=[], tag_context=[])
+        [row] = trace_lines(logger)
+        self.assertEqual(row["event"], "question_candidate_accepted")
+        self.assertEqual(row["outcome"], "accepted")
+        self.assertIsNone(row["rejection_reason"])
+        self.assertEqual(row["question"], result.question)
+        self.assertEqual(row["answers"], result.answers)
+        self.assertEqual(row["correct_answer"], result.correct_answer)
+        self.assertEqual(row["tags"]["entity"], ["albert-einstein"])
+        self.assertEqual(row["fact"]["relation"], "birth-year")
+        self.assertEqual(row["fact_key"], result.fact.key)
+        self.assertEqual(row["python_duplicate_check"]["score"], 0)
+        self.assertEqual(row["critic"]["verdict"]["difficulty"], "too_easy")
+        self.assertEqual(row["critic"]["verdict"]["rationale"], verdict["rationale"])
+        self.assertEqual(row["critic"]["assessment"]["total"], 3)
+        # With AI_QUALITY_MODE=audit the editor's criticism does not block.
+        self.assertEqual(row["critic"]["decision"], "audit")
+
+    def test_accepted_candidate_never_leaks_to_logs_when_debug_off(self):
+        from api import generate_valid_question
+        with self.settings(enabled="false"), \
+             patch("api.create_question", return_value=candidate().model_dump()), \
+             patch("tagging.review.check_tagged_quality"), \
+             patch("diagnostics.debug_log.debug") as logger:
+            result = generate_valid_question(0, "English", "History",
+                                             tag_history=[], tag_context=[])
+        self.assertEqual(result.question, candidate().question)
+        logger.assert_not_called()
+
+    def test_rejected_then_accepted_attempts_each_have_one_debug_record(self):
+        from api import generate_valid_question
+        invalid = candidate().model_dump()
+        invalid["answers"]["C"] = invalid["answers"]["A"]
+        valid = candidate().model_dump()
+        with self.settings(), \
+             patch.dict(os.environ, {"AI_GENERATION_MAX_ATTEMPTS": "2"}), \
+             patch("api.create_question", side_effect=[invalid, valid]), \
+             patch("api.sleep"), \
+             patch("tagging.review.check_tagged_quality"), \
+             patch("diagnostics.debug_log.debug") as logger:
+            token = request_id.set("attempts-123")
+            try:
+                generated = generate_valid_question(
+                    0, "English", "History", tag_history=[], tag_context=[]
+                )
+            finally:
+                request_id.reset(token)
+        rows = trace_lines(logger)
+        self.assertEqual([row["event"] for row in rows], [
+            "question_candidate_rejected", "question_candidate_accepted",
+        ])
+        self.assertEqual([row["outcome"] for row in rows], ["rejected", "accepted"])
+        self.assertEqual([row["attempt"] for row in rows], [1, 2])
+        self.assertTrue(all(row["request_id"] == "attempts-123" for row in rows))
+        self.assertEqual(rows[1]["question"], generated.question)
+        self.assertEqual(rows[1]["correct_answer"], "B")
