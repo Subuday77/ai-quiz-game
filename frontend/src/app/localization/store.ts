@@ -120,7 +120,7 @@ export class LocalizationStore {
   }
 
   format(key: string, args: Record<string, string | number>): string {
-    return this.t(key).replace(/\\{\\{([a-zA-Z0-9_]+)\\}\\}/g,
+    return this.t(key).replace(/\{\{([a-zA-Z0-9_]+)\}\}/g,
       (original, keyName: string) => Object.prototype.hasOwnProperty.call(args, keyName)
         ? String(args[keyName]) : original);
   }
