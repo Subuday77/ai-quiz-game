@@ -204,20 +204,23 @@ Developer SQL:
     ORDER BY q.created_at DESC
     LIMIT 50;
 
-## DEBUG: rejected candidate traces
+## DEBUG: all generated candidate traces
 
 Default: `AI_GENERATION_DEBUG=false`. Set
 `AI_GENERATION_DEBUG=true` in the backend's loaded `.env` and restart FastAPI
-only when diagnosing bad AI-generated questions.
+only when diagnosing AI-generated questions.
 
 The normal `quiz.diagnostics` logger stays INFO-level and remains
 content-free. A separate opt-in DEBUG-level diagnostic logger emits one
-single-line UTF-8 JSON record for each rejected candidate. **Every record
+single-line UTF-8 JSON record for each accepted or rejected candidate. **Every record
 starts literally with `DEBUG: `**, e.g.:
 
-    DEBUG: {"event":"question_candidate_rejected","request_id":"...","attempt":1,"rejection_reason":"quality_rejected","question":"...","answers":{"A":"...","B":"...","C":"...","D":"..."},"correct_answer":"B","tags":{"entity":["..."],"concept":["..."],"keyword":[]},"fact":{"subject":"...","relation":"...","object":"..."},"critic":{"verdict":{"rationale":"..."},"assessment":{"total":3}}}
+    DEBUG: {"event":"question_candidate_rejected","outcome":"rejected","request_id":"...","attempt":1,"rejection_reason":"quality_rejected","question":"...","answers":{"A":"...","B":"...","C":"...","D":"..."},"correct_answer":"B","tags":{"entity":["..."],"concept":["..."],"keyword":[]},"fact":{"subject":"...","relation":"...","object":"..."},"critic":{"verdict":{"rationale":"..."},"assessment":{"total":3}}}
+    DEBUG: {"event":"question_candidate_accepted","outcome":"accepted","request_id":"...","attempt":2,"rejection_reason":null,"question":"...","answers":{"A":"...","B":"...","C":"...","D":"..."},"correct_answer":"B","tags":{"entity":["..."],"concept":["..."],"keyword":[]},"fact":{"subject":"...","relation":"...","object":"..."},"critic":{"verdict":{"rationale":"..."},"assessment":{"total":0}}}
 
-The actual record also includes the timestamp, fact_key (when available),
+Every accepted/rejected record uses the same payload format. An accepted
+candidate has passed Python/model checks but is NOT necessarily committed
+to PostgreSQL yet. The actual records include the timestamp, fact_key (when available),
 Python duplication assessment, error type and full reviewer verdict
 when the critic completed a valid review. Candidate content and the correct
 answer are absent from INFO logs. A malformed JSON completion produces
@@ -234,11 +237,10 @@ text: treat DEBUG logs as sensitive, use local/private log sinks, and disable
 the flag when troubleshooting is over. In production, restrict access and
 retention and keep this off by default.
 
-There are no new tables, migrations or database writes. Existing
+There are no new tables, migrations or database writes for this feature. Existing
 `question_reviews` rows for accepted questions remain unaffected. Rejected
 candidates are never inserted into `questions` or `question_reviews`
-through this debug feature. No failed candidate logs are persisted by
-the application itself; any external log capture remains the operator's
-responsibility.
+through this debug feature. No candidate DEBUG logs are persisted by the application itself;
+any external log capture remains the operator's responsibility.
 
 Tests: `python -m unittest discover -s tests -v` from `backend/`.
