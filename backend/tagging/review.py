@@ -39,8 +39,11 @@ canonical English kebab-case and accurately describe the question, not
 generic filler. Check the fact.subject, fact.relation, fact.object triple:
 - The relation MUST uniquely name the specific fact/property tested, e.g.
   'birth-year', not generic 'date' or 'identity'.
-- The subject must be the same real-world entity across languages; do not
-  accept made-up or ambiguous subject/relation labels.
+- The subject must be a stable named entity OR a clearly defined concept
+  (for abstract mathematics/science); keep the same identity across
+  languages. Do not accept generic filler or ambiguous relations.
+- Check that the tags and fact actually fit the requested category/topic.
+  Do not treat shared category alone as evidence of duplication.
 - The object must correctly describe the true answer.
 - If any metadata is incorrect, unsupported or ambiguous, mark fail/uncertain.
 - Compare the candidate with the related *prior user questions*. Different
