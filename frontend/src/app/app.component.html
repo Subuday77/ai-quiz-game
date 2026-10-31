@@ -1,17 +1,32 @@
 <main class="shell" [attr.dir]="rtl ? 'rtl' : 'ltr'">
   <header class="brand">
     <span class="spark">✦</span><span>AI QUIZ <strong>GAME</strong></span>
-    <span class="prototype">LOCAL PREVIEW</span>
+    <span class="prototype">{{ locale.t('header.preview') }}</span>
+
+    <div class="ui-language-control">
+      <label for="ui-language">{{ locale.t('account.interfaceLanguage') }}</label>
+      <select id="ui-language" [ngModel]="locale.code" (ngModelChange)="setUiLanguage($event)"
+              [disabled]="locale.loading" aria-label="Interface language">
+        <option *ngFor="let language of uiLanguages" [value]="language.code">{{ language.nativeName }}</option>
+      </select>
+    </div>
+
     <div class="account-controls" aria-label="Player account">
-      <span class="account-loading" *ngIf="authLoading">Checking session…</span>
+      <span class="account-loading" *ngIf="authLoading">{{ locale.t('account.checking') }}</span>
       <ng-container *ngIf="!authLoading">
         <ng-container *ngIf="account as player; else signedOut">
           <span class="player-name" [title]="player.username">● {{ player.display_name || player.username }}</span>
-          <button class="account-button" type="button" (click)="logout()" [disabled]="loading || authBusy">Sign out</button>
+          <button class="account-button" type="button" (click)="logout()" [disabled]="loading || authBusy">
+            {{ locale.t('account.signOut') }}
+          </button>
         </ng-container>
         <ng-template #signedOut>
-          <button class="account-button" type="button" (click)="openAuthDialog('login')" [disabled]="authBusy">Sign in</button>
-          <button class="account-button account-signup" type="button" (click)="openAuthDialog('register')" [disabled]="authBusy">Create account</button>
+          <button class="account-button" type="button" (click)="openAuthDialog('login')" [disabled]="authBusy">
+            {{ locale.t('account.signIn') }}
+          </button>
+          <button class="account-button account-signup" type="button" (click)="openAuthDialog('register')" [disabled]="authBusy">
+            {{ locale.t('account.create') }}
+          </button>
         </ng-template>
       </ng-container>
     </div>
@@ -19,76 +34,75 @@
 
   <section class="star-dashboard" aria-label="Star rewards">
     <div class="star-panel">
-      <div class="star-panel-title">THIS GAME</div>
+      <div class="star-panel-title">{{ locale.t('stars.thisGame') }}</div>
       <div class="star-items">
-        <div class="star-item" *ngFor="let tier of starTiers"
-             [ngClass]="tier.key" [attr.aria-label]="tier.label + ': ' + currentStars[tier.key]">
+        <div class="star-item" *ngFor="let tier of starTiers" [ngClass]="tier.key"
+             [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + currentStars[tier.key]">
           <span class="star-icon" aria-hidden="true">★</span>
-          <span class="star-label">{{ tier.label }}</span>
+          <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
           <strong class="star-number">{{ currentStars[tier.key] }}</strong>
         </div>
       </div>
     </div>
     <div class="star-panel">
       <div class="star-panel-title">
-        ALL TIME
-        <span class="star-local">{{ account ? '(your account · PostgreSQL)' : '(sign in to see rewards)' }}</span>
+        {{ locale.t('stars.allTime') }}
+        <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
       </div>
       <div class="star-items">
-        <div class="star-item" *ngFor="let tier of starTiers"
-             [ngClass]="tier.key" [attr.aria-label]="tier.label + ': ' + totalStars[tier.key]">
+        <div class="star-item" *ngFor="let tier of starTiers" [ngClass]="tier.key"
+             [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + totalStars[tier.key]">
           <span class="star-icon" aria-hidden="true">★</span>
-          <span class="star-label">{{ tier.label }}</span>
+          <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
           <strong class="star-number">{{ totalStars[tier.key] }}</strong>
         </div>
       </div>
       <div class="stats-caption" *ngIf="account">
-        <span *ngIf="statsLoading">Refreshing your statistics…</span>
-        <span *ngIf="!statsLoading && !statsError">{{ gamesPlayed }} games · {{ correctAnswers }} correct answers</span>
-        <span class="stats-warning" *ngIf="statsError" role="status">{{ statsError }}</span>
+        <span *ngIf="statsLoading">{{ locale.t('stats.loading') }}</span>
+        <span *ngIf="!statsLoading && !statsError">{{ locale.format('stats.summary', { games: gamesPlayed, correct: correctAnswers }) }}</span>
+        <span class="stats-warning" *ngIf="statsError" role="status">{{ locale.t(statsError) }}</span>
       </div>
     </div>
   </section>
 
   <section class="card">
-    <div class="eyebrow">KNOWLEDGE IS YOUR SUPERPOWER</div>
-    <h1 *ngIf="screen === 'setup'">Ready to play?</h1>
-    <h1 *ngIf="screen === 'question'">{{ current?.bonus ? 'The secret round' : 'Choose your answer' }}</h1>
-    <h1 *ngIf="screen === 'feedback'">{{ feedback?.correct ? 'Brilliant!' : 'Not quite.' }}</h1>
-    <h1 *ngIf="screen === 'done'">{{ finishedPhase === 'lost' ? 'Game over' : 'Round complete!' }}</h1>
-    <p class="intro" *ngIf="screen === 'setup'">
-      15 questions. Four choices. One shot at the secret 16th question if you finish without hints.
-    </p>
-    <p class="intro" *ngIf="screen === 'setup' && !authLoading && !account">
-      Sign in or create an account to save your games and earn stars.
-    </p>
-    <p class="intro resume-note" *ngIf="screen === 'setup' && restoringGame">Checking for an unfinished game…</p>
-    <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">
-      Your unfinished game was restored. Continue where you left off.
-    </p>
+    <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
+    <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
+    <h1 *ngIf="screen === 'question'">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
+    <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
+    <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
+
+    <p class="intro" *ngIf="screen === 'setup'">{{ locale.t('hero.intro') }}</p>
+    <p class="intro" *ngIf="screen === 'setup' && !authLoading && !account">{{ locale.t('hero.signIn') }}</p>
+    <p class="intro resume-note" *ngIf="screen === 'setup' && restoringGame">{{ locale.t('hero.restoring') }}</p>
+    <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
 
     <div class="status" *ngIf="screen !== 'setup'">
-      <div><span>PROGRESS</span><strong>{{ progress }} / 15</strong></div>
+      <div><span>{{ locale.t('game.progress') }}</span><strong>{{ progress }} / 15</strong></div>
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
     <div *ngIf="screen === 'setup'" class="setup">
-      <label for="language">Question language</label>
+      <label for="language">{{ locale.t('game.questionLanguage') }}</label>
       <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
         <option *ngFor="let language of languages" [value]="language">{{ language }}</option>
       </select>
       <div class="question-actions">
         <button class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || configLoading || authLoading || authBusy || restoringGame">
-          {{ !account ? 'Sign in to play →' : gameId ? 'Resume game →' : 'Start game →' }}
+          {{ locale.t(!account ? 'game.loginToPlay' : gameId ? 'game.resume' : 'game.start') }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
-        <span *ngIf="loading" class="sr-only" role="status">Generating a question…</span>
+        <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
       </div>
     </div>
 
-    <div *ngIf="screen === 'question' && current as question" class="question">
-      <div class="question-label">QUESTION {{ question.number }} <span *ngIf="question.bonus" class="bonus">✦ BONUS</span></div>
+    <div *ngIf="screen === 'question' && current as question" class="question"
+         [attr.dir]="questionRtl ? 'rtl' : 'ltr'">
+      <div class="question-label">
+        {{ locale.format('game.number', { number: question.number }) }}
+        <span *ngIf="question.bonus" class="bonus">{{ locale.t('game.bonusBadge') }}</span>
+      </div>
       <h2>{{ question.question }}</h2>
       <div class="answers">
         <button *ngFor="let choice of choices" type="button" (click)="answer(choice)" [disabled]="loading">
@@ -98,33 +112,31 @@
     </div>
 
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
-      <p *ngIf="result.correct">That is the correct answer.</p>
-      <p *ngIf="!result.correct">The correct answer was <strong>{{ result.correct_answer }} — {{ correctAnswerText }}</strong>.</p>
-      <div class="achievement" *ngIf="result.achievement">★ {{ result.achievement | titlecase }} star unlocked!</div>
+      <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
+      <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
+      <div class="achievement" *ngIf="result.achievement">
+        {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
+      </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="continue()" [disabled]="loading">
-          {{ gameEnded ? 'See results →' : 'Next question →' }}
+          {{ locale.t(gameEnded ? 'game.seeResults' : 'game.nextQuestion') }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
-        <span *ngIf="loading" class="sr-only" role="status">Generating the next question…</span>
+        <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
       </div>
     </div>
 
     <div *ngIf="screen === 'done'" class="results">
-      <p>{{ finishedPhase === 'lost' ? 'Better luck next time.' : 'You finished the round!' }}</p>
-      <p>Your score: <strong>{{ progress }} / 15</strong> main questions</p>
-      <div class="star-list" *ngIf="stars.length">★ {{ stars.join(' · ') }}</div>
-      <button class="primary" type="button" (click)="restart()">Play again ↻</button>
+      <p>{{ locale.t(finishedPhase === 'lost' ? 'game.resultsLost' : 'game.resultsCompleted') }}</p>
+      <p>{{ locale.format('game.roundScore', { count: progress }) }}</p>
+      <div class="star-list" *ngIf="stars.length">★ {{ starNames }}</div>
+      <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
     </div>
 
-    <p class="intro" role="status" *ngIf="questionLoading && longWait">
-      This question is taking longer than usual. We are still preparing it.
-    </p>
-    <p class="error" role="alert" *ngIf="error">{{ error }}</p>
+    <p class="intro" role="status" *ngIf="questionLoading && longWait">{{ locale.t('game.longWait') }}</p>
+    <p class="error" role="alert" *ngIf="error">{{ locale.t(error) }}</p>
     <button class="primary" type="button" *ngIf="canRetryQuestion"
-            (click)="retryQuestion()" [disabled]="loading">
-      Retry question
-    </button>
+            (click)="retryQuestion()" [disabled]="loading">{{ locale.t('game.retry') }}</button>
   </section>
-  <footer>AI-generated questions · Answers checked on the server · Saved to PostgreSQL · Experimental local build</footer>
+  <footer>{{ locale.t('footer.note') }}</footer>
 </main>
