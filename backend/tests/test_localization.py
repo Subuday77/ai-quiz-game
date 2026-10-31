@@ -26,9 +26,11 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         def enable_fks(connection, _record):
             connection.execute("PRAGMA foreign_keys=ON")
         Base.metadata.create_all(self.engine)
+        # unittest executes cleanup callbacks in reverse registration order.
+        # Close the Session while its SQLite connection is still alive.
+        self.addCleanup(self.engine.dispose)
         self.db = Session(self.engine, expire_on_commit=False)
         self.addCleanup(self.db.close)
-        self.addCleanup(self.engine.dispose)
         self.env = patch.dict(os.environ, {"AI_LOCALIZER_BASE_URL": "https://localizer.example"})
         self.env.start()
         self.addCleanup(self.env.stop)
