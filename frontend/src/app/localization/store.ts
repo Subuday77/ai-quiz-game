@@ -3,7 +3,7 @@
  * FastAPI owns revision comparison, AI calls and PostgreSQL caching.
  */
 import { HttpClient } from '@angular/common/http';
-import { Subscription, timeout } from 'rxjs';
+import { Subscription, timeout, timer } from 'rxjs';
 
 export interface UiLanguage {
   code: string;
