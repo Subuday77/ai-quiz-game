@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from game_logic import AnswerResult, GameState
-from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic, User
+from persistence.models import GameRun, Question, QuestionAttempt, QuestionReview, StarAward, Topic, User
 from persistence.seed_topics import category_slug
 from question_schema import Choice, QuizQuestion
 
@@ -173,6 +173,12 @@ def offer_question(
         if dedup_enforce:
             from tagging.repository import save_metadata
             save_metadata(db, stored, question)
+            # The reviewer runs BEFORE the DB transaction; persist its full
+            # accepted verdict alongside the question, tags and attempt.
+            # PrivateAttr remains absent from all player-facing JSON.
+            review = question._review_report
+            if review is not None:
+                db.add(QuestionReview(question_id=stored.id, **review))
         next_number = run.correct_main_answers + 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
