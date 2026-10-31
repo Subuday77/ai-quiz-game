@@ -17,8 +17,8 @@ from output_contracts import OutputContract
 from provider_result import ProviderCompletionError, completed_text
 from quality_configuration import ReviewerSettings
 from quality_errors import QualityConfigurationError, QualityRegenerationError, QualityReviewFailure
-from quality_schema import QualityMode
-from quality_schema_v2 import CheckStatus
+from quality_schema import IssueCode, QualityMode
+from quality_schema_v2 import CheckStatus, DifficultyRating
 from quality_schema_v3 import QualityReviewV3, audit_score
 from question_generator import normalize_output
 from tagging.contract import TaggedQuestion
@@ -70,6 +70,48 @@ class TaggedReview(QualityReviewV3):
     duplicate_match: str
 
 
+# A near-threshold subjective mismatch can tip a seriously flawed question
+# into regeneration, but cannot reject a good question by itself.
+TAGGED_REGEN_SCORE_THRESHOLD = 3.25
+DIFFICULTY_STEP = 0.25
+DIFFICULTY_MAX_PENALTY = 0.5
+
+
+def tagged_assessment(verdict: TaggedReview, answer: str) -> dict:
+    """Compute tagged v4 scores without changing the older v3 scoring contract.
+
+    Only the difficulty-related knowledge component is downweighted. Critic's
+    integer source fields remain unchanged for the strict JSON Schema.
+    """
+    assessment = audit_score(verdict, answer)
+    raw_penalties = assessment["penalties"]
+    difficulty_mismatch = (
+        verdict.difficulty in (DifficultyRating.TOO_EASY, DifficultyRating.TOO_HARD)
+        or IssueCode.DIFFICULTY_MISMATCH in verdict.issue_codes
+    )
+    # A reported mismatch is worth a quarter even if the critic assigns no
+    # knowledge penalty (e.g. it blames easy distractors). Strong mismatch
+    # reaches half a point; it is never an independent hard failure.
+    difficulty_units = max(
+        raw_penalties["knowledge"], 1 if difficulty_mismatch else 0,
+    )
+    difficulty_penalty = min(
+        DIFFICULTY_MAX_PENALTY, difficulty_units * DIFFICULTY_STEP,
+    )
+    penalties = {**raw_penalties, "knowledge": difficulty_penalty}
+    total = sum(penalties.values())
+    return {
+        **assessment,
+        "total": total,
+        "penalties": penalties,
+        "raw_penalties": raw_penalties,
+        "score_threshold": TAGGED_REGEN_SCORE_THRESHOLD,
+        "threshold_preview": {
+            str(t): total >= t for t in (2, 3, TAGGED_REGEN_SCORE_THRESHOLD, 4, 5)
+        },
+    }
+
+
 def check_tagged_quality(question: TaggedQuestion, *, language: str,
                          requested_difficulty: int, category: str,
                          neighbors: list[dict], mode: QualityMode,
@@ -118,13 +160,14 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
 
     # Score and log EVERY well-formed review, including candidates that
     # will be rejected for invalid metadata or repeated knowledge.
-    assessment = audit_score(verdict, question.correct_answer)
+    assessment = tagged_assessment(verdict, question.correct_answer)
     event("tagged_review_completed", tags=verdict.tags_valid.value,
           fact=verdict.fact_valid.value, semantic_duplicate=verdict.semantic_duplicate,
           general_mode=mode.value)
     event("tagged_review_score", score=assessment["total"],
           penalties=assessment["penalties"],
           threshold_preview=assessment["threshold_preview"],
+          score_threshold=TAGGED_REGEN_SCORE_THRESHOLD,
           critical=assessment["critical"], difficulty=verdict.difficulty.value,
           facts=verdict.facts.value, options=verdict.options.value,
           language=verdict.language.value, leakage=verdict.leakage.value,
@@ -135,11 +178,16 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     # Retain the validated critic verdict even for rejected candidates so the
     # opt-in DEBUG trace can explain the rejection. Only ACCEPTED questions
     # are stored in question_reviews; rejected verdicts stay in process memory.
+    score_rejection = (
+        mode == QualityMode.ENFORCE
+        and assessment["total"] >= TAGGED_REGEN_SCORE_THRESHOLD
+    )
     review_rejected = (
         verdict.tags_valid != CheckStatus.PASS
         or verdict.fact_valid != CheckStatus.PASS
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
+        or score_rejection
     )
     # The private report is carried to the later PostgreSQL transaction.
     # No DB connection is kept open during the model request.
@@ -170,8 +218,10 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
         raise SemanticDuplicateError()
-    # Existing editorial scores remain audit-only in v4 (the separate quality
-    # policy controls critical editorial enforcement).
-    if mode == QualityMode.ENFORCE and assessment["critical"] != "none":
+    # Audit remains entirely diagnostic for editorial penalties.
+    # In enforce, critical faults OR a high weighted score trigger retry.
+    if mode == QualityMode.ENFORCE and (
+        assessment["critical"] != "none" or score_rejection
+    ):
         raise QualityRegenerationError()
 
