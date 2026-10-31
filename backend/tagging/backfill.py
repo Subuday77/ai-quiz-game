@@ -113,7 +113,8 @@ def main() -> None:
             return
 
         queue = db.scalars(missing.limit(args.limit)).all()
-        db.rollback()  # Keep connections free between calls.
+        db.expunge_all()  # Keep loaded candidates usable without DB I/O.
+        db.rollback()  # Release connection before AI calls.
         completed, failures = 0, 0
         for question in queue:
             tagged = None
