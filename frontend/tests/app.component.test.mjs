@@ -354,7 +354,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /openAuthDialog\('login'\)/);
   assert.match(template, /openAuthDialog\('register'\)/);
   assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
-  assert.match(template, /\*ngIf="canRetryQuestion"[\s\S]*?\(click\)="retryQuestion\(\)"/);
+  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /stars\.allTime/);
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
