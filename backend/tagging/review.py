@@ -84,6 +84,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     if remaining <= 0:
         raise QualityReviewFailure("tag_review_budget_exhausted", retryable=False)
     settings = ReviewerSettings.from_env()
+    review_start = clock()
     token = provider_timeout.set(min(timeout_seconds, remaining))
     try:
         reviewer = LLMClient(settings.provider, model_id=settings.model_id,
@@ -115,17 +116,50 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     finally:
         provider_timeout.reset(token)
 
+    # Score and log EVERY well-formed review, including candidates that
+    # will be rejected for invalid metadata or repeated knowledge.
+    assessment = audit_score(verdict, question.correct_answer)
     event("tagged_review_completed", tags=verdict.tags_valid.value,
           fact=verdict.fact_valid.value, semantic_duplicate=verdict.semantic_duplicate,
           general_mode=mode.value)
+    event("tagged_review_score", score=assessment["total"],
+          penalties=assessment["penalties"],
+          threshold_preview=assessment["threshold_preview"],
+          critical=assessment["critical"], difficulty=verdict.difficulty.value,
+          facts=verdict.facts.value, options=verdict.options.value,
+          language=verdict.language.value, leakage=verdict.leakage.value,
+          issue_codes=[code.value for code in verdict.issue_codes],
+          tags_valid=verdict.tags_valid.value, fact_valid=verdict.fact_valid.value,
+          semantic_duplicate=verdict.semantic_duplicate, mode=mode.value)
+
     if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
         raise SemanticDuplicateError()
-
-    # The v3 editorial numeric score remains an AUDIT/diagnostic signal.
-    assessment = audit_score(verdict, question.correct_answer)
-    event("tagged_review_score", score=assessment["total"],
-          critical=assessment["critical"], mode=mode.value)
+    # Existing editorial scores remain audit-only in v4 (the separate quality
+    # policy controls critical editorial enforcement).
     if mode == QualityMode.ENFORCE and assessment["critical"] != "none":
         raise QualityRegenerationError()
+
+    # The private report is carried to the later PostgreSQL transaction.
+    # No DB connection is kept open during the model request.
+    # Backfill does not generate a reviewer verdict and cannot invent one.
+    resolved_model = getattr(reviewer, "model", None)
+    if not isinstance(resolved_model, str):
+        resolved_model = settings.model_id
+    question._review_report = {
+        "checker_type": "ai_tagged_critic",
+        "provider": settings.provider,
+        "model": resolved_model,
+        "contract_version": "tagged_review_v4",
+        "decision": "accept" if mode == QualityMode.ENFORCE else "audit",
+        "issues": [code.value for code in verdict.issue_codes],
+        "details": {
+            "requested_difficulty": requested_difficulty,
+            "category": category,
+            "general_mode": mode.value,
+            "verdict": verdict.model_dump(mode="json"),
+            "assessment": assessment,
+        },
+        "duration_ms": max(0, round((clock() - review_start) * 1000)),
+    }
