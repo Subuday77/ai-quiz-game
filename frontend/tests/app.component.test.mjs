@@ -623,3 +623,157 @@ test('spinner continues rotating under reduced-motion setting', () => {
   assert.match(reduced, /animation-duration:\s*6s/);
   assert.match(reduced, /animation-duration:\s*8s/);
 });
+
+
+test('RAM cache switches among complete locales instantly without HTTP or spinner', () => {
+  const calls = [];
+  const words = { en: 'Ready to play?', de: 'Bereit zum Spielen?', fr: 'Prêt à jouer ?' };
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      calls.push(code);
+      return of({ language_code: code, dictionary: { ...english, 'hero.ready': words[code] },
+        source_version: 'v1', fallback: false, missing_count: 0 });
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  store.load('fr');
+  assert.deepEqual(calls, ['en', 'de', 'fr']);
+  assert.equal(store.t('hero.ready'), words.fr);
+  let callbackSuccess = false;
+  store.load('de', success => { callbackSuccess = success; });
+  assert.equal(callbackSuccess, true);
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'de');
+  assert.equal(store.t('hero.ready'), words.de);
+  store.load('fr');
+  store.load('en');
+  assert.deepEqual(calls, ['en', 'de', 'fr']);
+  assert.equal(store.loading, false);
+  assert.equal(store.t('hero.ready'), words.en);
+  store.destroy();
+});
+
+test('a newly created localization store fetches fresh dictionaries after page reload', () => {
+  const calls = [];
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      calls.push(code);
+      return of({ language_code: code, dictionary: english,
+        source_version: 'latest', fallback: false, missing_count: 0 });
+    },
+  };
+  const oldPage = new LocalizationStore(http);
+  oldPage.load('en');
+  oldPage.load('de');
+  oldPage.load('en');
+  oldPage.destroy();
+
+  const newPage = new LocalizationStore(http);
+  newPage.load('en');
+  newPage.load('de');
+  assert.deepEqual(calls, ['en', 'de', 'en', 'de']);
+  newPage.destroy();
+});
+
+test('reset invalidates selected cached locale but preserves unrelated ones', () => {
+  const calls = [];
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      calls.push(code);
+      return of({ language_code: code, dictionary: { ...english, 'hero.ready': code },
+        source_version: String(calls.length), fallback: false, missing_count: 0 });
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  store.load('fr');
+  store.invalidate('de');
+  store.load('de');
+  store.load('fr');
+  store.load('de');
+  assert.deepEqual(calls, ['en', 'de', 'fr', 'de']);
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'de');
+  assert.match(source, /this\.locale\.invalidate\(selected\)/);
+  store.destroy();
+});
+
+test('reset all and forced refresh bypass stale RAM dictionaries', () => {
+  const calls = [];
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      calls.push(code);
+      return of({ language_code: code, dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  store.load('fr');
+  store.invalidate('all');
+  store.load('de'); // Must fetch fresh copy, even if it is currently displayed.
+  store.load('fr');
+  store.load('fr', undefined, true); // Explicit refresh also bypasses cache.
+  assert.deepEqual(calls, ['en', 'de', 'fr', 'de', 'fr', 'fr']);
+  store.destroy();
+});
+
+test('cache hit cancels a pending translation and ignores its late response', () => {
+  const pending = new Subject();
+  const calls = [];
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      calls.push(code);
+      if (code === 'de') return pending.asObservable();
+      return of({ language_code: code, dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  assert.equal(store.loading, true);
+  store.load('en'); // English is already in RAM; no request or overlay.
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'en');
+  assert.equal(pending.observed, false);
+  pending.next({ language_code: 'de', dictionary: { ...english, 'hero.ready': 'Stale' },
+    source_version: 'v1', fallback: false, missing_count: 0 });
+  pending.complete();
+  assert.equal(store.code, 'en');
+  assert.equal(store.t('hero.ready'), 'Ready to play?');
+  assert.deepEqual(calls, ['en', 'de']);
+  store.destroy();
+});
+
+test('failed translations never enter the RAM cache', () => {
+  let attempts = 0;
+  const http = {
+    get(url) {
+      const code = url.split('/').pop();
+      if (code === 'en') return of({ language_code: code, dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      attempts++;
+      return throwError(() => new Error('Offline'));
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('de');
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'en');
+  store.load('de');
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'en');
+  assert.equal(attempts, 2);
+  store.destroy();
+});
