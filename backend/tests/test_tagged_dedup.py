@@ -200,6 +200,29 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertEqual(len(history_for_user(self.db, self.alice)), 2)
 
 
+    def test_backfill_dry_run_never_calls_ai_or_mutates_db(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from tagging import backfill
+        plain = QuizQuestion.model_validate({
+            key: value for key, value in candidate().model_dump().items()
+            if key not in ("tags", "fact")
+        })
+        offer_question(self.db, run_id=self.first_run.id, user_id=self.alice,
+                       question=plain, category="History", provider="test", model="stub")
+        output = StringIO()
+        with patch("tagging.backfill.engine", return_value=self.engine), \
+             patch("tagging.backfill.LLMClient") as ai, \
+             patch("sys.argv", ["backfill", "--dry-run"]), \
+             redirect_stdout(output):
+            backfill.main()
+        ai.assert_not_called()
+        self.assertIn("Historical questions missing canonical tags/facts: 1", output.getvalue())
+        self.assertIn("DRY RUN", output.getvalue())
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionFact)), 0)
+
+
+
 class TaggedCriticTests(unittest.TestCase):
     def setUp(self):
         self.verdict = {
