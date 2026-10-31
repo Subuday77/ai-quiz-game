@@ -68,7 +68,7 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
         return of({ enabled: devReset });
       }
       if (url === '/api/auth/me') {
-        return signedIn ? of(account) : throwError(() => new HttpErrorResponse({ status: 401 }));
+        return signedIn ? of({ ...account }) : throwError(() => new HttpErrorResponse({ status: 401 }));
       }
       if (url === '/api/profile/me/stats') {
         return of({ ...profile, star_awards: { ...profile.star_awards } });
