@@ -57,6 +57,10 @@ generic filler. Check the fact.subject, fact.relation, fact.object triple:
 - Do not conceal uncertainty or claim unrelated facts are duplicates merely
   because a topic/entity appears in both.
 - Never expose these tags, facts or reviews to the player.
+Difficulty ratings are subjective. Reserve too_easy/too_hard for a clear
+mismatch, not ordinary differences in background knowledge. A difficulty
+mismatch ALONE must never set facts/fact_valid/options to fail; those
+checks concern factual correctness, not how familiar a player is with it.
 The Python verifier's deterministic rejection takes precedence over this
 review, even if you think a question is new.
 Return only the strict v4 JSON object. Do not add a model-computed total.
