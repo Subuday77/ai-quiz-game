@@ -41,6 +41,7 @@ class User(Base):
     username_key: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
     display_name: Mapped[str | None] = mapped_column(String(80))
     preferred_language: Mapped[str] = mapped_column(String(25), nullable=False, default="English")
+    ui_language: Mapped[str] = mapped_column(String(20), nullable=False, default="en")
     theme_key: Mapped[str] = mapped_column(String(50), nullable=False, default="default")
     created_at = datetime_column()
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -256,3 +257,25 @@ class QuestionReport(Base):
         CheckConstraint("reason IN ('incorrect_key','multiple_correct','answer_leak','ambiguous',"
                         "'bad_translation','difficulty_mismatch','other')", name="ck_report_reason"),
     )
+
+
+class UiTranslation(Base):
+    """One approved translated UI string, invalidated by its English source hash."""
+    __tablename__ = "ui_translations"
+
+    locale_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    string_key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at = datetime_column()
+
+
+class UiLocaleSync(Base):
+    """Bounded, cross-worker translation lease and retry cooldown."""
+    __tablename__ = "ui_locale_sync"
+
+    locale_code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at = datetime_column()
