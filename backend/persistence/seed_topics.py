@@ -7,6 +7,9 @@ This is NOT topic tagging. Tags/keywords are to be created separately.
 """
 import hashlib
 import re
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +36,8 @@ def seed_topics(db: Session) -> int:
 
 
 def main():
+    # Match the Alembic configuration: DATABASE_URL lives in the repo root.
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     with Session(engine()) as db:
         created = seed_topics(db)
     print(f"Seeded {created} missing topics.")
