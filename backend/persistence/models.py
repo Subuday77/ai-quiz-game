@@ -134,6 +134,24 @@ class QuestionTag(Base):
     origin: Mapped[str] = mapped_column(String(40), nullable=False, default="generator")
 
 
+
+class QuestionFact(Base):
+    """Normalized knowledge tested by a question, independent of language.
+
+    A question can have one tested fact. The answer/object is retained for
+    audit, but uniqueness is evaluated by subject+relation across each
+    individual player's shown-question history (not globally).
+    """
+    __tablename__ = "question_facts"
+    question_id = mapped_column(Uuid(as_uuid=True), ForeignKey("questions.id", ondelete="CASCADE"), primary_key=True)
+    fact_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(160), nullable=False)
+    relation: Mapped[str] = mapped_column(String(160), nullable=False)
+    object: Mapped[str] = mapped_column(String(160), nullable=False)
+    origin: Mapped[str] = mapped_column(String(24), nullable=False, default="generator")
+    created_at = datetime_column()
+
+
 class GameRun(Base):
     __tablename__ = "game_runs"
     id = id_column()
