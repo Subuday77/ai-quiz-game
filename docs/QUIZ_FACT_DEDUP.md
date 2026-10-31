@@ -143,3 +143,63 @@ No accepted question, answer, game run, or star award is deleted.
 The generic Retry question button remains for all other errors and is hidden
 while the specialized panel is present. UI regression tests cover recovery,
 translation keys, no extra game POST, and unaffected error handling.
+
+
+## Critic scoring and database audit
+
+The tagged v4 reviewer returns the full v3 editorial assessment:
+
+- distractors penalty: 0..3;
+- knowledge penalty: 0..2;
+- suitability penalty: 0..2;
+- wording penalty: 0..1.
+
+The sum is a PENALTY (0 = no penalty assigned; higher = worse).
+These fields, the reported difficulty (appropriate/too_easy/too_hard/
+uncertain), category checks, issue codes, threshold previews and critical
+recommendations are emitted in the structured tagged_review_score log event.
+The deterministic Python duplicate scoring is logged separately as
+tag_similarity_score with score, rejection threshold, reason and rejected flag.
+
+The accepted tagged candidate carries a PRIVATE reviewer payload to the
+same PostgreSQL transaction that creates the question, fact, tags and attempt.
+The existing question_reviews table stores checker_type=ai_tagged_critic,
+contract_version=tagged_review_v4, decision, issue codes, provider/model,
+review duration, and details with:
+
+- verdict: complete typed reviewer output, including rationale;
+- assessment: computed total and four individual penalties;
+- python_duplicate_check: similarity score, threshold and reason;
+- general_mode, requested_difficulty, category.
+
+The rationale, correct answer and question body are NOT included in ordinary
+content-free diagnostic logs. The full verdict is safely inspectable by
+developers in PostgreSQL. This does not change what is sent to Angular.
+
+IMPORTANT: review rows start appearing only for NEW questions accepted after
+this revision is deployed. Prior approved questions and past historical
+tag-extraction backfills have no saved reviewer output; no verdict is invented.
+Rejected candidates that were never inserted as questions have no
+question_reviews row because that table has a mandatory question_id foreign
+key. Their score breakdown is still logged for debugging.
+
+With AI_QUALITY_MODE=audit (as observed in the user's live trace), editorial
+penalties and even editor-reported difficulty remain diagnostic; they do not
+automatically reject an otherwise valid tagged question. With enforce, critical
+editorial findings reject, but numeric score thresholds remain previews only.
+Turning score thresholds into policy should be a separately calibrated change.
+
+Developer SQL:
+
+    SELECT q.id, q.requested_difficulty, q.text,
+           r.created_at, r.decision,
+           r.details->'verdict'->>'difficulty' AS critic_difficulty,
+           r.details->'assessment'->>'total' AS penalty_total,
+           r.details->'assessment'->'penalties' AS penalties,
+           r.details->'python_duplicate_check' AS duplicate_similarity,
+           r.details->'verdict'->>'rationale' AS rationale
+    FROM public.questions q
+    LEFT JOIN public.question_reviews r ON r.question_id = q.id
+    WHERE q.prompt_version = 'tagged-v2'
+    ORDER BY q.created_at DESC
+    LIMIT 50;
