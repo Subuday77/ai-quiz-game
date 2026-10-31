@@ -132,15 +132,15 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
           tags_valid=verdict.tags_valid.value, fact_valid=verdict.fact_valid.value,
           semantic_duplicate=verdict.semantic_duplicate, mode=mode.value)
 
-    if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
-        raise QualityRegenerationError()
-    if verdict.semantic_duplicate:
-        raise SemanticDuplicateError()
-    # Existing editorial scores remain audit-only in v4 (the separate quality
-    # policy controls critical editorial enforcement).
-    if mode == QualityMode.ENFORCE and assessment["critical"] != "none":
-        raise QualityRegenerationError()
-
+    # Retain the validated critic verdict even for rejected candidates so the
+    # opt-in DEBUG trace can explain the rejection. Only ACCEPTED questions
+    # are stored in question_reviews; rejected verdicts stay in process memory.
+    review_rejected = (
+        verdict.tags_valid != CheckStatus.PASS
+        or verdict.fact_valid != CheckStatus.PASS
+        or verdict.semantic_duplicate
+        or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
+    )
     # The private report is carried to the later PostgreSQL transaction.
     # No DB connection is kept open during the model request.
     # Backfill does not generate a reviewer verdict and cannot invent one.
@@ -152,7 +152,8 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         "provider": settings.provider,
         "model": resolved_model,
         "contract_version": "tagged_review_v4",
-        "decision": "accept" if mode == QualityMode.ENFORCE else "audit",
+        "decision": ("reject" if review_rejected
+                     else "accept" if mode == QualityMode.ENFORCE else "audit"),
         "issues": [code.value for code in verdict.issue_codes],
         "details": {
             "requested_difficulty": requested_difficulty,
@@ -164,3 +165,13 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         },
         "duration_ms": max(0, round((clock() - review_start) * 1000)),
     }
+
+    if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
+        raise QualityRegenerationError()
+    if verdict.semantic_duplicate:
+        raise SemanticDuplicateError()
+    # Existing editorial scores remain audit-only in v4 (the separate quality
+    # policy controls critical editorial enforcement).
+    if mode == QualityMode.ENFORCE and assessment["critical"] != "none":
+        raise QualityRegenerationError()
+
