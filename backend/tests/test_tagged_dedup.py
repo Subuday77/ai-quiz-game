@@ -232,7 +232,7 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(review)
         self.assertEqual(review.checker_type, "ai_tagged_critic")
         self.assertEqual(review.provider, "openai")
-        self.assertEqual(review.details["assessment"]["total"], 3)
+        self.assertEqual(review.details["assessment"]["total"], 2.25)
         self.assertEqual(review.details["python_duplicate_check"]["score"], 0)
         self.assertEqual(review.details["python_duplicate_check"]["threshold"], 70)
         self.assertEqual(review.details["verdict"]["difficulty"], "too_easy")
@@ -411,7 +411,7 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIsNotNone(checked._review_report)
         details = checked._review_report["details"]
         self.assertEqual(details["verdict"]["difficulty"], "too_easy")
-        self.assertEqual(details["assessment"]["total"], 5)
+        self.assertEqual(details["assessment"]["total"], 4.25)
         self.assertEqual(details["assessment"]["penalties"]["distractors"], 2)
         self.assertEqual(details["assessment"]["penalties"]["wording"], 1)
         self.assertEqual(checked._review_report["decision"], "audit")
@@ -419,7 +419,7 @@ class TaggedCriticTests(unittest.TestCase):
         scores = [call.kwargs for call in log.call_args_list
                   if call.args[0] == "tagged_review_score"]
         self.assertEqual(len(scores), 1)
-        self.assertEqual(scores[0]["score"], 5)
+        self.assertEqual(scores[0]["score"], 4.25)
         self.assertEqual(scores[0]["penalties"]["knowledge"], 1)
         self.assertEqual(scores[0]["difficulty"], "too_easy")
         self.assertNotIn("rationale", scores[0])
@@ -432,6 +432,68 @@ class TaggedCriticTests(unittest.TestCase):
                         if call.args[0] == "tagged_review_score"]
         self.assertEqual(len(score_events), 1)
         self.assertEqual(score_events[0].kwargs["fact_valid"], "fail")
+
+
+    def test_difficulty_weight_only_a_quarter_to_half_point(self):
+        from tagging.review import tagged_assessment
+        normal = tagged_assessment(
+            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+                self.verdict
+            ), "B",
+        )
+        self.assertEqual(normal["total"], 0)
+        easy = {**self.verdict, "difficulty": "too_easy", "knowledge_penalty": 0}
+        minor = tagged_assessment(
+            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+                easy
+            ), "B",
+        )
+        self.assertEqual(minor["penalties"]["knowledge"], 0.25)
+        self.assertEqual(minor["total"], 0.25)
+        severe = {**easy, "knowledge_penalty": 2}
+        major = tagged_assessment(
+            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+                severe
+            ), "B",
+        )
+        self.assertEqual(major["penalties"]["knowledge"], 0.5)
+        self.assertEqual(major["total"], 0.5)
+        self.assertEqual(major["raw_penalties"]["knowledge"], 2)
+
+    def test_subjective_difficulty_alone_never_rejects_enforce(self):
+        flagged = {
+            **self.verdict, "difficulty": "too_easy",
+            "knowledge_penalty": 2,
+            "issue_codes": ["difficulty_mismatch"],
+        }
+        with patch("tagging.review.event") as event:
+            verified = self.check(flagged, QualityMode.ENFORCE)
+        self.assertEqual(verified._review_report["details"]["assessment"]["total"], 0.5)
+        self.assertEqual(verified._review_report["decision"], "accept")
+        score = [call.kwargs for call in event.call_args_list
+                 if call.args[0] == "tagged_review_score"][0]
+        self.assertEqual(score["score_threshold"], 3.25)
+        self.assertFalse(score["threshold_preview"]["3.25"])
+
+    def test_difficulty_quarter_tips_three_points_to_enforce_rejection(self):
+        other_three = {**self.verdict, "distractor_penalty": 3}
+        # An otherwise marginal question with three points is NOT rejected.
+        accepted = self.check(other_three, QualityMode.ENFORCE)
+        self.assertEqual(accepted._review_report["details"]["assessment"]["total"], 3)
+        critical_plus_quarter = {
+            **other_three, "difficulty": "too_easy", "knowledge_penalty": 0,
+        }
+        with self.assertRaises(QualityRegenerationError):
+            self.check(critical_plus_quarter, QualityMode.ENFORCE)
+        # Audit still records the exact same 3.25 without blocking.
+        approved_in_audit = self.check(critical_plus_quarter, QualityMode.AUDIT)
+        self.assertEqual(
+            approved_in_audit._review_report["details"]["assessment"]["total"], 3.25
+        )
+        self.assertTrue(
+            approved_in_audit._review_report["details"]["assessment"][
+                "threshold_preview"]["3.25"]
+        )
 
     def test_invalid_tags_are_rejected_even_if_general_quality_off(self):
         with self.assertRaises(QualityRegenerationError):
