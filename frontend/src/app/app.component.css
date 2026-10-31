@@ -296,10 +296,21 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   1.6%, 7% { opacity: 1; transform: translateY(0); }
   9.09%, 100% { opacity: 0; transform: translateY(-6px); }
 }
+/* Keep the loader visibly active on devices that request reduced motion.
+   Use gentle, slower orbits and text cross-fades instead of disabling the
+   entire animation (which previously froze the loader on its English caption). */
+@keyframes locale-phrase-crossfade {
+  0% { opacity: 0; }
+  1.6%, 7% { opacity: 1; }
+  9.09%, 100% { opacity: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .localization-orb::before, .localization-orb::after { animation: none; }
-  .localization-phrase { animation: none; display: none; }
-  .localization-phrase:first-child { display: grid; opacity: 1; transform: none; }
+  .localization-orb::before { animation-duration: 6s; }
+  .localization-orb::after { animation-duration: 8s; }
+  .localization-phrase {
+    animation-name: locale-phrase-crossfade;
+    transform: none;
+  }
 }
 @media (max-width: 640px) {
   .dev-translation-tools { width: 100%; }
