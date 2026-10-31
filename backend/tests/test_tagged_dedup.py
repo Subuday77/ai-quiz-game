@@ -29,7 +29,7 @@ from tagging.core import (
     similarity, threshold,
 )
 from tagging.repository import history_for_user
-from tagging.review import check_tagged_quality
+from tagging.review import TaggedReview, check_tagged_quality, tagged_assessment
 from tagging.schemas import (
     tagged_question_schema, tagged_review_schema, tag_extraction_schema,
 )
@@ -437,14 +437,14 @@ class TaggedCriticTests(unittest.TestCase):
     def test_difficulty_weight_only_a_quarter_to_half_point(self):
         from tagging.review import tagged_assessment
         normal = tagged_assessment(
-            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+            TaggedReview.model_validate(
                 self.verdict
             ), "B",
         )
         self.assertEqual(normal["total"], 0)
         easy = {**self.verdict, "difficulty": "too_easy", "knowledge_penalty": 0}
         minor = tagged_assessment(
-            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+            TaggedReview.model_validate(
                 easy
             ), "B",
         )
@@ -452,7 +452,7 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertEqual(minor["total"], 0.25)
         severe = {**easy, "knowledge_penalty": 2}
         major = tagged_assessment(
-            __import__("tagging.review", fromlist=["TaggedReview"]).TaggedReview.model_validate(
+            TaggedReview.model_validate(
                 severe
             ), "B",
         )
