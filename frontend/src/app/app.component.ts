@@ -4,6 +4,7 @@ import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 import { LocalizationStore, UI_LANGUAGES } from './localization/store';
+import { RESET_COPY, RESET_LANGUAGE_NAMES } from './localization/reset-copy';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
@@ -66,6 +67,7 @@ interface AnswerFeedback {
 export class AppComponent implements OnInit, OnDestroy {
   readonly languages = ['English', 'Russian', 'Hebrew', 'German', 'French', 'Spanish', 'Italian'];
   readonly uiLanguages = UI_LANGUAGES;
+  readonly resetCopy = RESET_COPY;
   readonly locale: LocalizationStore;
   // Status text is intentionally shown in multiple native languages while
   // translation runs; it does not depend on a dictionary being available.
@@ -95,6 +97,7 @@ export class AppComponent implements OnInit, OnDestroy {
   authBusy = false;
   resetEnabled = false;
   resetBusy = false;
+  resetError = '';
   restoringGame = false;
   finishedPhase: 'lost' | 'completed' | null = null;
   statsLoading = false;
@@ -212,19 +215,22 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resetBusy = true;
     try {
       const { default: Swal } = await import('sweetalert2');
-      const inputOptions: Record<string, string> = { all: this.locale.t('localization.resetAll') };
+      this.resetError = '';
+      const inputOptions: Record<string, string> = { all: RESET_COPY.all };
       for (const language of this.uiLanguages) {
-        if (language.code !== 'en') inputOptions[language.code] = language.nativeName;
+        if (language.code !== 'en') {
+          inputOptions[language.code] = RESET_LANGUAGE_NAMES[language.code];
+        }
       }
       const decision = await Swal.fire({
-        titleText: this.locale.t('localization.resetTitle'),
-        text: this.locale.t('localization.resetExplain'),
+        titleText: RESET_COPY.title,
+        text: RESET_COPY.explain,
         input: 'select',
         inputOptions,
         inputValue: this.locale.code === 'en' ? 'all' : this.locale.code,
         showCancelButton: true,
-        confirmButtonText: this.locale.t('localization.resetConfirm'),
-        cancelButtonText: this.locale.t('auth.cancel'),
+        confirmButtonText: RESET_COPY.confirm,
+        cancelButtonText: RESET_COPY.cancel,
         confirmButtonColor: '#a14a60',
         background: '#1b1e3e',
         color: '#f1f3ff',
@@ -237,8 +243,8 @@ export class AppComponent implements OnInit, OnDestroy {
       ).pipe(timeout(10000)));
       await Swal.fire({
         icon: 'success',
-        titleText: this.locale.t('localization.resetDone'),
-        text: this.locale.format('localization.resetResult', { count: result.removed_count }),
+        titleText: RESET_COPY.done,
+        text: RESET_COPY.result(result.removed_count),
         background: '#1b1e3e',
         color: '#f1f3ff',
         confirmButtonColor: '#8170d8',
@@ -250,7 +256,7 @@ export class AppComponent implements OnInit, OnDestroy {
         }, true);
       }
     } catch {
-      this.error = 'localization.resetFailed';
+      this.resetError = RESET_COPY.failed;
     } finally {
       this.resetBusy = false;
     }
