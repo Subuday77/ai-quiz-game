@@ -67,6 +67,21 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly languages = ['English', 'Russian', 'Hebrew', 'German', 'French', 'Spanish', 'Italian'];
   readonly uiLanguages = UI_LANGUAGES;
   readonly locale: LocalizationStore;
+  // Status text is intentionally shown in multiple native languages while
+  // translation runs; it does not depend on a dictionary being available.
+  readonly localizationStatus = [
+    { text: 'Localizing the website…', rtl: false },
+    { text: 'Die Website wird übersetzt…', rtl: false },
+    { text: 'Traduction du site en cours…', rtl: false },
+    { text: 'Traduciendo el sitio web…', rtl: false },
+    { text: 'Traduzione del sito in corso…', rtl: false },
+    { text: 'A traduzir o site…', rtl: false },
+    { text: 'Идёт перевод сайта…', rtl: false },
+    { text: 'האתר עובר תרגום…', rtl: true },
+    { text: 'جارٍ ترجمة الموقع…', rtl: true },
+    { text: 'サイトを翻訳しています…', rtl: false },
+    { text: '正在翻译网站…', rtl: false },
+  ];
   readonly choices: Choice[] = ['A', 'B', 'C', 'D'];
   readonly starTiers: { key: StarTier; label: string }[] = [
     { key: 'bronze', label: 'Bronze' },
@@ -78,6 +93,8 @@ export class AppComponent implements OnInit, OnDestroy {
   account: Account | null = null;
   authLoading = true;
   authBusy = false;
+  resetEnabled = false;
+  resetBusy = false;
   restoringGame = false;
   finishedPhase: 'lost' | 'completed' | null = null;
   statsLoading = false;
@@ -153,19 +170,92 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   setUiLanguage(code: string): void {
-    if (!this.uiLanguages.some(item => item.code === code)) return;
-    this.locale.load(code);
-    if (!this.account || this.account.ui_language === code) return;
-    const accountId = this.account.id;
-    this.subscriptions.add(this.http.patch<{ language_code: string }>(
-      '/api/localization/preference', { language_code: code },
-    ).pipe(timeout(10000)).subscribe({
+    if (!this.uiLanguages.some(item => item.code === code) || this.locale.loading) return;
+    const accountId = this.account?.id;
+    // Persist the preference only AFTER the complete translation is ready.
+    this.locale.load(code, (successful) => {
+      if (!successful) {
+        this.error = 'localization.loadFailed';
+        return;
+      }
+      this.error = '';
+      if (!accountId || this.account?.id !== accountId || this.account.ui_language === code) return;
+      this.subscriptions.add(this.http.patch<{ language_code: string }>(
+        '/api/localization/preference', { language_code: code },
+      ).pipe(timeout(10000)).subscribe({
+        next: (result) => {
+          if (this.account?.id === accountId && this.locale.code === result.language_code) {
+            this.account.ui_language = result.language_code;
+          }
+        },
+        error: () => { this.error = 'account.languageSaveFailed'; },
+      }));
+    });
+  }
+
+  // The reset button exists only when the development-only backend explicitly
+  // allows it. Production defaults to disabled, including API-level checks.
+  private discoverResetCapability(accountId: string): void {
+    this.resetEnabled = false;
+    this.subscriptions.add(this.http.get<{ enabled: boolean }>(
+      '/api/localization/reset-capability',
+    ).pipe(timeout(5000)).subscribe({
       next: (result) => {
-        if (this.account?.id === accountId) this.account.ui_language = result.language_code;
+        if (this.account?.id === accountId) this.resetEnabled = result.enabled === true;
       },
-      error: () => { this.error = 'account.languageSaveFailed'; },
+      error: () => { this.resetEnabled = false; },
     }));
   }
+
+  async resetTranslations(): Promise<void> {
+    if (!this.account || !this.resetEnabled || this.resetBusy || this.locale.loading) return;
+    this.resetBusy = true;
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const inputOptions: Record<string, string> = { all: this.locale.t('localization.resetAll') };
+      for (const language of this.uiLanguages) {
+        if (language.code !== 'en') inputOptions[language.code] = language.nativeName;
+      }
+      const decision = await Swal.fire({
+        titleText: this.locale.t('localization.resetTitle'),
+        text: this.locale.t('localization.resetExplain'),
+        input: 'select',
+        inputOptions,
+        inputValue: this.locale.code === 'en' ? 'all' : this.locale.code,
+        showCancelButton: true,
+        confirmButtonText: this.locale.t('localization.resetConfirm'),
+        cancelButtonText: this.locale.t('auth.cancel'),
+        confirmButtonColor: '#a14a60',
+        background: '#1b1e3e',
+        color: '#f1f3ff',
+        focusCancel: true,
+      });
+      if (!decision.isConfirmed || typeof decision.value !== 'string') return;
+      const selected = decision.value;
+      const result = await firstValueFrom(this.http.post<{ language_code: string; removed_count: number }>(
+        '/api/localization/reset', { language_code: selected },
+      ).pipe(timeout(10000)));
+      await Swal.fire({
+        icon: 'success',
+        titleText: this.locale.t('localization.resetDone'),
+        text: this.locale.format('localization.resetResult', { count: result.removed_count }),
+        background: '#1b1e3e',
+        color: '#f1f3ff',
+        confirmButtonColor: '#8170d8',
+      });
+      // Only reload the visible language if it was included in the reset.
+      if (selected === 'all' || selected === this.locale.code) {
+        this.locale.load(this.locale.code, (successful) => {
+          if (!successful) this.error = 'localization.loadFailed';
+        }, true);
+      }
+    } catch {
+      this.error = 'localization.resetFailed';
+    } finally {
+      this.resetBusy = false;
+    }
+  }
+
   get correctAnswerText(): string {
     return this.feedback && this.current
       ? this.current.answers[this.feedback.correct_answer]
@@ -427,6 +517,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.account = account;
     this.authLoading = false;
     this.locale.load(account.ui_language || 'en');
+    this.discoverResetCapability(account.id);
     this.totalStars = emptyStars();
     if (this.languages.includes(account.preferred_language) && !this.gameId) {
       this.selectedLanguage = account.preferred_language;
@@ -437,6 +528,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private clearAccount(): void {
     this.statsVersion++;
+    this.resetEnabled = false;
     this.restoreVersion++;
     this.restoringGame = false;
     this.account = null;
