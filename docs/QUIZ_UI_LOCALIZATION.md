@@ -231,3 +231,34 @@ their slower rotation under reduced-motion settings.
 non-English dictionary will automatically request **only seven new strings**
 on its next load. No manual database reset or new migration is needed. Removed
 reset-dialog keys are no longer displayed or sent for translation.
+
+
+## In-memory Angular dictionary cache
+
+The Angular `LocalizationStore` now keeps a small, per-page-session RAM
+cache of **complete** UI dictionaries only (`fallback=false`,
+`missing_count=0`). Switching to a language already loaded in this page
+session is synchronous: **no HTTP request, no spinner and no intermediate
+English flash**. The language code, RTL direction and translated strings
+still change atomically. The cache is not stored in `localStorage` or
+`sessionStorage` and is cleared when the Angular store is destroyed.
+
+On a new browser page load, a new store starts with an empty cache. FastAPI
+again checks `backend/localization/en.json` against PostgreSQL and uses AI
+Localizer only for missing/changed strings. This deliberately does not attempt
+live version invalidation during an already-open page.
+
+A reset from the opt-in development tool clears the corresponding in-memory
+entries **as well as** the server's database cache. Resetting one language
+leaves the other cached languages intact. Resetting all clears all RAM
+dictionaries; the current non-English language is immediately re-fetched
+behind the loading overlay. An explicit forced reload also bypasses RAM.
+
+An incomplete/failed translation is never added to the RAM cache. In-flight
+requests are cancelled if the user returns to a completed cached language;
+a late response cannot override the current language.
+
+Frontend regression tests cover cache hits, reload validation, per-language
+and all-language resets, forced refresh, failed responses and stale
+in-flight requests. This feature requires no new npm dependencies, backend
+schema migrations or environment variables.
