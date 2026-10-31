@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
+import { LocalizationStore, UI_LANGUAGES } from './localization/store';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
@@ -20,6 +21,7 @@ interface Account {
   username: string;
   display_name: string | null;
   preferred_language: string;
+  ui_language: string;
   theme_key: string;
 }
 interface ProfileStats {
@@ -63,6 +65,8 @@ interface AnswerFeedback {
 })
 export class AppComponent implements OnInit, OnDestroy {
   readonly languages = ['English', 'Russian', 'Hebrew', 'German', 'French', 'Spanish', 'Italian'];
+  readonly uiLanguages = UI_LANGUAGES;
+  readonly locale: LocalizationStore;
   readonly choices: Choice[] = ['A', 'B', 'C', 'D'];
   readonly starTiers: { key: StarTier; label: string }[] = [
     { key: 'bronze', label: 'Bronze' },
@@ -104,9 +108,12 @@ export class AppComponent implements OnInit, OnDestroy {
   currentStars: StarCounts = emptyStars();
   totalStars: StarCounts = emptyStars();
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {
+    this.locale = new LocalizationStore(http);
+  }
 
   ngOnInit(): void {
+    this.locale.load('en');
     this.subscriptions.add(this.http.get<{
       long_wait_warning_ms: number; request_timeout_ms: number;
     }>('/api/client-config').pipe(
@@ -136,9 +143,26 @@ export class AppComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.unsubscribe();
+    this.locale.destroy();
   }
 
-  get rtl(): boolean { return this.selectedLanguage === 'Hebrew'; }
+  get rtl(): boolean { return this.locale.rtl; }
+  get questionRtl(): boolean { return this.selectedLanguage === 'Hebrew'; }
+
+  setUiLanguage(code: string): void {
+    if (!this.uiLanguages.some(item => item.code === code)) return;
+    this.locale.load(code);
+    if (!this.account || this.account.ui_language === code) return;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.patch<{ language_code: string }>(
+      '/api/localization/preference', { language_code: code },
+    ).pipe(timeout(10000)).subscribe({
+      next: (result) => {
+        if (this.account?.id === accountId) this.account.ui_language = result.language_code;
+      },
+      error: () => { this.error = 'account.languageSaveFailed'; },
+    }));
+  }
   get correctAnswerText(): string {
     return this.feedback && this.current
       ? this.current.answers[this.feedback.correct_answer]
@@ -194,15 +218,15 @@ export class AppComponent implements OnInit, OnDestroy {
           const confirmation = popup?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value ?? '';
 
           if (!USERNAME_PATTERN.test(username)) {
-            Swal.showValidationMessage('Username: 3–30 English letters, digits or _, starting with a letter.');
+            Swal.showValidationMessage(this.locale.t('auth.usernameInvalid'));
             return false;
           }
           if (password.length < 8 || password.length > 256) {
-            Swal.showValidationMessage('Password must contain 8–256 characters.');
+            Swal.showValidationMessage(this.locale.t('auth.passwordInvalid'));
             return false;
           }
           if (isRegister && confirmation !== password) {
-            Swal.showValidationMessage('Passwords do not match.');
+            Swal.showValidationMessage(this.locale.t('auth.passwordMismatch'));
             return false;
           }
           try {
@@ -211,7 +235,7 @@ export class AppComponent implements OnInit, OnDestroy {
               { username, password },
             ).pipe(timeout(15000)));
           } catch (error: unknown) {
-            Swal.showValidationMessage(this.authErrorMessage(error, mode));
+            Swal.showValidationMessage(this.locale.t(this.authErrorMessage(error, mode)));
             return false;
           }
         },
@@ -220,7 +244,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.signedIn(result.value as Account);
       }
     } catch {
-      this.error = 'Could not open the sign-in dialog. Check the app and try again.';
+      this.error = 'auth.modalFailed';
     } finally {
       this.authBusy = false;
     }
@@ -238,7 +262,7 @@ export class AppComponent implements OnInit, OnDestroy {
         if (err instanceof HttpErrorResponse && err.status === 401) {
           this.clearAccount();
         } else {
-          this.error = 'Could not sign out. Check the connection and try again.';
+          this.error = 'account.logoutFailed';
         }
       },
     }));
@@ -273,7 +297,7 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
-        else this.fail('Could not start a game. Check the connection and try again.');
+        else this.fail('game.startFailed');
       },
     }));
   }
@@ -310,13 +334,13 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         this.canRetryQuestion = true;
         if (error instanceof TimeoutError) {
-          this.fail('The question is taking too long. It may still be preparing. Retry to retrieve it.');
+          this.fail('game.questionTimeout');
         } else if (error instanceof HttpErrorResponse && error.status === 502) {
-          this.fail('The AI could not prepare a valid question. Please retry.');
+          this.fail('game.questionInvalid');
         } else if (error instanceof HttpErrorResponse && error.status === 503) {
-          this.fail('The question service is unavailable. Wait a moment and retry.');
+          this.fail('game.questionUnavailable');
         } else {
-          this.fail('Could not retrieve the question. Check your connection and retry.');
+          this.fail('game.questionFailed');
         }
       },
     }));
@@ -356,7 +380,7 @@ export class AppComponent implements OnInit, OnDestroy {
         else if (err instanceof HttpErrorResponse && err.status === 409) {
           this.recoverGameAfterConflict();
         } else {
-          this.fail('Could not confirm your answer. It may already have been recorded. Please try again.');
+          this.fail('game.answerFailed');
         }
       },
     }));
@@ -381,6 +405,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.account?.id !== account.id) this.resetGameView();
     this.account = account;
     this.authLoading = false;
+    this.locale.load(account.ui_language || 'en');
     this.totalStars = emptyStars();
     if (this.languages.includes(account.preferred_language) && !this.gameId) {
       this.selectedLanguage = account.preferred_language;
@@ -404,7 +429,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private sessionExpired(): void {
     this.clearAccount();
-    this.error = 'Your session expired. Sign in again to continue.';
+    this.error = 'account.sessionExpired';
     this.loading = false;
   }
 
@@ -433,7 +458,7 @@ export class AppComponent implements OnInit, OnDestroy {
       error: (err: unknown) => {
         if (this.account?.id !== accountId || version !== this.statsVersion) return;
         if (this.isUnauthorized(err)) this.sessionExpired();
-        else this.statsError = 'Statistics are temporarily unavailable.';
+        else this.statsError = 'stats.unavailable';
       },
     }));
   }
@@ -478,7 +503,7 @@ export class AppComponent implements OnInit, OnDestroy {
         } else if (this.isUnauthorized(err)) {
           this.sessionExpired();
         } else {
-          this.error = 'Could not check your unfinished game. Reload to try again.';
+          this.error = 'game.restoreFailed';
         }
       },
     }));
@@ -486,7 +511,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private recoverGameAfterConflict(): void {
     const id = this.gameId;
-    if (!id) { this.fail('The round is no longer available.'); return; }
+    if (!id) { this.fail('game.noRound'); return; }
     this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + id).pipe(
       timeout(10000),
     ).subscribe({
@@ -508,9 +533,9 @@ export class AppComponent implements OnInit, OnDestroy {
           this.screen = 'setup';
           this.resumeAvailable = true;
         }
-        this.error = 'Your previous answer was already processed. Game status has been restored.';
+        this.error = 'game.answerAlreadyRecorded';
       },
-      error: () => this.fail('Could not recover the game status. Reload the page and sign in.'),
+      error: () => this.fail('game.recoveryFailed'),
     }));
   }
 
@@ -555,13 +580,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private authErrorMessage(error: unknown, mode: AuthMode): string {
     if (error instanceof HttpErrorResponse) {
-      if (error.status === 401) return 'Invalid username or password.';
-      if (error.status === 409 && mode === 'register') return 'Username is already taken.';
-      if (error.status === 429) return 'Too many attempts. Please try again later.';
-      if (error.status === 422) return 'Please check the username and password requirements.';
-      if (error.status === 403) return 'This browser origin is not permitted.';
+      if (error.status === 401) return 'auth.invalidCredentials';
+      if (error.status === 409 && mode === 'register') return 'auth.usernameTaken';
+      if (error.status === 429) return 'auth.rateLimited';
+      if (error.status === 422) return 'auth.fieldsInvalid';
+      if (error.status === 403) return 'auth.originDenied';
     }
-    return 'Sign in failed. Check the connection and try again.';
+    return 'auth.networkFailed';
   }
 
   private fail(message: string): void {
