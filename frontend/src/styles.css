@@ -8,3 +8,22 @@ body {
 button, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
+
+
+/* Global SweetAlert2 account modal. The form itself never embeds user input. */
+.quiz-auth-popup { border: 1px solid #666b96; border-radius: 18px; }
+.quiz-auth-fields { display: flex; flex-direction: column; align-items: stretch; gap: 8px; text-align: left; }
+.quiz-auth-fields label { font-size: 13px; font-weight: 700; color: #d2d7ef; }
+.quiz-auth-fields .swal2-input {
+  width: 100%;
+  margin: 0 0 9px;
+  padding: 10px 13px;
+  color: #f5f6ff;
+  background: #292d50;
+  border: 1px solid #6c739a;
+  border-radius: 9px;
+  font-size: 15px;
+}
+.quiz-auth-fields .swal2-input:focus { border-color: #8ce9ef; box-shadow: 0 0 0 2px #8ce9ef33; }
+.quiz-auth-popup .swal2-validation-message { border-radius: 10px; color: #701b25; }
+.quiz-auth-popup .swal2-actions { gap: 10px; }
