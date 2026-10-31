@@ -1,8 +1,7 @@
-"""Angular localization client — the source English dictionary stays on FastAPI.
-
-Native language names are fixed labels and MUST never go through AI translation.
-The server handles revision comparison, paid translation calls and PostgreSQL caching.
-"""
+/** Angular localization client. English source stays on FastAPI.
+ * Native language names are never translated.
+ * FastAPI owns revision comparison, AI calls and PostgreSQL caching.
+ */
 import { HttpClient } from '@angular/common/http';
 import { Subscription, timeout } from 'rxjs';
 
