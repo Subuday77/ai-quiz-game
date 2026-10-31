@@ -148,6 +148,9 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get rtl(): boolean { return this.locale.rtl; }
   get questionRtl(): boolean { return this.selectedLanguage === 'Hebrew'; }
+  get starNames(): string {
+    return this.stars.map(key => this.locale.t('stars.' + key)).join(' · ');
+  }
 
   setUiLanguage(code: string): void {
     if (!this.uiLanguages.some(item => item.code === code)) return;
