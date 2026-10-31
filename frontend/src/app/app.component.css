@@ -200,3 +200,109 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 @media (max-width: 720px) {
   .ui-language-control { width: 100%; }
 }
+
+
+/* Local-only translation cache controls, never shown by the public server. */
+.dev-reset-button {
+  font-size: 11px;
+  color: #e9d1b4;
+  border-color: #916d66;
+  background: #3b3045;
+  white-space: nowrap;
+}
+.dev-reset-button:hover:not(:disabled) { background: #57425a; border-color: #dab7a3; }
+
+/* Localizing overlay: fully hides transient text without discarding the
+   already rendered UI. It also prevents accidental clicks during loading. */
+.localization-overlay {
+  position: fixed;
+  z-index: 2400;
+  inset: 0;
+  background: rgba(9, 12, 33, .94);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+.localization-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 27px;
+  text-align: center;
+  max-width: min(440px, 100%);
+}
+.localization-orb {
+  width: 112px;
+  height: 112px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 15px rgba(140, 233, 239, .24));
+}
+.localization-orb::before, .localization-orb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 40deg, transparent 0 12%, #8ce9ef 23%, #bca5ff 48%,
+    transparent 60% 70%, #8ce9ef 85%, transparent 98%
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  animation: locale-orbit 2.4s linear infinite;
+}
+.localization-orb::after {
+  inset: 18px;
+  background: conic-gradient(
+    from 150deg, #d0b9ff 0 16%, transparent 28% 52%,
+    #8ce9ef 75%, transparent 92%
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  animation: locale-orbit 1.7s linear infinite reverse;
+}
+.localization-globe {
+  color: #c3dbff;
+  font-size: 42px;
+  line-height: 1;
+  text-shadow: 0 0 20px #8ce9ef;
+}
+.localization-status-line {
+  min-height: 65px;
+  width: min(380px, 80vw);
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.localization-phrase {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  font-size: clamp(15px, 3.5vw, 20px);
+  font-weight: 600;
+  line-height: 1.5;
+  color: #ecf0ff;
+  text-wrap: balance;
+  display: grid;
+  place-items: center;
+  animation: locale-phrase-cycle 22s linear infinite;
+  animation-delay: calc(var(--phrase-index) * 2s);
+}
+@keyframes locale-orbit { to { transform: rotate(360deg); } }
+@keyframes locale-phrase-cycle {
+  0% { opacity: 0; transform: translateY(8px); }
+  1.6%, 7% { opacity: 1; transform: translateY(0); }
+  9.09%, 100% { opacity: 0; transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .localization-orb::before, .localization-orb::after { animation: none; }
+  .localization-phrase { animation: none; display: none; }
+  .localization-phrase:first-child { display: grid; opacity: 1; transform: none; }
+}
+@media (max-width: 640px) {
+  .dev-translation-tools { width: 100%; }
+  .dev-reset-button { max-width: 100%; }
+}
