@@ -78,5 +78,8 @@
   "auth.originDenied": "This browser origin is not permitted.",
   "auth.networkFailed": "Sign in failed. Check the connection and try again.",
   "auth.modalFailed": "Could not open the sign-in dialog. Check the app and try again.",
-  "footer.note": "AI-generated questions · Answers checked on the server · Saved to PostgreSQL · Experimental local build"
+  "footer.note": "AI-generated questions · Answers checked on the server · Saved to PostgreSQL · Experimental local build",
+  "account.interfaceLanguage": "Interface language",
+  "account.languageSaveFailed": "Could not save your interface language. Please try again.",
+  "game.restoreFailed": "Could not check your unfinished game. Reload to try again."
 }
