@@ -377,6 +377,36 @@ class TaggedGenerationPolicyTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             generate_valid_question(0, "English", "History",
                                     tag_history=self.history, tag_context=[])
-        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail, {"code": "duplicate_exhausted"})
         self.assertEqual(self.generate.call_count, 3)
+        self.review.assert_not_called()
+
+
+    def test_exhausted_critic_semantic_duplicates_use_distinct_error(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        from tagging.core import SemanticDuplicateError
+        self.generate.return_value = self.new_fact.model_dump()
+        self.review.side_effect = SemanticDuplicateError()
+        with self.assertRaises(HTTPException) as raised:
+            generate_valid_question(0, "English", "History",
+                                    tag_history=self.history, tag_context=[])
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail, {"code": "duplicate_exhausted"})
+        self.assertEqual(self.review.call_count, 3)
+
+    def test_mixed_invalid_question_and_duplicate_errors_keep_generic_failure(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        self.generate.side_effect = [
+            self.duplicate.model_dump(),
+            {**self.new_fact.model_dump(), "difficulty": 8},
+            self.duplicate.model_dump(),
+        ]
+        with self.assertRaises(HTTPException) as raised:
+            generate_valid_question(0, "English", "History",
+                                    tag_history=self.history, tag_context=[])
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertEqual(raised.exception.detail, "AI could not generate a valid question")
         self.review.assert_not_called()
