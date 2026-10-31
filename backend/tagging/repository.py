@@ -45,6 +45,11 @@ def history_for_user(db: Session, user_id: UUID) -> list[HistoryItem]:
         ):
             if kind in tag_map[question_id]:
                 tag_map[question_id][kind].append(slug.split(":", 1)[-1])
+    # Fail closed on partial/manual metadata too: a fact without the tag
+    # associations needed for weighted similarity is not usable history.
+    if any(not tags["entity"] or not tags["concept"]
+           for tags in tag_map.values()):
+        raise HistoryNotTagged("Some displayed questions have incomplete tag metadata")
     history = []
     seen = set()
     for question, fact, category_slug in rows:
