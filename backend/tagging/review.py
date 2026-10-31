@@ -22,6 +22,7 @@ from quality_schema_v2 import CheckStatus
 from quality_schema_v3 import QualityReviewV3, audit_score
 from question_generator import normalize_output
 from tagging.contract import TaggedQuestion
+from tagging.core import SemanticDuplicateError
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 
@@ -117,10 +118,10 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     event("tagged_review_completed", tags=verdict.tags_valid.value,
           fact=verdict.fact_valid.value, semantic_duplicate=verdict.semantic_duplicate,
           general_mode=mode.value)
-    if (verdict.tags_valid != CheckStatus.PASS
-            or verdict.fact_valid != CheckStatus.PASS
-            or verdict.semantic_duplicate):
+    if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
         raise QualityRegenerationError()
+    if verdict.semantic_duplicate:
+        raise SemanticDuplicateError()
 
     # The v3 editorial numeric score remains an AUDIT/diagnostic signal.
     assessment = audit_score(verdict, question.correct_answer)
