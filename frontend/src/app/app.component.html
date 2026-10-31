@@ -141,9 +141,20 @@
     </div>
 
     <p class="intro" role="status" *ngIf="questionLoading && longWait">{{ locale.t('game.longWait') }}</p>
-    <p class="error" role="alert" *ngIf="error">{{ locale.t(error) }}</p>
+    <div class="duplicate-recovery" *ngIf="duplicateExhausted" role="alert" aria-live="assertive">
+      <p>{{ locale.t('game.duplicateExhausted') }}</p>
+      <div class="question-actions">
+        <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
+          {{ locale.t('game.duplicateRetry') }}
+        </button>
+        <button class="outline-button" type="button" (click)="returnToMenuAfterDuplicate()" [disabled]="loading">
+          {{ locale.t('game.returnToMenu') }}
+        </button>
+      </div>
+    </div>
+    <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
-    <button class="primary" type="button" *ngIf="canRetryQuestion"
+    <button class="primary" type="button" *ngIf="canRetryQuestion && !duplicateExhausted"
             (click)="retryQuestion()" [disabled]="loading">{{ locale.t('game.retry') }}</button>
   </section>
   <footer>{{ locale.t('footer.note') }}</footer>
