@@ -144,12 +144,35 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     # SDKs and reuses the same retry/quality/leak policy as legacy games.
     from api import generate_valid_question
 
-    candidate = generate_valid_question(difficulty, language, category)
+    # Explicit opt-in: old question transport and all existing API tests
+    # stay unchanged until the history backfill is complete and verified.
+    tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
+    if tagged:
+        from tagging.core import HistoryNotTagged, generator_context
+        from tagging.repository import history_for_user
+        try:
+            history = history_for_user(db, user.id)
+        except HistoryNotTagged:
+            raise HTTPException(
+                status_code=503,
+                detail="Historical questions lack verified tags; run tagging.backfill",
+            ) from None
+        exclusions = generator_context(history, category_slug(category))
+        db.rollback()  # No database connection held during slow AI calls.
+        candidate = generate_valid_question(
+            difficulty, language, category,
+            tag_history=history, tag_context=exclusions,
+        )
+    else:
+        candidate = generate_valid_question(difficulty, language, category)
     provider, model = _generation_metadata()
     try:
         attempt, stored = offer_question(
             db, run_id=run_id, user_id=user.id, question=candidate,
             category=category, provider=provider, model=model,
+            prompt_version="tagged-v2" if tagged else "v1",
+            schema_version="question_tagged_v2" if tagged else "question_v1",
+            dedup_enforce=tagged,
         )
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
@@ -157,6 +180,13 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         raise HTTPException(status_code=409, detail="Game state changed; reload question") from None
     except TopicsNotSeeded:
         raise HTTPException(status_code=503, detail="Topic catalog not initialized") from None
+    except Exception as exc:
+        from tagging.core import DuplicateQuestionError, HistoryNotTagged
+        if isinstance(exc, DuplicateQuestionError):
+            raise HTTPException(status_code=409, detail="Duplicate question rejected; retry") from None
+        if isinstance(exc, HistoryNotTagged):
+            raise HTTPException(status_code=503, detail="Historical tag backfill required") from None
+        raise
 
     # The previous round may have advanced while a concurrent AI call ran.
     # The commit-side row lock guarantees we only return the active question.
