@@ -54,6 +54,7 @@ class TaggedQuestion(QuizQuestion):
     fact: Fact
     # Internal server-only audit payload; never part of model_dump/LLM JSON or Angular API.
     _review_report: dict | None = PrivateAttr(default=None)
+    _duplicate_assessment: dict | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def fact_in_tags(self) -> "TaggedQuestion":
