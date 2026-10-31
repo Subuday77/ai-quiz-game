@@ -30,6 +30,7 @@ const componentSource = source.replace(
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 
 const account = {
   id: 'user-1', username: 'Alice', display_name: 'Alice',
@@ -42,7 +43,7 @@ const question = {
 };
 
 function setup({ warning = 8000, timeout = 45000, settingsError = false,
-                 signedIn = true, starAwards = {}, answered = 0, correct = 0 } = {}) {
+                  signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false } = {}) {
   const requests = [];
   const posts = [];
   const patches = [];
@@ -62,6 +63,9 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
         const code = url.split('/').pop();
         return of({ language_code: code, dictionary: english,
           source_version: 'test', fallback: false, missing_count: 0 });
+      }
+      if (url === '/api/localization/reset-capability') {
+        return of({ enabled: devReset });
       }
       if (url === '/api/auth/me') {
         return signedIn ? of(account) : throwError(() => new HttpErrorResponse({ status: 401 }));
@@ -400,4 +404,107 @@ test('UI source dictionary contains every explicit static translation key', () =
     if (match[1].endsWith('.')) continue;
     assert.ok(Object.hasOwn(english, match[1]), 'Missing English key: ' + match[1]);
   }
+});
+
+
+test('language changes are atomic: no English flash while another translation loads', () => {
+  const german = new Subject();
+  const http = {
+    get(url) {
+      if (url.endsWith('/en')) return of({
+        language_code: 'en', dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0,
+      });
+      if (url.endsWith('/de')) return german.asObservable();
+      throw new Error('Unexpected request: ' + url);
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  assert.equal(store.t('hero.ready'), 'Ready to play?');
+  assert.equal(store.loading, false);
+
+  store.load('de');
+  assert.equal(store.code, 'en');
+  assert.equal(store.requestedCode, 'de');
+  assert.equal(store.loading, true);
+  assert.equal(store.t('hero.ready'), 'Ready to play?');
+
+  const translated = { ...english, 'hero.ready': 'Bereit zum Spielen?' };
+  german.next({ language_code: 'de', dictionary: translated, source_version: 'v1',
+    fallback: false, missing_count: 0 });
+  german.complete();
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'de');
+  assert.equal(store.t('hero.ready'), 'Bereit zum Spielen?');
+  store.destroy();
+});
+
+test('incomplete translations keep prior screen and spinner until ready', () => {
+  const requests = [];
+  const http = {
+    get(url) {
+      if (url.endsWith('/en')) return of({ language_code: 'en', dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      const subject = new Subject();
+      requests.push(subject);
+      return subject.asObservable();
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  store.load('fr');
+  requests[0].next({ language_code: 'fr', dictionary: english, source_version: 'v1',
+    fallback: true, missing_count: 10 });
+  requests[0].complete();
+  assert.equal(store.loading, true);
+  assert.equal(store.code, 'en');
+  assert.equal(store.t('hero.ready'), 'Ready to play?');
+  store.destroy(); // Cancels the scheduled retry; no paid calls leak from tests.
+});
+
+test('failed translation keeps the previous language without saving preference', () => {
+  const requests = [];
+  const http = {
+    get(url) {
+      if (url.endsWith('/en')) return of({ language_code: 'en', dictionary: english,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      const request = new Subject();
+      requests.push(request);
+      return request.asObservable();
+    },
+  };
+  const store = new LocalizationStore(http);
+  store.load('en');
+  let success = true;
+  store.load('fr', (value) => { success = value; });
+  requests[0].error(new Error('offline'));
+  assert.equal(success, false);
+  assert.equal(store.loading, false);
+  assert.equal(store.code, 'en');
+  assert.equal(store.requestedCode, 'en');
+  assert.equal(store.fallback, true);
+  store.destroy();
+});
+
+test('loading overlay contains rotating captions in eleven native languages', () => {
+  const { app } = setup();
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.equal(app.localizationStatus.length, 11);
+  assert.ok(app.localizationStatus.some(x => x.text.includes('Идёт перевод сайта')));
+  assert.ok(app.localizationStatus.some(x => x.text.includes('正在翻译网站')));
+  assert.ok(app.localizationStatus.some(x => x.rtl));
+  assert.match(template, /class="localization-overlay"/);
+  assert.match(template, /class="localization-phrase"/);
+  assert.match(template, /\*ngIf="locale.loading"/);
+});
+
+test('reset control is visible only when backend enables development mode', () => {
+  const { app } = setup();
+  assert.equal(app.resetEnabled, false);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\*ngIf="account && resetEnabled"/);
+  const enabled = setup({ devReset: true });
+  assert.equal(enabled.app.resetEnabled, true);
+  assert.equal(enabled.app.locale.code, 'en');
 });
