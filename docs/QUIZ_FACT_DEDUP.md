@@ -203,3 +203,42 @@ Developer SQL:
     WHERE q.prompt_version = 'tagged-v2'
     ORDER BY q.created_at DESC
     LIMIT 50;
+
+## DEBUG: rejected candidate traces
+
+Default: `AI_GENERATION_DEBUG=false`. Set
+`AI_GENERATION_DEBUG=true` in the backend's loaded `.env` and restart FastAPI
+only when diagnosing bad AI-generated questions.
+
+The normal `quiz.diagnostics` logger stays INFO-level and remains
+content-free. A separate opt-in DEBUG-level diagnostic logger emits one
+single-line UTF-8 JSON record for each rejected candidate. **Every record
+starts literally with `DEBUG: `**, e.g.:
+
+    DEBUG: {"event":"question_candidate_rejected","request_id":"...","attempt":1,"rejection_reason":"quality_rejected","question":"...","answers":{"A":"...","B":"...","C":"...","D":"..."},"correct_answer":"B","tags":{"entity":["..."],"concept":["..."],"keyword":[]},"fact":{"subject":"...","relation":"...","object":"..."},"critic":{"verdict":{"rationale":"..."},"assessment":{"total":3}}}
+
+The actual record also includes the timestamp, fact_key (when available),
+Python duplication assessment, error type and full reviewer verdict
+when the critic completed a valid review. Candidate content and the correct
+answer are absent from INFO logs. A malformed JSON completion produces
+`DEBUG: {"event":"question_candidate_invalid_json",...}` with up to 3,000
+characters of unparseable model output.
+
+For validation failures, the candidate is recorded if the provider
+successfully returned a JSON object. Model output that never arrived has
+no candidate text to log. Question stems are limited to 2,500 characters,
+individual answer choices to 500, and slug fields to 140. No prompts,
+prior-question histories, passwords, API keys, request cookies, or arbitrary
+extra model fields are logged. Reviewer rationales may quote candidate
+text: treat DEBUG logs as sensitive, use local/private log sinks, and disable
+the flag when troubleshooting is over. In production, restrict access and
+retention and keep this off by default.
+
+There are no new tables, migrations or database writes. Existing
+`question_reviews` rows for accepted questions remain unaffected. Rejected
+candidates are never inserted into `questions` or `question_reviews`
+through this debug feature. No failed candidate logs are persisted by
+the application itself; any external log capture remains the operator's
+responsibility.
+
+Tests: `python -m unittest discover -s tests -v` from `backend/`.
