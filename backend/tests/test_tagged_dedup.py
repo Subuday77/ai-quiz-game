@@ -223,6 +223,37 @@ class TaggedPersistenceTests(unittest.TestCase):
 
 
 
+    def test_historical_backfill_apply_is_resumable_and_unlocks_history(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from tagging import backfill
+        plain = QuizQuestion.model_validate({
+            key: value for key, value in candidate().model_dump().items()
+            if key not in ("tags", "fact")
+        })
+        offer_question(self.db, run_id=self.first_run.id, user_id=self.alice,
+                       question=plain, category="History", provider="test", model="stub")
+        with self.assertRaises(HistoryNotTagged):
+            history_for_user(self.db, self.alice)
+        with patch("tagging.backfill.engine", return_value=self.engine), \
+             patch("tagging.backfill._extract", return_value=candidate()) as extractor, \
+             patch("sys.argv", ["backfill", "--apply", "--limit", "1"]), \
+             redirect_stdout(StringIO()):
+            backfill.main()
+        extractor.assert_called_once()
+        self.db.expire_all()
+        self.assertEqual(len(history_for_user(self.db, self.alice)), 1)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionFact)), 1)
+        # Already processed metadata is left in place on a subsequent run.
+        with patch("tagging.backfill.engine", return_value=self.engine), \
+             patch("tagging.backfill._extract") as extractor, \
+             patch("sys.argv", ["backfill", "--apply", "--limit", "1"]), \
+             redirect_stdout(StringIO()):
+            backfill.main()
+        extractor.assert_not_called()
+
+
+
 class TaggedCriticTests(unittest.TestCase):
     def setUp(self):
         self.verdict = {
