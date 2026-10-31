@@ -117,6 +117,7 @@ export class AppComponent implements OnInit, OnDestroy {
   questionLoading = false;
   longWait = false;
   canRetryQuestion = false;
+  duplicateExhausted = false;
   private warningMs = 8000;
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
@@ -429,6 +430,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.questionLoading = true;
     this.longWait = false;
     this.canRetryQuestion = false;
+    this.duplicateExhausted = false;
     this.error = '';
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
     this.subscriptions.add(this.http.get<PublicQuestion>(
@@ -454,7 +456,16 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.canRetryQuestion = true;
-        if (error instanceof TimeoutError) {
+        if (error instanceof HttpErrorResponse && error.status === 409 &&
+            error.error?.detail?.code === 'duplicate_exhausted') {
+          // No new question was offered. Keep the server game ID, progress,
+          // and saved resume token intact; hide prior round feedback.
+          this.duplicateExhausted = true;
+          this.current = null;
+          this.feedback = null;
+          this.screen = 'question';
+          this.fail('game.duplicateExhausted');
+        } else if (error instanceof TimeoutError) {
           this.fail('game.questionTimeout');
         } else if (error instanceof HttpErrorResponse && error.status === 502) {
           this.fail('game.questionInvalid');
@@ -469,6 +480,19 @@ export class AppComponent implements OnInit, OnDestroy {
 
   retryQuestion(): void {
     if (this.canRetryQuestion && !this.loading) this.loadQuestion();
+  }
+
+  returnToMenuAfterDuplicate(): void {
+    if (!this.duplicateExhausted || this.loading) return;
+    // This is navigation, not game abandonment. Resume continues the same
+    // round without losing progress or opening a new game in PostgreSQL.
+    this.screen = 'setup';
+    this.resumeAvailable = !!this.gameId;
+    this.current = null;
+    this.feedback = null;
+    this.canRetryQuestion = false;
+    this.duplicateExhausted = false;
+    this.error = '';
   }
 
   answer(choice: Choice): void {
@@ -664,6 +688,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private resetGameView(): void {
     this.canRetryQuestion = false;
+    this.duplicateExhausted = false;
     this.longWait = false;
     this.gameId = '';
     this.resumeAvailable = false;
