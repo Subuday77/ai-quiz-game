@@ -148,7 +148,7 @@ def game_info(game_id: str) -> GameInfo:
                         correct_main_answers=session.state.correct_main_answers)
 
 
-from tagging.core import DuplicateQuestionError
+from tagging.core import DuplicateQuestionError, SemanticDuplicateError
 
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
@@ -172,6 +172,16 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
+    duplicate_rejections = 0
+    other_failures = 0
+
+    def failure(fallback_status: int, fallback_detail: str) -> HTTPException:
+        # Only an exclusively duplicate-related exhaustion earns this code.
+        # Generic provider/validation failures must not blame user history.
+        if tagged and duplicate_rejections > 0 and other_failures == 0:
+            return HTTPException(status_code=409, detail={"code": "duplicate_exhausted"})
+        return HTTPException(status_code=fallback_status, detail=fallback_detail)
+
     event("generation_policy", budget_ms=policy.budget_seconds * 1000,
           max_attempts=policy.max_attempts,
           provider_timeout_ms=policy.provider_timeout_seconds * 1000, sdk_max_retries=0)
@@ -179,7 +189,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         remaining = deadline - perf_counter()
         if remaining <= 0:
             event("generation_budget_exhausted")
-            raise HTTPException(status_code=503, detail="AI provider unavailable")
+            raise failure(503, "AI provider unavailable")
         token = generation_attempt.set(attempt)
         timeout_token = provider_timeout.set(min(policy.provider_timeout_seconds, remaining))
         event("generation_attempt_started")
@@ -210,7 +220,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                               deadline, policy.provider_timeout_seconds, clock=perf_counter)
             event("generation_attempt_completed", outcome="success")
             break
-        except DuplicateQuestionError as exc:
+        except (DuplicateQuestionError, SemanticDuplicateError):
+            duplicate_rejections += 1
             failure_status = 502
             event("generation_attempt_completed", outcome="duplicate_rejected")
             # Give the next attempt a concrete additional exclusion.
@@ -219,6 +230,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                "object": question.fact.object,
                                "rejected": True})
         except QualityRegenerationError:
+            other_failures += 1
             failure_status = 502
             if tagged:
                 exclusions.append({"subject": question.fact.subject,
@@ -227,10 +239,12 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                    "rejected": True})
             event("generation_attempt_completed", outcome="quality_rejected")
         except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
+            other_failures += 1
             failure_status = 502
             event("generation_attempt_completed", outcome="invalid_question",
                   error_type=type(exc).__name__)
         except Exception as exc:
+            other_failures += 1
             retryable = is_transient(exc)
             event("generation_attempt_completed", outcome="provider_failure",
                   error_type=type(exc).__name__, retryable=retryable)
@@ -243,8 +257,10 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         detail = ("AI could not generate a valid question" if failure_status == 502
                   else "AI provider unavailable")
         if attempt == policy.max_attempts:
-            event("generation_retries_exhausted", attempts=attempt)
-            raise HTTPException(status_code=failure_status, detail=detail)
+            event("generation_retries_exhausted", attempts=attempt,
+                  reason="duplicate_exhausted" if duplicate_rejections and not other_failures
+                  else "generation_failed")
+            raise failure(failure_status, detail)
         delay = policy.backoff(attempt)
         # Do not retry sooner than the server requests, or sleep beyond our limits.
         if delay_hint is not None:
@@ -254,7 +270,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             delay = max(delay, delay_hint)
         if delay >= deadline - perf_counter():
             event("generation_budget_exhausted")
-            raise HTTPException(status_code=failure_status, detail=detail)
+            raise failure(failure_status, detail)
         event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
         sleep(delay)
     return question
