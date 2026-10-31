@@ -17,7 +17,7 @@ from generation_policy import InvalidQuestionError
 from output_contracts import OutputContract, transport_contract
 from persistence.gameplay import create_game, offer_question
 from persistence.models import (
-    Base, Question, QuestionAttempt, QuestionFact, QuestionTag, Tag, Topic, User,
+    Base, Question, QuestionAttempt, QuestionFact, QuestionReview, QuestionTag, Tag, Topic, User,
 )
 from persistence.seed_topics import category_slug
 from quality_errors import QualityRegenerationError
@@ -161,6 +161,46 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertEqual(attempt.question_id, stored.id)
         self.assertIsNone(attempt.answered_at)  # Even unanswered questions count.
 
+
+    def test_accepted_tagged_critic_report_persisted_in_same_transaction(self):
+        prepared = candidate()
+        prepared._review_report = {
+            "checker_type": "ai_tagged_critic",
+            "provider": "openai",
+            "model": "stub",
+            "contract_version": "tagged_review_v4",
+            "decision": "audit",
+            "issues": [],
+            "details": {
+                "general_mode": "audit",
+                "requested_difficulty": 0,
+                "verdict": {
+                    "difficulty": "appropriate",
+                    "wording_penalty": 1,
+                    "rationale": "Unnatural wording",
+                },
+                "assessment": {
+                    "total": 1,
+                    "penalties": {
+                        "distractors": 0, "knowledge": 0,
+                        "suitability": 0, "wording": 1,
+                    },
+                },
+            },
+            "duration_ms": 1250,
+        }
+        attempt, stored = self.offer(self.first_run, self.alice, prepared)
+        saved = self.db.scalar(
+            select(QuestionReview).where(QuestionReview.question_id == stored.id)
+        )
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved.contract_version, "tagged_review_v4")
+        self.assertEqual(saved.decision, "audit")
+        self.assertEqual(saved.details["assessment"]["penalties"]["wording"], 1)
+        self.assertEqual(saved.details["verdict"]["rationale"], "Unnatural wording")
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionAttempt)), 1)
+        self.assertNotIn("_review_report", prepared.model_dump())
+
     def test_no_duplicate_for_same_user_across_games_or_languages(self):
         self.offer(self.first_run, self.alice, candidate())
         new_run = create_game(self.db, user_id=self.alice, language="German")
@@ -300,8 +340,9 @@ class TaggedCriticTests(unittest.TestCase):
                                      structured_output_mode="off")), \
              patch("tagging.review.LLMClient") as factory, \
              patch("tagging.review.completed_text", return_value=json.dumps(verdict)):
+            reviewed = candidate()
             check_tagged_quality(
-                candidate(), language="English", requested_difficulty=0,
+                reviewed, language="English", requested_difficulty=0,
                 category="History", neighbors=[], mode=mode,
                 deadline=perf_counter() + 10, timeout_seconds=5,
             )
@@ -310,9 +351,48 @@ class TaggedCriticTests(unittest.TestCase):
                 factory.return_value.responses.create.call_args.kwargs["output_contract"],
                 OutputContract.TAGGED_REVIEW,
             )
+            return reviewed
 
     def test_mandatory_critic_runs_even_if_general_quality_off(self):
         self.check(self.verdict, QualityMode.OFF)
+
+
+    def test_editorial_score_breakdown_is_logged_and_report_remains_private(self):
+        editorial = {
+            **self.verdict,
+            "difficulty": "too_easy",
+            "distractor_penalty": 2,
+            "knowledge_penalty": 1,
+            "suitability_penalty": 1,
+            "wording_penalty": 1,
+            "rationale": "Too easy with awkward language.",
+        }
+        with patch("tagging.review.event") as log:
+            checked = self.check(editorial, QualityMode.AUDIT)
+        self.assertIsNotNone(checked._review_report)
+        details = checked._review_report["details"]
+        self.assertEqual(details["verdict"]["difficulty"], "too_easy")
+        self.assertEqual(details["assessment"]["total"], 5)
+        self.assertEqual(details["assessment"]["penalties"]["distractors"], 2)
+        self.assertEqual(details["assessment"]["penalties"]["wording"], 1)
+        self.assertEqual(checked._review_report["decision"], "audit")
+        self.assertNotIn("_review_report", checked.model_dump())
+        scores = [call.kwargs for call in log.call_args_list
+                  if call.args[0] == "tagged_review_score"]
+        self.assertEqual(len(scores), 1)
+        self.assertEqual(scores[0]["score"], 5)
+        self.assertEqual(scores[0]["penalties"]["knowledge"], 1)
+        self.assertEqual(scores[0]["difficulty"], "too_easy")
+        self.assertNotIn("rationale", scores[0])
+
+    def test_scores_are_logged_even_for_rejected_tagged_question(self):
+        with patch("tagging.review.event") as log:
+            with self.assertRaises(QualityRegenerationError):
+                self.check({**self.verdict, "fact_valid": "fail"})
+        score_events = [call for call in log.call_args_list
+                        if call.args[0] == "tagged_review_score"]
+        self.assertEqual(len(score_events), 1)
+        self.assertEqual(score_events[0].kwargs["fact_valid"], "fail")
 
     def test_invalid_tags_are_rejected_even_if_general_quality_off(self):
         with self.assertRaises(QualityRegenerationError):
