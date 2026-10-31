@@ -201,6 +201,43 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertEqual(self.db.scalar(select(func.count()).select_from(QuestionAttempt)), 1)
         self.assertNotIn("_review_report", prepared.model_dump())
 
+
+    def test_generation_critic_and_database_review_chain(self):
+        from api import generate_valid_question
+        mock_verdict = {
+            "facts": "pass", "options": "pass", "language": "pass", "leakage": "pass",
+            "difficulty": "too_easy", "independent_answer": "B", "issue_codes": [],
+            "distractor_penalty": 1, "knowledge_penalty": 1,
+            "suitability_penalty": 0, "wording_penalty": 1,
+            "rationale": "The question is simple and awkwardly worded.",
+            "tags_valid": "pass", "fact_valid": "pass",
+            "semantic_duplicate": False, "duplicate_match": "",
+        }
+        with patch.dict(os.environ, {"AI_QUALITY_MODE": "audit",
+                                      "AI_LOCAL_LEAK_MODE": "off"}), \
+             patch("api.create_question", return_value=candidate().model_dump()), \
+             patch("tagging.review.ReviewerSettings.from_env",
+                   return_value=Mock(provider="openai", model_id="stub",
+                                     structured_output_mode="strict")), \
+             patch("tagging.review.LLMClient"), \
+             patch("tagging.review.completed_text",
+                   return_value=json.dumps(mock_verdict)):
+            generated = generate_valid_question(
+                0, "English", "History", tag_history=[], tag_context=[]
+            )
+        _, saved_question = self.offer(self.first_run, self.alice, generated)
+        review = self.db.scalar(select(QuestionReview).where(
+            QuestionReview.question_id == saved_question.id
+        ))
+        self.assertIsNotNone(review)
+        self.assertEqual(review.checker_type, "ai_tagged_critic")
+        self.assertEqual(review.provider, "openai")
+        self.assertEqual(review.details["assessment"]["total"], 3)
+        self.assertEqual(review.details["verdict"]["difficulty"], "too_easy")
+        self.assertEqual(review.details["verdict"]["rationale"],
+                         "The question is simple and awkwardly worded.")
+        self.assertEqual(review.decision, "audit")
+
     def test_no_duplicate_for_same_user_across_games_or_languages(self):
         self.offer(self.first_run, self.alice, candidate())
         new_run = create_game(self.db, user_id=self.alice, language="German")
