@@ -4,7 +4,6 @@ UI labels are immutable native names in dropdowns and are NOT sent to AI.
 """
 import hashlib
 import json
-from functools import lru_cache
 from pathlib import Path
 
 LANGUAGES = {
@@ -16,7 +15,6 @@ LANGUAGES = {
 RIGHT_TO_LEFT = {"he", "ar"}
 
 
-@lru_cache(maxsize=1)
 def english_dictionary() -> dict[str, str]:
     with (Path(__file__).with_name("en.json")).open(encoding="utf-8") as handle:
         dictionary = json.load(handle)
