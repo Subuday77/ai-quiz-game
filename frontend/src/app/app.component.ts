@@ -74,6 +74,8 @@ export class AppComponent implements OnInit, OnDestroy {
   account: Account | null = null;
   authLoading = true;
   authBusy = false;
+  restoringGame = false;
+  finishedPhase: 'lost' | 'completed' | null = null;
   statsLoading = false;
   statsError = '';
   gamesPlayed = 0;
@@ -95,6 +97,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
+  private restoreVersion = 0;
 
   progress = 0;
   stars: string[] = [];
@@ -242,7 +245,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.configLoading || this.authLoading || this.authBusy) return;
+    if (this.loading || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -335,6 +338,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
           this.stars.push(result.achievement);
@@ -387,6 +391,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private clearAccount(): void {
     this.statsVersion++;
+    this.restoreVersion++;
+    this.restoringGame = false;
     this.account = null;
     this.totalStars = emptyStars();
     this.gamesPlayed = 0;
@@ -437,11 +443,14 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!accountId) return;
     const savedId = this.readActiveGame(accountId);
     if (!savedId) return;
+    const version = ++this.restoreVersion;
+    this.restoringGame = true;
     this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + savedId).pipe(
       timeout(10000),
+      finalize(() => { if (this.restoreVersion === version) this.restoringGame = false; }),
     ).subscribe({
       next: (run) => {
-        if (this.account?.id !== accountId) return;
+        if (this.account?.id !== accountId || this.restoreVersion !== version) return;
         if (run.phase !== 'main' && run.phase !== 'bonus') {
           this.removeSavedGame(accountId);
           return;
@@ -463,9 +472,13 @@ export class AppComponent implements OnInit, OnDestroy {
           .map((tier) => tier.key);
       },
       error: (err: unknown) => {
-        if (this.account?.id !== accountId) return;
+        if (this.account?.id !== accountId || this.restoreVersion !== version) return;
         if (err instanceof HttpErrorResponse && err.status === 404) {
           this.removeSavedGame(accountId);
+        } else if (this.isUnauthorized(err)) {
+          this.sessionExpired();
+        } else {
+          this.error = 'Could not check your unfinished game. Reload to try again.';
         }
       },
     }));
@@ -483,16 +496,15 @@ export class AppComponent implements OnInit, OnDestroy {
         this.progress = run.correct_main_answers;
         if (run.phase === 'completed' || run.phase === 'lost') {
           this.forgetActiveGame();
-          this.feedback = {
-            correct: false, correct_answer: 'A', phase: run.phase,
-            correct_main_answers: run.correct_main_answers, achievement: null,
-          };
+          this.feedback = null;
+          this.finishedPhase = run.phase === 'lost' ? 'lost' : 'completed';
           this.current = null;
           this.screen = 'done';
           this.refreshStats();
         } else {
           this.current = null;
           this.feedback = null;
+          this.finishedPhase = null;
           this.screen = 'setup';
           this.resumeAvailable = true;
         }
@@ -509,6 +521,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resumeAvailable = false;
     this.current = null;
     this.feedback = null;
+    this.finishedPhase = null;
     this.error = '';
     this.progress = 0;
     this.stars = [];
