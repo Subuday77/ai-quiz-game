@@ -12,6 +12,8 @@ from pathlib import Path
 from time import sleep
 
 from dotenv import load_dotenv
+# Provider selection is resolved at import time: load the project .env FIRST.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
