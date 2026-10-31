@@ -24,13 +24,19 @@ mkdirSync(join(temp, 'localization'));
 const localeSource = readFileSync(join(root, 'src/app/localization/store.ts'), 'utf8');
 writeFileSync(join(temp, 'localization/store.mjs'),
   ts.transpileModule(localeSource, { compilerOptions }).outputText);
-const componentSource = source.replace(
-  "from './localization/store';", "from './localization/store.mjs';",
-);
+const resetSource = readFileSync(join(root, 'src/app/localization/reset-copy.ts'), 'utf8');
+writeFileSync(join(temp, 'localization/reset-copy.mjs'),
+  ts.transpileModule(resetSource, { compilerOptions }).outputText);
+const componentSource = source
+  .replace("from './localization/store';", "from './localization/store.mjs';")
+  .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
+const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
+  pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
+);
 
 const account = {
   id: 'user-1', username: 'Alice', display_name: 'Alice',
@@ -545,15 +551,75 @@ test('reset control is visible only when backend enables development mode', () =
   assert.equal(enabled.app.locale.code, 'en');
 });
 
-test('localization spinner still moves and captions rotate in reduced-motion mode', () => {
+
+test('loading caption always remains visible and switches every two seconds', () => {
+  const englishResult = { language_code: 'en', dictionary: english,
+    source_version: 'v1', fallback: false, missing_count: 0 };
+  const pending = new Subject();
+  const store = new LocalizationStore({
+    get(url) { return url.endsWith('/en') ? of(englishResult) : pending.asObservable(); },
+  });
+  const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
+  scheduler.run(() => {
+    store.load('en');
+    store.load('de');
+    assert.equal(store.messageIndex, 0);
+    scheduler.schedule(() => assert.equal(store.messageIndex, 1), 2001);
+    scheduler.schedule(() => assert.equal(store.messageIndex, 2), 4001);
+    scheduler.schedule(() => {
+      pending.next({ language_code: 'de',
+        dictionary: { ...english, 'hero.ready': 'Bereit zum Spielen?' },
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      pending.complete();
+      assert.equal(store.loading, false);
+      assert.equal(store.code, 'de');
+      store.destroy();
+    }, 4100);
+  });
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /localizationStatus\[locale\.messageIndex\]\.text/);
+  assert.equal([...template.matchAll(/class="localization-phrase"/g)].length, 1);
+  assert.match(css, /\.localization-phrase\s*\{[^}]*opacity:\s*1/s);
+  assert.doesNotMatch(css, /@keyframes locale-phrase-cycle|@keyframes locale-phrase-crossfade/);
+});
+
+test('question language options are localized labels but API uses original English names', () => {
+  const { app } = setup();
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const expected = ['English', 'Russian', 'Hebrew', 'German', 'French', 'Spanish', 'Italian'];
+  assert.deepEqual(app.languages, expected);
+  assert.match(template, /\[value\]="language"/);
+  assert.match(template, /locale\.t\('questionLanguage\.' \+ language\)/);
+  for (const name of expected) {
+    assert.equal(english['questionLanguage.' + name], name);
+  }
+  // Interface language dropdown must still use native names.
+  assert.match(template, /\{\{ language\.nativeName \}\}/);
+});
+
+test('developer reset button, all dialog text and choices stay English', () => {
+  const { app } = setup({ devReset: true });
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.equal(app.resetCopy.button, 'Reset translations (dev)');
+  assert.equal(RESET_COPY.confirm, 'Remove saved translations');
+  assert.equal(RESET_COPY.cancel, 'Cancel');
+  assert.match(RESET_COPY.explain, /cost money/);
+  assert.equal(RESET_LANGUAGE_NAMES.de, 'German');
+  assert.equal(RESET_LANGUAGE_NAMES.ru, 'Russian');
+  assert.equal(RESET_LANGUAGE_NAMES.he, 'Hebrew');
+  assert.match(template, /resetCopy\.button/);
+  assert.doesNotMatch(source, /locale\.(?:t|format)\('localization\.reset/);
+  assert.deepEqual(Object.keys(english).filter(k => k.startsWith('localization.reset')), []);
+  assert.equal(app.locale.code, 'en');
+});
+
+test('spinner continues rotating under reduced-motion setting', () => {
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
   assert.match(css, /@keyframes locale-orbit/);
-  assert.match(css, /@keyframes locale-phrase-cycle/);
-  assert.match(css, /@keyframes locale-phrase-crossfade/);
   const reduced = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/)?.[1];
   assert.ok(reduced, 'Reduced-motion styles should exist');
   assert.doesNotMatch(reduced, /animation:\s*none|display:\s*none/);
   assert.match(reduced, /animation-duration:\s*6s/);
   assert.match(reduced, /animation-duration:\s*8s/);
-  assert.match(reduced, /animation-name:\s*locale-phrase-crossfade/);
 });
