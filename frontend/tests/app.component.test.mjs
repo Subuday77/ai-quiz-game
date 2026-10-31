@@ -3,7 +3,7 @@
 import '@angular/compiler';
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
@@ -15,16 +15,25 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temp = mkdtempSync(join(root, '.quiz-tests-'));
 after(() => rmSync(temp, { recursive: true, force: true }));
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
-const compiled = ts.transpileModule(source, { compilerOptions: {
+const english = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
+const compilerOptions = {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022,
   experimentalDecorators: true, useDefineForClassFields: false,
-} }).outputText;
+};
+mkdirSync(join(temp, 'localization'));
+const localeSource = readFileSync(join(root, 'src/app/localization/store.ts'), 'utf8');
+writeFileSync(join(temp, 'localization/store.mjs'),
+  ts.transpileModule(localeSource, { compilerOptions }).outputText);
+const componentSource = source.replace(
+  "from './localization/store';", "from './localization/store.mjs';",
+);
+const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 
 const account = {
   id: 'user-1', username: 'Alice', display_name: 'Alice',
-  preferred_language: 'English', theme_key: 'default',
+  preferred_language: 'English', ui_language: 'en', theme_key: 'default',
 };
 const question = {
   question_id: 'same-question', number: 5, difficulty: 4,
@@ -47,6 +56,11 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
         return settingsError ? throwError(() => new Error('offline')) : of({
           long_wait_warning_ms: warning, request_timeout_ms: timeout,
         });
+      }
+      if (url.startsWith('/api/localization/dictionary/')) {
+        const code = url.split('/').pop();
+        return of({ language_code: code, dictionary: english,
+          source_version: 'test', fallback: false, missing_count: 0 });
       }
       if (url === '/api/auth/me') {
         return signedIn ? of(account) : throwError(() => new HttpErrorResponse({ status: 401 }));
@@ -130,7 +144,7 @@ test('45-second timeout clears loading and offers retry without a new game', () 
   assert.equal(app.loading, false);
   assert.equal(app.longWait, false);
   assert.equal(app.canRetryQuestion, true);
-  assert.match(app.error, /may still be preparing/i);
+  assert.match(app.locale.t(app.error), /may still be preparing/i);
   assert.equal(requests[0].subject.observed, false);
   scheduler.run(() => {
     app.retryQuestion();
@@ -155,7 +169,7 @@ test('backend and connection failures clear loading and allow a retry', () => {
     assert.equal(app.questionLoading, false);
     assert.equal(app.longWait, false);
     assert.equal(app.canRetryQuestion, true);
-    assert.match(app.error, /retry/i);
+    assert.match(app.locale.t(app.error), /retry/i);
     scheduler.run(() => { app.retryQuestion(); succeed(requests[1]); });
     assert.equal(app.screen, 'question');
     assert.equal(app.loading, false);
@@ -172,7 +186,7 @@ test('expired session resets private player state', () => {
   assert.equal(app.gameId, '');
   assert.equal(app.totalStars.bronze, 0);
   assert.equal(app.canRetryQuestion, false);
-  assert.match(app.error, /session expired/i);
+  assert.match(app.locale.t(app.error), /session expired/i);
 });
 
 test('rapid clicks do not generate parallel questions', () => {
