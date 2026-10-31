@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -17,6 +18,35 @@ if not log.handlers:
     log.addHandler(handler)
 log.setLevel(logging.INFO)
 log.propagate = False
+
+# Explicit opt-in content-bearing trace. Do NOT enable on shared production
+# logs: rejected questions contain answers, and reviewer rationales may quote
+# question wording. This logger is deliberately separate from INFO diagnostics.
+debug_log = logging.getLogger("quiz.diagnostics.debug")
+if not debug_log.handlers:
+    debug_handler = logging.StreamHandler()
+    debug_handler.setFormatter(logging.Formatter("%(message)s"))
+    debug_log.addHandler(debug_handler)
+debug_log.setLevel(logging.DEBUG)
+debug_log.propagate = False
+
+
+def generation_debug_enabled() -> bool:
+    return os.getenv("AI_GENERATION_DEBUG", "false").strip().lower() == "true"
+
+
+def debug_event(name: str, **fields) -> None:
+    """Opt-in, full-content JSON trace, always prefixed with literal DEBUG:."""
+    if not generation_debug_enabled():
+        return
+    debug_log.debug("DEBUG: %s", json.dumps({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": name,
+        "request_id": request_id.get(),
+        "attempt": generation_attempt.get(),
+        **fields,
+    }, ensure_ascii=False, default=str))
+
 
 
 def event(name: str, **fields) -> None:
