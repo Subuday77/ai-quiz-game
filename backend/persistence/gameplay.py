@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from game_logic import AnswerResult, GameState
-from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic
+from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic, User
 from persistence.seed_topics import category_slug
 from question_schema import Choice, QuizQuestion
 
@@ -104,6 +104,7 @@ def offer_question(
     question: QuizQuestion, category: str,
     provider: str, model: str,
     prompt_version: str = "v1", schema_version: str = "question_v1",
+    dedup_enforce: bool = False,
 ) -> tuple[QuestionAttempt, Question]:
     """Store one already-validated candidate, or return the cached pending one.
 
@@ -112,6 +113,14 @@ def offer_question(
     function, so slow generation does not hold the game row lock.
     """
     try:
+        if dedup_enforce:
+            from tagging.contract import TaggedQuestion
+            from tagging.core import require_unique
+            from tagging.repository import history_for_user
+            if not isinstance(question, TaggedQuestion):
+                raise GameConflict("Tagged workflow requires verified fact metadata")
+            # Serialize ALL question commits for this player across game runs.
+            db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
@@ -119,6 +128,9 @@ def offer_question(
         if cached:
             db.commit()
             return cached
+        if dedup_enforce:
+            # Atomic recheck after another parallel request may have committed.
+            require_unique(question, history_for_user(db, user_id))
         expected_difficulty = game_state(run).current_difficulty
         if question.difficulty != expected_difficulty:
             raise GameConflict("Wrong question difficulty for current game state")
@@ -158,6 +170,9 @@ def offer_question(
                 or stored.topic_id != topic.id
                 or stored.requested_difficulty != question.difficulty):
             raise GameConflict("Existing question is conflicting or not approved")
+        if dedup_enforce:
+            from tagging.repository import save_metadata
+            save_metadata(db, stored, question)
         next_number = run.correct_main_answers + 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
