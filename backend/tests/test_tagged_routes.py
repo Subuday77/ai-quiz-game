@@ -82,6 +82,20 @@ class TaggedEndpointTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(QuestionAttempt)), 1)
 
+    def test_duplicate_exhaustion_error_is_forwarded_without_question_or_progress_change(self):
+        from fastapi import HTTPException
+        game_id = self.new_game("German")
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail={"code": "duplicate_exhausted"}
+        )) as gen:
+            response = self.client.get(f"/api/v2/games/{game_id}/question")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json(), {"detail": {"code": "duplicate_exhausted"}})
+        gen.assert_called_once()
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Question)), 0)
+            self.assertEqual(db.scalar(select(func.count()).select_from(QuestionAttempt)), 0)
+
     def test_history_without_backfill_blocks_tagged_generation(self):
         # Write the first question through the legacy route without tags.
         with patch.dict(os.environ, {"AI_TAG_DEDUP_ENABLED": "false"}):
