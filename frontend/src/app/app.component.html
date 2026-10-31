@@ -44,7 +44,7 @@
       </div>
       <div class="stats-caption" *ngIf="account">
         <span *ngIf="statsLoading">Refreshing your statistics…</span>
-        <span *ngIf="!statsLoading && !statsError">{{ gamesPlayed }} games · {{ answeredQuestions }} answered questions</span>
+        <span *ngIf="!statsLoading && !statsError">{{ gamesPlayed }} games · {{ correctAnswers }} correct answers</span>
         <span class="stats-warning" *ngIf="statsError" role="status">{{ statsError }}</span>
       </div>
     </div>
