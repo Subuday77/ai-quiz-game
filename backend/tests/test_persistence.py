@@ -42,10 +42,12 @@ class PersistenceSchemaTests(unittest.TestCase):
         self.addCleanup(self.eng.dispose)
 
     def test_migration_snapshot_and_current_models_match(self):
-        self.assertEqual(set(Base.metadata.tables), set(FrozenV1.metadata.tables))
-        for name, table in Base.metadata.tables.items():
-            frozen = FrozenV1.metadata.tables[name]
-            self.assertEqual(set(table.c.keys()), set(frozen.c.keys()), name)
+        # 0001 remains frozen; additional tables/columns are introduced by
+        # subsequent Alembic revisions, not by editing the old snapshot.
+        self.assertTrue(set(FrozenV1.metadata.tables).issubset(set(Base.metadata.tables)))
+        for name, frozen in FrozenV1.metadata.tables.items():
+            table = Base.metadata.tables[name]
+            self.assertTrue(set(frozen.c.keys()).issubset(set(table.c.keys())), name)
         self.assertGreaterEqual(len(Base.metadata.tables), 15)
 
     def test_schema_contains_required_entities(self):
