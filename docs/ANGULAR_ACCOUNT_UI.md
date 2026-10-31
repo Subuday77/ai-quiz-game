@@ -18,6 +18,10 @@ Production `master` and Render are intentionally unchanged.
 - Loads the **all-time** bronze/silver/gold/platinum counters from
   `GET /api/profile/me/stats`, including a refresh after each answer. No
   browser-local balance or spendable currency is treated as authoritative.
+- The all-time summary shows `correct_answers` as **correct answers**;
+  incorrect attempts remain recorded for analytics but are not added to the
+  displayed correct-answer total. The sign-in password field has no length
+  placeholder, while registration retains its 8-character hint.
 - Only keeps the current *unfinished game ID* in localStorage, under a key
   scoped by the logged-in user ID. A returning player can click **Resume
   game** after the server verifies ownership and current state.
