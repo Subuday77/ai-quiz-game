@@ -34,13 +34,17 @@ interface DictionaryResponse {
 const isSupported = (code: string): boolean => UI_LANGUAGES.some((item) => item.code === code);
 
 export class LocalizationStore {
+  // 'code' and 'dictionary' are a committed, visible pair. Until a complete
+  // translation arrives, both remain unchanged: no intermediate English flash.
   code = 'en';
-  loading = true;
+  requestedCode = 'en';
+  loading = false;
   fallback = false;
   private dictionary: Record<string, string> = {};
-  private english: Record<string, string> = {};
   private requestVersion = 0;
   private active: Subscription | null = null;
+  private readonly maxFallbackPolls = 12;
+  private readonly fallbackPollMs = 2500;
 
   constructor(private readonly http: HttpClient) {}
 
@@ -48,48 +52,81 @@ export class LocalizationStore {
     return this.code === 'he' || this.code === 'ar';
   }
 
-  load(code: string): void {
+  load(code: string, onSettled?: (successful: boolean) => void, force = false): void {
     if (!isSupported(code)) code = 'en';
-    this.code = code;
-    // Do not display the previous language while switching or after failure.
-    this.dictionary = { ...this.english };
+    if (this.code === code && Object.keys(this.dictionary).length > 0 &&
+        !this.loading && !force) {
+      onSettled?.(true);
+      return;
+    }
+
+    // Cancel any previous pending dictionary/poll. A late response can never
+    // overwrite a newer choice, and the old UI keeps its own dictionary/dir.
+    this.requestedCode = code;
     this.loading = true;
     this.fallback = false;
     const version = ++this.requestVersion;
     this.active?.unsubscribe();
-    this.active = this.http.get<DictionaryResponse>(
-      '/api/localization/dictionary/' + encodeURIComponent(code),
-    ).pipe(timeout(55000)).subscribe({
-      next: (result) => {
-        if (version !== this.requestVersion || result.language_code !== code) return;
-        this.dictionary = result.dictionary;
-        if (code === 'en') this.english = { ...result.dictionary };
-        this.fallback = result.fallback;
-        this.loading = false;
-      },
-      error: () => {
-        if (version !== this.requestVersion) return;
-        // Fall back to the known English master; never show another language.
-        this.dictionary = { ...this.english };
-        this.loading = false;
-        this.fallback = true;
-      },
-    });
+    const job = new Subscription();
+    this.active = job;
+
+    const fail = (): void => {
+      if (version !== this.requestVersion || job.closed) return;
+      this.loading = false;
+      this.fallback = true;
+      this.requestedCode = this.code;
+      onSettled?.(false);
+    };
+
+    const request = (pollCount: number): void => {
+      if (job.closed || version !== this.requestVersion) return;
+      const pending = this.http.get<DictionaryResponse>(
+        '/api/localization/dictionary/' + encodeURIComponent(code),
+      ).pipe(timeout(55000)).subscribe({
+        next: (result) => {
+          if (version !== this.requestVersion || job.closed) return;
+          if (result.language_code !== code || !result.dictionary) {
+            fail();
+            return;
+          }
+          // When another worker is translating or the Localizer returned a
+          // partial/English fallback, hold the old UI and poll a bounded time.
+          if (result.fallback || result.missing_count > 0) {
+            if (pollCount >= this.maxFallbackPolls) {
+              fail();
+            } else {
+              job.add(timer(this.fallbackPollMs).subscribe(() => request(pollCount + 1)));
+            }
+            return;
+          }
+
+          // Commit new language + content together in one Angular turn.
+          this.dictionary = { ...result.dictionary };
+          this.code = code;
+          this.requestedCode = code;
+          this.fallback = false;
+          this.loading = false;
+          onSettled?.(true);
+        },
+        error: fail,
+      });
+      job.add(pending);
+    };
+    request(0);
   }
 
   t(key: string): string {
-    // Missing strings are supplied as English by FastAPI. During first load,
-    // display a neutral readable label rather than literal dotted API keys.
     return this.dictionary[key] ?? key.split('.').pop()!.replace(/([A-Z])/g, ' $1').trim();
   }
 
   format(key: string, args: Record<string, string | number>): string {
-    return this.t(key).replace(/\{\{([a-zA-Z0-9_]+)\}\}/g,
+    return this.t(key).replace(/\\{\\{([a-zA-Z0-9_]+)\\}\\}/g,
       (original, keyName: string) => Object.prototype.hasOwnProperty.call(args, keyName)
         ? String(args[keyName]) : original);
   }
 
   destroy(): void {
     this.active?.unsubscribe();
+    this.requestVersion++;
   }
 }
