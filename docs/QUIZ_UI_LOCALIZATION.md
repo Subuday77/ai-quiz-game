@@ -201,3 +201,33 @@ restart FastAPI. No migration or manual SQL is needed.
    cached. Selecting German should produce a fresh translation.
 6. Clear all translations and verify the English master and all quiz/player
    data remain intact.
+
+
+## Language menu labels and reset dialog (2026-10-31 update)
+
+The **interface-language** dropdown continues to display native names regardless
+of the UI locale (Deutsch, Français, Русский, עברית, etc.).
+
+The separate **question-language** dropdown now translates its labels using
+seven new `questionLanguage.*` keys in `backend/localization/en.json`.
+Only the **visible label** changes. The HTML option value sent to the game
+backend remains the existing English identifier (`English`, `Russian`,
+`Hebrew`, `German`, `French`, `Spanish`, `Italian`). Changing the UI
+language does not change the question language.
+
+The **Reset translations (dev)** button and **all contents** of its SweetAlert2
+confirmation/success dialogs stay in English, including the choice labels,
+buttons, and explanatory warning. Their fixed copy lives in
+`frontend/src/app/localization/reset-copy.ts` and is intentionally **excluded
+from the AI translation source dictionary**. Its optional failure message is
+also shown in English.
+
+The loading overlay now uses one continuously visible status line, updated every
+two seconds by RxJS (rather than eleven independent CSS opacity animations).
+This avoids blank frames. The spinner rings remain CSS-animated, including
+their slower rotation under reduced-motion settings.
+
+**Note:** because seven new English keys were added, each already-cached
+non-English dictionary will automatically request **only seven new strings**
+on its next load. No manual database reset or new migration is needed. Removed
+reset-dialog keys are no longer displayed or sent for translation.
