@@ -79,7 +79,7 @@ export class AppComponent implements OnInit, OnDestroy {
   statsLoading = false;
   statsError = '';
   gamesPlayed = 0;
-  answeredQuestions = 0;
+  correctAnswers = 0;
 
   selectedLanguage = 'English';
   screen: Screen = 'setup';
@@ -166,7 +166,7 @@ export class AppComponent implements OnInit, OnDestroy {
             '<label for="quiz-auth-password">Password</label>' +
             '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
               'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" ' +
-              'maxlength="256" placeholder="At least 8 characters">' +
+              'maxlength="256"' + (isRegister ? ' placeholder="At least 8 characters"' : '') + '>' +
             (isRegister ?
               '<label for="quiz-auth-confirm">Confirm password</label>' +
               '<input id="quiz-auth-confirm" class="swal2-input" type="password" ' +
@@ -396,7 +396,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.account = null;
     this.totalStars = emptyStars();
     this.gamesPlayed = 0;
-    this.answeredQuestions = 0;
+    this.correctAnswers = 0;
     this.statsLoading = false;
     this.statsError = '';
     this.resetGameView();
@@ -428,7 +428,7 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         this.totalStars = updated;
         this.gamesPlayed = stats.games_played;
-        this.answeredQuestions = stats.answered_questions;
+        this.correctAnswers = stats.correct_answers;
       },
       error: (err: unknown) => {
         if (this.account?.id !== accountId || version !== this.statsVersion) return;
