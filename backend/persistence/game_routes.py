@@ -95,7 +95,8 @@ def new_game(payload: NewGame, request: Request,
     validate_origin(request)
     if payload.language not in LANGUAGE_DICT.values():
         raise HTTPException(status_code=422, detail="Unsupported language")
-    if db.scalar(select(Topic.id).limit(1)) is None:
+    existing = set(db.scalars(select(Topic.slug)))
+    if not {category_slug(name) for name in QUESTION_CATEGORIES}.issubset(existing):
         raise HTTPException(status_code=503, detail="Topic catalog not initialized")
     run = create_game(db, user_id=user.id, language=payload.language)
     return GameInfo(
