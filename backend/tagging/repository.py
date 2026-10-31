@@ -72,12 +72,13 @@ def save_metadata(db: Session, question: Question, candidate: TaggedQuestion,
     if current:
         if current.fact_key != candidate.fact.key:
             raise DuplicateQuestionError("Conflicting canonical fact for existing question")
-        return
-    db.add(QuestionFact(
-        question_id=question.id, fact_key=candidate.fact.key,
-        subject=candidate.fact.subject, relation=candidate.fact.relation,
-        object=candidate.fact.object, origin=origin,
-    ))
+        # Repair missing tag links during a resumed historical backfill.
+    else:
+        db.add(QuestionFact(
+            question_id=question.id, fact_key=candidate.fact.key,
+            subject=candidate.fact.subject, relation=candidate.fact.relation,
+            object=candidate.fact.object, origin=origin,
+        ))
     for kind in ("entity", "concept", "keyword"):
         for raw_slug in getattr(candidate.tags, kind):
             slug = f"{kind}:{raw_slug}"
