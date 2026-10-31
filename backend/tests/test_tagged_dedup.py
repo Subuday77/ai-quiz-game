@@ -37,12 +37,18 @@ from tagging.schemas import (
 
 def candidate(*, language="English", relation="birth-year",
               concept="birth-date", answer="1879", difficulty=0):
-    question = ("In what year was Albert Einstein born?" if language == "English"
-                else "In welchem Jahr wurde Albert Einstein geboren?")
+    if relation == "birth-year":
+        question = ("In what year was Albert Einstein born?" if language == "English"
+                    else "In welchem Jahr wurde Albert Einstein geboren?")
+        answers = {"A": "1878", "B": "1879", "C": "1880", "D": "1881"}
+    else:
+        question = "For what scientific work did Albert Einstein win the Nobel Prize?"
+        answers = {"A": "Relativity", "B": "Photoelectric effect",
+                   "C": "Nuclear fission", "D": "Brownian motion"}
     return TaggedQuestion.model_validate({
         "difficulty": difficulty,
         "question": question,
-        "answers": {"A": "1878", "B": "1879", "C": "1880", "D": "1881"},
+        "answers": answers,
         "correct_answer": "B",
         "tags": {
             "entity": ["albert-einstein"], "concept": [concept],
