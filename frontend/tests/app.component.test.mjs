@@ -45,6 +45,7 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
                  signedIn = true, starAwards = {}, answered = 0, correct = 0 } = {}) {
   const requests = [];
   const posts = [];
+  const patches = [];
   const profile = {
     games_played: 1, total_score: 0, best_round_score: 0,
     wallet_balance: 0, star_awards: { ...starAwards }, achievements: [],
@@ -77,12 +78,17 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
       posts.push({ url, body, subject });
       return subject.asObservable();
     },
+    patch(url, body) {
+      const subject = new Subject();
+      patches.push({ url, body, subject });
+      return subject.asObservable();
+    },
   };
   const app = new AppComponent(http);
   app.ngOnInit();
   app.gameId = 'existing-game';
   const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
-  return { app, http, requests, posts, scheduler, profile };
+  return { app, http, requests, posts, patches, scheduler, profile };
 }
 
 function succeed(request, value = question) {
@@ -106,7 +112,8 @@ test('lifetime count includes only correct answers, not incorrect attempts', () 
 });
 
 test('password length hint is only used when registering', () => {
-  assert.match(source, /isRegister \? ' placeholder="At least 8 characters"' : ''/);
+  assert.match(source, /hint\('quiz-auth-password', 'auth.passwordHint'\)/);
+  assert.match(source, /if \(isRegister\) \{/);
   assert.doesNotMatch(source, /maxlength="256" placeholder="At least 8 characters"/);
 });
 
@@ -338,7 +345,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /openAuthDialog\('register'\)/);
   assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
   assert.match(template, /\*ngIf="canRetryQuestion"[\s\S]*?\(click\)="retryQuestion\(\)"/);
-  assert.match(template, /ALL TIME/);
+  assert.match(template, /stars\.allTime/);
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
 });
@@ -353,4 +360,44 @@ test('SweetAlert2 dependency, pinned lockfile and styles are synchronized', () =
   assert.equal(lock.packages['node_modules/sweetalert2'].version, packageJson.dependencies.sweetalert2);
   assert.ok(angular.projects['ai-quiz-frontend'].architect.build.options.styles
     .includes('node_modules/sweetalert2/dist/sweetalert2.min.css'));
+});
+
+test('UI languages are shown by native names, never sent to localizer', () => {
+  const { app } = setup();
+  const names = Object.fromEntries(app.uiLanguages.map(item => [item.code, item.nativeName]));
+  assert.equal(Object.keys(names).length, 11);
+  assert.equal(names.en, 'English');
+  assert.equal(names.de, 'Deutsch');
+  assert.equal(names.ru, 'Русский');
+  assert.equal(names.he, 'עברית');
+  assert.equal(names.ar, 'العربية');
+  assert.equal(names.ja, '日本語');
+  assert.equal(names.zh, '中文');
+  assert.equal(Object.values(english).includes('Deutsch'), false);
+});
+
+test('changing interface language never changes question language', () => {
+  const { app, patches } = setup();
+  app.selectedLanguage = 'Russian';
+  app.setUiLanguage('he');
+  assert.equal(app.locale.code, 'he');
+  assert.equal(app.rtl, true);
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(patches[0].url, '/api/localization/preference');
+  assert.deepEqual(patches[0].body, { language_code: 'he' });
+  succeed(patches[0], { language_code: 'he' });
+  assert.equal(app.account.ui_language, 'he');
+  app.selectedLanguage = 'German';
+  assert.equal(app.locale.code, 'he');
+});
+
+test('UI source dictionary contains every explicit static translation key', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const referenced = [...source.matchAll(/(?:this\.)?locale\.t\('([^']+)'\)/g),
+    ...template.matchAll(/locale\.t\('([^']+)'\)/g),
+    ...source.matchAll(/this\.fail\('([^']+)'\)/g)];
+  for (const match of referenced) {
+    if (match[1].endsWith('.')) continue;
+    assert.ok(Object.hasOwn(english, match[1]), 'Missing English key: ' + match[1]);
+  }
 });
