@@ -157,7 +157,7 @@
     </div>
     <div class="localization-status-line" aria-hidden="true">
       <span *ngFor="let message of localizationStatus; let i = index"
-            class="localization-phrase" [style.--phrase-index]="i"
+            class="localization-phrase" [style.animationDelay]="(i * 2) + 's'"
             [attr.dir]="message.rtl ? 'rtl' : 'ltr'">{{ message.text }}</span>
     </div>
     <span class="sr-only">Localizing the website. Please wait.</span>
