@@ -21,26 +21,63 @@ def select_generator_prompt(version: str | None = None) -> str:
     raise ValueError("Invalid AI_GENERATOR_PROMPT_VERSION; use v1 or v2")
 
 
+TAGGING_GENERATOR_INSTRUCTIONS = """
+STRICT TAGGED OUTPUT (overrides the legacy JSON example above):
+Return the normal five question fields AND required 'tags' and 'fact' objects.
+'tags': {'entity': 1-3 slugs, 'concept': 1-4 slugs, 'keyword': 0-4 slugs}.
+'fact': {'subject': slug, 'relation': slug, 'object': slug}.
+Every slug MUST be canonical LOWERCASE ENGLISH ASCII kebab-case
+(e.g. 'albert-einstein', 'birth-year', '1879'), independently of the
+language used for the question. The fact.subject MUST be one of the
+entity tags. The relation must describe the EXACT knowledge being asked
+(e.g. birth-year, not simply date); object represents the correct answer.
+Different wordings and answer orders for the same knowledge MUST produce
+the same subject and relation. Do NOT use the difficulty as a tag.
+The question must NOT test any excluded knowledge from the user's
+prior-question history. Different facts about the same entity ARE allowed.
+Keep metadata private to the server. Return one strict JSON object.
+"""
+
+
 def create_question(complexity: int, language: str, category: str,
-                    *, prompt_version: str | None = None) -> dict[str, Any]:
-    """Generate and parse one question; API schema validation/retries follow."""
+                    *, prompt_version: str | None = None,
+                    tag_context: list[dict] | None = None) -> dict[str, Any]:
+    """Generate and parse one question; API validation/retries follow.
+
+    tag_context=None preserves the exact legacy transport/contract.
+    An empty list means tagged mode with a first-time user.
+    """
     if not 0 <= complexity <= MAX_DIFFICULTY:
         raise ValueError(f"Complexity must be between 0 and {MAX_DIFFICULTY}")
 
+    tagging = tag_context is not None
     instructions = select_generator_prompt(prompt_version)
+    question_input = (
+        f"Generate a question with difficulty level {complexity}. "
+        f"Topic: {category}. "
+        f"Use {language} to choose a language of question."
+    )
+    if tagging:
+        from output_contracts import OutputContract
+        instructions += "\n" + TAGGING_GENERATOR_INSTRUCTIONS
+        question_input += (
+            "\nDo NOT repeat any of these already shown facts for this user. "
+            "These are only exclusions, not subject suggestions:\n"
+            + json.dumps(tag_context, ensure_ascii=False, separators=(",", ":"))
+        )
+
     with timed_stage("provider_client_setup"):
         provider_client = client()
-    response = provider_client.responses.create(
-        instructions=instructions,
-        input=(
-            f"Generate a question with difficulty level {complexity}. "
-            f"Topic: {category}. "
-            f"Use {language} to choose a language of question."
-        ),
-        max_output_tokens=MAX_OUTPUT_TOKENS,
-        reasoning={"effort": "none"},
-        temperature=TEMPERATURE,
-    )
+    request = {
+        "instructions": instructions,
+        "input": question_input,
+        "max_output_tokens": max(MAX_OUTPUT_TOKENS, 1000) if tagging else MAX_OUTPUT_TOKENS,
+        "reasoning": {"effort": "none"},
+        "temperature": TEMPERATURE,
+    }
+    if tagging:
+        request["output_contract"] = OutputContract.TAGGED_QUESTION
+    response = provider_client.responses.create(**request)
     text = completed_text(response)
     with timed_stage("question_json_parse"):
         return json.loads(normalize_output(text))
