@@ -2,16 +2,36 @@ import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { finalize, Subscription, timeout, TimeoutError, timer } from 'rxjs';
+import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
 type StarTier = 'bronze' | 'silver' | 'gold' | 'platinum';
 type StarCounts = Record<StarTier, number>;
+type AuthMode = 'login' | 'register';
 
+const GAME_API = '/api/v2/games';
+const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
-const STAR_STORAGE_KEY = 'ai-quiz-game:local-star-totals:v1';
 
+interface Account {
+  id: string;
+  username: string;
+  display_name: string | null;
+  preferred_language: string;
+  theme_key: string;
+}
+interface ProfileStats {
+  games_played: number;
+  total_score: number;
+  best_round_score: number;
+  wallet_balance: number;
+  star_awards: Record<string, number>;
+  achievements: string[];
+  answered_questions: number;
+  correct_answers: number;
+}
 interface GameInfo {
   game_id: string;
   language: string;
@@ -50,9 +70,19 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'gold', label: 'Gold' },
     { key: 'platinum', label: 'Platinum' },
   ];
+
+  account: Account | null = null;
+  authLoading = true;
+  authBusy = false;
+  statsLoading = false;
+  statsError = '';
+  gamesPlayed = 0;
+  answeredQuestions = 0;
+
   selectedLanguage = 'English';
   screen: Screen = 'setup';
   gameId = '';
+  resumeAvailable = false;
   current: PublicQuestion | null = null;
   feedback: AnswerFeedback | null = null;
   loading = false;
@@ -64,10 +94,12 @@ export class AppComponent implements OnInit, OnDestroy {
   private warningMs = 8000;
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
+  private statsVersion = 0;
+
   progress = 0;
   stars: string[] = [];
   currentStars: StarCounts = emptyStars();
-  totalStars: StarCounts = this.readStoredStars();
+  totalStars: StarCounts = emptyStars();
 
   constructor(private readonly http: HttpClient) {}
 
@@ -86,8 +118,16 @@ export class AppComponent implements OnInit, OnDestroy {
           this.requestTimeoutMs = settings.request_timeout_ms;
         }
       },
-      // Keep finite defaults when running against an older or unavailable backend.
       error: () => {},
+    }));
+
+    // The server owns the opaque session cookie. Never store credentials or
+    // an authentication token in localStorage/sessionStorage.
+    this.subscriptions.add(this.http.get<Account>('/api/auth/me').pipe(
+      timeout(10000), finalize(() => { this.authLoading = false; }),
+    ).subscribe({
+      next: (account) => this.signedIn(account),
+      error: () => { this.account = null; },
     }));
   }
 
@@ -105,29 +145,138 @@ export class AppComponent implements OnInit, OnDestroy {
     return this.feedback?.phase === 'completed' || this.feedback?.phase === 'lost';
   }
 
+  // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
+  async openAuthDialog(mode: AuthMode): Promise<void> {
+    if (this.authBusy || this.loading || this.authLoading) return;
+    this.authBusy = true;
+    this.error = '';
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const isRegister = mode === 'register';
+      const result = await Swal.fire({
+        title: isRegister ? 'Create your account' : 'Sign in to AI Quiz',
+        html:
+          '<div class="quiz-auth-fields">' +
+            '<label for="quiz-auth-username">Username</label>' +
+            '<input id="quiz-auth-username" class="swal2-input" type="text" ' +
+              'autocomplete="username" maxlength="30" placeholder="Your username">' +
+            '<label for="quiz-auth-password">Password</label>' +
+            '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
+              'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" ' +
+              'maxlength="256" placeholder="At least 8 characters">' +
+            (isRegister ?
+              '<label for="quiz-auth-confirm">Confirm password</label>' +
+              '<input id="quiz-auth-confirm" class="swal2-input" type="password" ' +
+                'autocomplete="new-password" maxlength="256" placeholder="Repeat password">'
+              : '') +
+          '</div>',
+        customClass: {
+          popup: 'quiz-auth-popup',
+          confirmButton: 'quiz-auth-confirm',
+        },
+        background: '#1b1e3e',
+        color: '#f1f3ff',
+        confirmButtonText: isRegister ? 'Create account' : 'Sign in',
+        confirmButtonColor: '#8170d8',
+        showCancelButton: true,
+        cancelButtonText: 'Cancel',
+        focusConfirm: false,
+        showLoaderOnConfirm: true,
+        allowOutsideClick: () => !Swal.isLoading(),
+        allowEscapeKey: () => !Swal.isLoading(),
+        preConfirm: async () => {
+          const popup = Swal.getPopup();
+          const username = (popup?.querySelector<HTMLInputElement>('#quiz-auth-username')?.value ?? '').trim();
+          const password = popup?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value ?? '';
+          const confirmation = popup?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value ?? '';
+
+          if (!USERNAME_PATTERN.test(username)) {
+            Swal.showValidationMessage('Username: 3–30 English letters, digits or _, starting with a letter.');
+            return false;
+          }
+          if (password.length < 8 || password.length > 256) {
+            Swal.showValidationMessage('Password must contain 8–256 characters.');
+            return false;
+          }
+          if (isRegister && confirmation !== password) {
+            Swal.showValidationMessage('Passwords do not match.');
+            return false;
+          }
+          try {
+            return await firstValueFrom(this.http.post<Account>(
+              isRegister ? '/api/auth/register' : '/api/auth/login',
+              { username, password },
+            ).pipe(timeout(15000)));
+          } catch (error: unknown) {
+            Swal.showValidationMessage(this.authErrorMessage(error, mode));
+            return false;
+          }
+        },
+      });
+      if (result.isConfirmed && result.value) {
+        this.signedIn(result.value as Account);
+      }
+    } catch {
+      this.error = 'Could not open the sign-in dialog. Check the app and try again.';
+    } finally {
+      this.authBusy = false;
+    }
+  }
+
+  logout(): void {
+    if (!this.account || this.loading || this.authBusy) return;
+    this.authBusy = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<void>('/api/auth/logout', {}).pipe(
+      timeout(10000), finalize(() => { this.authBusy = false; }),
+    ).subscribe({
+      next: () => this.clearAccount(),
+      error: (err: unknown) => {
+        if (err instanceof HttpErrorResponse && err.status === 401) {
+          this.clearAccount();
+        } else {
+          this.error = 'Could not sign out. Check the connection and try again.';
+        }
+      },
+    }));
+  }
+
   startGame(): void {
-    if (this.loading || this.configLoading) return;
-    if (this.gameId) { this.loadQuestion(); return; }
+    if (this.loading || this.configLoading || this.authLoading || this.authBusy) return;
+    if (!this.account) {
+      void this.openAuthDialog('login');
+      return;
+    }
+    if (this.gameId) {
+      this.resumeAvailable = false;
+      this.loadQuestion();
+      return;
+    }
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
-      '/api/games', { language: this.selectedLanguage },
+      GAME_API, { language: this.selectedLanguage },
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.rememberActiveGame(game.game_id);
         this.stars = [];
         this.currentStars = emptyStars();
         this.progress = 0;
         this.feedback = null;
+        this.resumeAvailable = false;
         this.loading = false;
         this.loadQuestion();
       },
-      error: () => this.fail('Could not start a game. Check the connection and try again.'),
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.fail('Could not start a game. Check the connection and try again.');
+      },
     }));
   }
 
   loadQuestion(): void {
-    if (!this.gameId || this.loading) return;
+    if (!this.gameId || this.loading || !this.account) return;
     this.loading = true;
     this.questionLoading = true;
     this.longWait = false;
@@ -135,7 +284,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
     this.subscriptions.add(this.http.get<PublicQuestion>(
-      '/api/games/' + this.gameId + '/question',
+      GAME_API + '/' + this.gameId + '/question',
     ).pipe(
       timeout(this.requestTimeoutMs),
       finalize(() => {
@@ -149,8 +298,13 @@ export class AppComponent implements OnInit, OnDestroy {
         this.current = question;
         this.feedback = null;
         this.screen = 'question';
+        this.resumeAvailable = false;
       },
       error: (error: unknown) => {
+        if (this.isUnauthorized(error)) {
+          this.sessionExpired();
+          return;
+        }
         this.canRetryQuestion = true;
         if (error instanceof TimeoutError) {
           this.fail('The question is taking too long. It may still be preparing. Retry to retrieve it.');
@@ -170,26 +324,37 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   answer(choice: Choice): void {
-    if (this.loading || !this.current || this.screen !== 'question') return;
+    if (this.loading || !this.current || this.screen !== 'question' || !this.account) return;
     this.loading = true;
     this.error = '';
-    this.subscriptions.add(this.http.post<AnswerFeedback>('/api/games/' + this.gameId + '/answer', {
-      question_id: this.current.question_id,
-      answer: choice,
-    }).pipe(timeout(this.requestTimeoutMs)).subscribe({
+    this.subscriptions.add(this.http.post<AnswerFeedback>(
+      GAME_API + '/' + this.gameId + '/answer', {
+        question_id: this.current.question_id,
+        answer: choice,
+      },
+    ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
         this.progress = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
           this.stars.push(result.achievement);
           this.currentStars[result.achievement] += 1;
-          this.totalStars[result.achievement] += 1;
-          this.storeStars();
         }
+        if (result.phase === 'completed' || result.phase === 'lost') {
+          this.forgetActiveGame();
+        }
+        this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
       },
-      error: () => this.fail('Could not confirm your answer. It may already have been recorded. Please try again.'),
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else if (err instanceof HttpErrorResponse && err.status === 409) {
+          this.recoverGameAfterConflict();
+        } else {
+          this.fail('Could not confirm your answer. It may already have been recorded. Please try again.');
+        }
+      },
     }));
   }
 
@@ -204,9 +369,144 @@ export class AppComponent implements OnInit, OnDestroy {
 
   restart(): void {
     if (this.loading) return;
+    this.forgetActiveGame();
+    this.resetGameView();
+  }
+
+  private signedIn(account: Account): void {
+    if (this.account?.id !== account.id) this.resetGameView();
+    this.account = account;
+    this.authLoading = false;
+    this.totalStars = emptyStars();
+    if (this.languages.includes(account.preferred_language) && !this.gameId) {
+      this.selectedLanguage = account.preferred_language;
+    }
+    this.refreshStats();
+    this.restoreActiveGame();
+  }
+
+  private clearAccount(): void {
+    this.statsVersion++;
+    this.account = null;
+    this.totalStars = emptyStars();
+    this.gamesPlayed = 0;
+    this.answeredQuestions = 0;
+    this.statsLoading = false;
+    this.statsError = '';
+    this.resetGameView();
+  }
+
+  private sessionExpired(): void {
+    this.clearAccount();
+    this.error = 'Your session expired. Sign in again to continue.';
+    this.loading = false;
+  }
+
+  private refreshStats(): void {
+    const accountId = this.account?.id;
+    if (!accountId) return;
+    const version = ++this.statsVersion;
+    this.statsLoading = true;
+    this.statsError = '';
+    this.subscriptions.add(this.http.get<ProfileStats>('/api/profile/me/stats').pipe(
+      timeout(10000), finalize(() => {
+        if (version === this.statsVersion) this.statsLoading = false;
+      }),
+    ).subscribe({
+      next: (stats) => {
+        if (this.account?.id !== accountId || version !== this.statsVersion) return;
+        const updated = emptyStars();
+        for (const tier of this.starTiers) {
+          const value = stats.star_awards[tier.key];
+          if (Number.isSafeInteger(value) && value >= 0) updated[tier.key] = value;
+        }
+        this.totalStars = updated;
+        this.gamesPlayed = stats.games_played;
+        this.answeredQuestions = stats.answered_questions;
+      },
+      error: (err: unknown) => {
+        if (this.account?.id !== accountId || version !== this.statsVersion) return;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.statsError = 'Statistics are temporarily unavailable.';
+      },
+    }));
+  }
+
+  private restoreActiveGame(): void {
+    const accountId = this.account?.id;
+    if (!accountId) return;
+    const savedId = this.readActiveGame(accountId);
+    if (!savedId) return;
+    this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + savedId).pipe(
+      timeout(10000),
+    ).subscribe({
+      next: (run) => {
+        if (this.account?.id !== accountId) return;
+        if (run.phase !== 'main' && run.phase !== 'bonus') {
+          this.removeSavedGame(accountId);
+          return;
+        }
+        this.gameId = run.game_id;
+        this.resumeAvailable = true;
+        this.selectedLanguage = run.language;
+        this.progress = run.correct_main_answers;
+        this.current = null;
+        this.feedback = null;
+        this.screen = 'setup';
+        this.currentStars = {
+          bronze: run.correct_main_answers >= 5 ? 1 : 0,
+          silver: run.correct_main_answers >= 10 ? 1 : 0,
+          gold: run.correct_main_answers >= 15 ? 1 : 0,
+          platinum: 0,
+        };
+        this.stars = this.starTiers.filter((tier) => this.currentStars[tier.key] > 0)
+          .map((tier) => tier.key);
+      },
+      error: (err: unknown) => {
+        if (this.account?.id !== accountId) return;
+        if (err instanceof HttpErrorResponse && err.status === 404) {
+          this.removeSavedGame(accountId);
+        }
+      },
+    }));
+  }
+
+  private recoverGameAfterConflict(): void {
+    const id = this.gameId;
+    if (!id) { this.fail('The round is no longer available.'); return; }
+    this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + id).pipe(
+      timeout(10000),
+    ).subscribe({
+      next: (run) => {
+        this.loading = false;
+        this.canRetryQuestion = false;
+        this.progress = run.correct_main_answers;
+        if (run.phase === 'completed' || run.phase === 'lost') {
+          this.forgetActiveGame();
+          this.feedback = {
+            correct: false, correct_answer: 'A', phase: run.phase,
+            correct_main_answers: run.correct_main_answers, achievement: null,
+          };
+          this.current = null;
+          this.screen = 'done';
+          this.refreshStats();
+        } else {
+          this.current = null;
+          this.feedback = null;
+          this.screen = 'setup';
+          this.resumeAvailable = true;
+        }
+        this.error = 'Your previous answer was already processed. Game status has been restored.';
+      },
+      error: () => this.fail('Could not recover the game status. Reload the page and sign in.'),
+    }));
+  }
+
+  private resetGameView(): void {
     this.canRetryQuestion = false;
     this.longWait = false;
     this.gameId = '';
+    this.resumeAvailable = false;
     this.current = null;
     this.feedback = null;
     this.error = '';
@@ -216,33 +516,39 @@ export class AppComponent implements OnInit, OnDestroy {
     this.screen = 'setup';
   }
 
-  // Prototype-only display cache: the backend still decides which stars were earned.
-  // This local browser total is NOT an authoritative balance for purchases.
+  private rememberActiveGame(id: string): void {
+    const userId = this.account?.id;
+    if (!userId) return;
+    try { localStorage.setItem(ACTIVE_GAME_KEY + userId, id); } catch { /* private mode */ }
+  }
+  private readActiveGame(userId: string): string | null {
+    try { return localStorage.getItem(ACTIVE_GAME_KEY + userId); }
+    catch { return null; }
+  }
+  private removeSavedGame(userId: string): void {
+    try { localStorage.removeItem(ACTIVE_GAME_KEY + userId); } catch { /* private mode */ }
+  }
+  private forgetActiveGame(): void {
+    if (this.account) this.removeSavedGame(this.account.id);
+  }
+
   private isStarTier(value: string): value is StarTier {
     return this.starTiers.some((tier) => tier.key === value);
   }
 
-  private readStoredStars(): StarCounts {
-    const result = emptyStars();
-    try {
-      const saved = JSON.parse(localStorage.getItem(STAR_STORAGE_KEY) ?? 'null');
-      if (!saved || typeof saved !== 'object') return result;
-      for (const key of Object.keys(result) as StarTier[]) {
-        const count = saved[key];
-        if (Number.isSafeInteger(count) && count >= 0) result[key] = count;
-      }
-    } catch {
-      // Local storage can be unavailable in private browsing or restricted contexts.
-    }
-    return result;
+  private isUnauthorized(err: unknown): boolean {
+    return err instanceof HttpErrorResponse && err.status === 401;
   }
 
-  private storeStars(): void {
-    try {
-      localStorage.setItem(STAR_STORAGE_KEY, JSON.stringify(this.totalStars));
-    } catch {
-      // The quiz still works if the browser cannot persist display-only totals.
+  private authErrorMessage(error: unknown, mode: AuthMode): string {
+    if (error instanceof HttpErrorResponse) {
+      if (error.status === 401) return 'Invalid username or password.';
+      if (error.status === 409 && mode === 'register') return 'Username is already taken.';
+      if (error.status === 429) return 'Too many attempts. Please try again later.';
+      if (error.status === 422) return 'Please check the username and password requirements.';
+      if (error.status === 403) return 'This browser origin is not permitted.';
     }
+    return 'Sign in failed. Check the connection and try again.';
   }
 
   private fail(message: string): void {
