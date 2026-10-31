@@ -83,12 +83,11 @@
   "account.languageSaveFailed": "Could not save your interface language. Please try again.",
   "game.restoreFailed": "Could not check your unfinished game. Reload to try again.",
   "localization.loadFailed": "This language could not be prepared. The previous language is still shown. Try again later.",
-  "localization.resetButton": "Reset translations (dev)",
-  "localization.resetTitle": "Remove saved translations?",
-  "localization.resetExplain": "The site saves translations in a shared database. Removing them means the selected language (or all languages) will be translated again the next time someone opens it. AI translation can cost money. Accounts, questions and game results will NOT be deleted.",
-  "localization.resetAll": "All translated languages",
-  "localization.resetConfirm": "Remove saved translations",
-  "localization.resetDone": "Translations removed",
-  "localization.resetResult": "Removed {{count}} saved strings. A fresh translation will be requested next time this language is opened.",
-  "localization.resetFailed": "Could not reset the translations. Please try again."
+  "questionLanguage.English": "English",
+  "questionLanguage.Russian": "Russian",
+  "questionLanguage.Hebrew": "Hebrew",
+  "questionLanguage.German": "German",
+  "questionLanguage.French": "French",
+  "questionLanguage.Spanish": "Spanish",
+  "questionLanguage.Italian": "Italian"
 }
