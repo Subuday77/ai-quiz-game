@@ -169,6 +169,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from tagging.contract import TaggedQuestion
         from tagging.core import require_unique, critic_neighbors
         from tagging.review import check_tagged_quality
+        from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
     event("generation_policy", budget_ms=policy.budget_seconds * 1000,
@@ -199,7 +200,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             if tagged:
                 check_tagged_quality(question, requested_difficulty=difficulty,
                                      language=language, category=category,
-                                     neighbors=critic_neighbors(question, tag_history),
+                                     neighbors=critic_neighbors(question, tag_history,
+                                                                 category_slug=topic_slug(category)),
                                      mode=quality_mode, deadline=deadline,
                                      timeout_seconds=policy.provider_timeout_seconds,
                                      clock=perf_counter)
@@ -218,6 +220,11 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                "rejected": True})
         except QualityRegenerationError:
             failure_status = 502
+            if tagged:
+                exclusions.append({"subject": question.fact.subject,
+                                   "relation": question.fact.relation,
+                                   "object": question.fact.object,
+                                   "rejected": True})
             event("generation_attempt_completed", outcome="quality_rejected")
         except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
             failure_status = 502
