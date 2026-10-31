@@ -14,7 +14,7 @@
     <div class="dev-translation-tools" *ngIf="account && resetEnabled">
       <button class="account-button dev-reset-button" type="button" (click)="resetTranslations()"
               [disabled]="resetBusy || locale.loading || authBusy">
-        <span aria-hidden="true">↻</span> {{ locale.t('localization.resetButton') }}
+        <span aria-hidden="true">↻</span> {{ resetCopy.button }}
       </button>
     </div>
 
@@ -92,7 +92,7 @@
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
       <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
-        <option *ngFor="let language of languages" [value]="language">{{ language }}</option>
+        <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
       <div class="question-actions">
         <button class="primary" type="button" (click)="startGame()"
@@ -142,6 +142,7 @@
 
     <p class="intro" role="status" *ngIf="questionLoading && longWait">{{ locale.t('game.longWait') }}</p>
     <p class="error" role="alert" *ngIf="error">{{ locale.t(error) }}</p>
+    <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
     <button class="primary" type="button" *ngIf="canRetryQuestion"
             (click)="retryQuestion()" [disabled]="loading">{{ locale.t('game.retry') }}</button>
   </section>
@@ -156,9 +157,10 @@
       <span class="localization-globe">✧</span>
     </div>
     <div class="localization-status-line" aria-hidden="true">
-      <span *ngFor="let message of localizationStatus; let i = index"
-            class="localization-phrase" [style.animationDelay]="(i * 2) + 's'"
-            [attr.dir]="message.rtl ? 'rtl' : 'ltr'">{{ message.text }}</span>
+      <span class="localization-phrase"
+            [attr.dir]="localizationStatus[locale.messageIndex].rtl ? 'rtl' : 'ltr'">{{
+        localizationStatus[locale.messageIndex].text
+      }}</span>
     </div>
     <span class="sr-only">Localizing the website. Please wait.</span>
   </div>
