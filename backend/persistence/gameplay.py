@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from game_logic import AnswerResult, GameState
@@ -125,18 +126,13 @@ def offer_question(
         if topic is None:
             raise TopicsNotSeeded("Run python -m persistence.seed_topics first")
         fingerprint = _fingerprint(question, category)
-        stored = db.scalar(
-            select(Question).where(
-                Question.language == run.language,
-                Question.fingerprint == fingerprint,
-            )
+        lookup = select(Question).where(
+            Question.language == run.language,
+            Question.fingerprint == fingerprint,
         )
-        if stored is not None:
-            if (stored.correct_key != question.correct_answer
-                    or stored.status != "approved"):
-                raise GameConflict("Existing question is conflicting or not approved")
-        else:
-            stored = Question(
+        stored = db.scalar(lookup)
+        if stored is None:
+            candidate = Question(
                 topic_id=topic.id, language=run.language,
                 requested_difficulty=question.difficulty,
                 text=question.question, choices=question.answers,
@@ -145,8 +141,23 @@ def offer_question(
                 generator_model=model, prompt_version=prompt_version,
                 schema_version=schema_version,
             )
-            db.add(stored)
-            db.flush()
+            try:
+                # Across games, two AI calls can produce the same candidate.
+                # A savepoint contains the global unique-index race without
+                # aborting the transaction holding this round's row lock.
+                with db.begin_nested():
+                    db.add(candidate)
+                    db.flush()
+                stored = candidate
+            except IntegrityError:
+                stored = db.scalar(lookup)
+                if stored is None:
+                    raise
+        if (stored.correct_key != question.correct_answer
+                or stored.status != "approved"
+                or stored.topic_id != topic.id
+                or stored.requested_difficulty != question.difficulty):
+            raise GameConflict("Existing question is conflicting or not approved")
         next_number = run.correct_main_answers + 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
