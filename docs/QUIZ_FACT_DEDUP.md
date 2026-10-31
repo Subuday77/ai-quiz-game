@@ -118,3 +118,28 @@ scores, per-player all-language history, different-fact acceptance, metadata
 atomicity, missing-history fail-closed, and mandatory critic behavior.
 Before deployment, test PostgreSQL migrations and concurrent requests against
 real PostgreSQL. Nothing is silently deployed or backfilled.
+
+## Duplicate-exhaustion player recovery
+
+When EVERY failed candidate in the bounded tagged generation attempt is
+rejected as a duplicate (either Python's deterministic similarity check or
+the tagged critic's semantic-duplicate verdict), the backend returns:
+
+    HTTP 409
+    {"detail":{"code":"duplicate_exhausted"}}
+
+Any mixed validation/provider/ordinary-quality failure retains the existing
+generic HTTP error; it is not mislabeled as a duplicate. Existing answer
+conflicts and concurrent-save conflicts are also distinct.
+
+Angular detects the structured code and shows a localized explanation with
+**Try again** and **Back to menu** buttons. These labels and the message are
+keys in backend/localization/en.json and are translated by the UI localizer.
+Try again requests a new candidate for the SAME game and current level.
+Back to menu navigates to setup but **preserves** the existing game ID,
+progress, and saved resume state; the user can resume from that same round.
+No accepted question, answer, game run, or star award is deleted.
+
+The generic Retry question button remains for all other errors and is hidden
+while the specialized panel is present. UI regression tests cover recovery,
+translation keys, no extra game POST, and unaffected error handling.
