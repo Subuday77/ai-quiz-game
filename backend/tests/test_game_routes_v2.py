@@ -52,6 +52,7 @@ class PersistentGameAPITests(unittest.TestCase):
         self.addCleanup(app.dependency_overrides.pop, get_db, None)
         self.enterContext(patch.dict(os.environ, {
             "AUTH_COOKIE_SECURE": "false",
+            "AI_TAG_DEDUP_ENABLED": "false",  # Legacy v2 test fixture explicitly uses the old contract.
             "AI_QUALITY_MODE": "off",
             "AI_LOCAL_LEAK_MODE": "off",
             "AI_GENERATION_MAX_ATTEMPTS": "3",
