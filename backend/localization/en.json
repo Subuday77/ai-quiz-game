@@ -89,5 +89,8 @@
   "questionLanguage.German": "German",
   "questionLanguage.French": "French",
   "questionLanguage.Spanish": "Spanish",
-  "questionLanguage.Italian": "Italian"
+  "questionLanguage.Italian": "Italian",
+  "game.duplicateExhausted": "We couldn't find a new unique question this time. The candidates were too similar to questions you've already seen. Would you like to try again?",
+  "game.duplicateRetry": "Try again",
+  "game.returnToMenu": "Back to menu"
 }
