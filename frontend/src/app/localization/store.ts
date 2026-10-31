@@ -40,6 +40,9 @@ export class LocalizationStore {
   requestedCode = 'en';
   loading = false;
   fallback = false;
+  // A single, always-visible status caption cycles independently of CSS.
+  messageIndex = 0;
+  private messageCycle: Subscription | null = null;
   private dictionary: Record<string, string> = {};
   private requestVersion = 0;
   private active: Subscription | null = null;
@@ -50,6 +53,19 @@ export class LocalizationStore {
 
   get rtl(): boolean {
     return this.code === 'he' || this.code === 'ar';
+  }
+
+  private startMessageCycle(): void {
+    this.stopMessageCycle();
+    this.messageIndex = 0;
+    this.messageCycle = timer(2000, 2000).subscribe(() => {
+      if (this.loading) this.messageIndex = (this.messageIndex + 1) % UI_LANGUAGES.length;
+    });
+  }
+
+  private stopMessageCycle(): void {
+    this.messageCycle?.unsubscribe();
+    this.messageCycle = null;
   }
 
   load(code: string, onSettled?: (successful: boolean) => void, force = false): void {
@@ -65,6 +81,7 @@ export class LocalizationStore {
     this.requestedCode = code;
     this.loading = true;
     this.fallback = false;
+    this.startMessageCycle();
     const version = ++this.requestVersion;
     this.active?.unsubscribe();
     const job = new Subscription();
@@ -73,6 +90,7 @@ export class LocalizationStore {
     const fail = (): void => {
       if (version !== this.requestVersion || job.closed) return;
       this.loading = false;
+      this.stopMessageCycle();
       this.fallback = true;
       this.requestedCode = this.code;
       onSettled?.(false);
@@ -106,6 +124,7 @@ export class LocalizationStore {
           this.requestedCode = code;
           this.fallback = false;
           this.loading = false;
+          this.stopMessageCycle();
           onSettled?.(true);
         },
         error: fail,
@@ -126,6 +145,7 @@ export class LocalizationStore {
   }
 
   destroy(): void {
+    this.stopMessageCycle();
     this.active?.unsubscribe();
     this.requestVersion++;
   }
