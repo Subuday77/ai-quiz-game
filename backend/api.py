@@ -148,6 +148,9 @@ def game_info(game_id: str) -> GameInfo:
                         correct_main_answers=session.state.correct_main_answers)
 
 
+from tagging.core import DuplicateQuestionError
+
+
 def generate_valid_question(difficulty: int, language: str, category: str, *,
                             tag_history=None, tag_context=None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
@@ -164,7 +167,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     tagged = tag_history is not None
     if tagged:
         from tagging.contract import TaggedQuestion
-        from tagging.core import DuplicateQuestionError, require_unique, critic_neighbors
+        from tagging.core import require_unique, critic_neighbors
         from tagging.review import check_tagged_quality
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
