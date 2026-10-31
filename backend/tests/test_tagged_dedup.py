@@ -420,7 +420,7 @@ class TaggedCriticTests(unittest.TestCase):
                   if call.args[0] == "tagged_review_score"]
         self.assertEqual(len(scores), 1)
         self.assertEqual(scores[0]["score"], 4.25)
-        self.assertEqual(scores[0]["penalties"]["knowledge"], 1)
+        self.assertEqual(scores[0]["penalties"]["knowledge"], 0.25)
         self.assertEqual(scores[0]["difficulty"], "too_easy")
         self.assertNotIn("rationale", scores[0])
 
@@ -435,27 +435,14 @@ class TaggedCriticTests(unittest.TestCase):
 
 
     def test_difficulty_weight_only_a_quarter_to_half_point(self):
-        from tagging.review import tagged_assessment
-        normal = tagged_assessment(
-            TaggedReview.model_validate(
-                self.verdict
-            ), "B",
-        )
+        normal = tagged_assessment(TaggedReview.model_validate(self.verdict), "B")
         self.assertEqual(normal["total"], 0)
         easy = {**self.verdict, "difficulty": "too_easy", "knowledge_penalty": 0}
-        minor = tagged_assessment(
-            TaggedReview.model_validate(
-                easy
-            ), "B",
-        )
+        minor = tagged_assessment(TaggedReview.model_validate(easy), "B")
         self.assertEqual(minor["penalties"]["knowledge"], 0.25)
         self.assertEqual(minor["total"], 0.25)
         severe = {**easy, "knowledge_penalty": 2}
-        major = tagged_assessment(
-            TaggedReview.model_validate(
-                severe
-            ), "B",
-        )
+        major = tagged_assessment(TaggedReview.model_validate(severe), "B")
         self.assertEqual(major["penalties"]["knowledge"], 0.5)
         self.assertEqual(major["total"], 0.5)
         self.assertEqual(major["raw_penalties"]["knowledge"], 2)
