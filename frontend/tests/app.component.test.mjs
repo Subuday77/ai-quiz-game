@@ -316,3 +316,15 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
 });
+
+
+test('SweetAlert2 dependency, pinned lockfile and styles are synchronized', () => {
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const angular = JSON.parse(readFileSync(join(root, 'angular.json'), 'utf8'));
+  assert.equal(packageJson.dependencies.sweetalert2, '11.26.25');
+  assert.equal(lock.packages[''].dependencies.sweetalert2, packageJson.dependencies.sweetalert2);
+  assert.equal(lock.packages['node_modules/sweetalert2'].version, packageJson.dependencies.sweetalert2);
+  assert.ok(angular.projects['ai-quiz-frontend'].architect.build.options.styles
+    .includes('node_modules/sweetalert2/dist/sweetalert2.min.css'));
+});
