@@ -249,8 +249,12 @@ export class AppComponent implements OnInit, OnDestroy {
         color: '#f1f3ff',
         confirmButtonColor: '#8170d8',
       });
-      // Only reload the visible language if it was included in the reset.
-      if (selected === 'all' || selected === this.locale.code) {
+      // A reset invalidates both PostgreSQL and any in-memory copies.
+      // Otherwise switching back to a previously loaded language could
+      // mistakenly show its deleted translation without requesting fresh data.
+      this.locale.invalidate(selected);
+      if (this.locale.code !== 'en' &&
+          (selected === 'all' || selected === this.locale.code)) {
         this.locale.load(this.locale.code, (successful) => {
           if (!successful) this.error = 'localization.loadFailed';
         }, true);
