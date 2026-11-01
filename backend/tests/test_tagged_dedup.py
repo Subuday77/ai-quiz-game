@@ -558,21 +558,22 @@ class TaggedCriticTests(unittest.TestCase):
         with self.assertRaises(QualityRegenerationError):
             self.check({**self.verdict, "tags_valid": "fail"})
 
-    def test_option_failure_is_mandatory_even_in_audit_with_inconsistent_fact_valid(self):
-        # The Jam case: critic correctly recognizes four valid choices but
-        # contradictorily labels the fact triple as pass.
-        with self.assertRaises(QualityRegenerationError):
-            self.check({
-                **self.verdict, "facts": "pass", "options": "fail",
-                "fact_valid": "pass", "rationale": "All A-D are number-one singles.",
-            }, QualityMode.AUDIT)
+    def test_facts_and_options_failures_are_diagnostic_in_audit(self):
+        # The Jam / Beatles: the critic may flag quality errors, but audit
+        # must not silently become enforce.
+        for finding in ("facts", "options"):
+            with self.subTest(finding=finding):
+                verdict = {
+                    **self.verdict, finding: "fail", "fact_valid": "pass",
+                    "rationale": "The critic identified an incorrect premise or options.",
+                }
+                observed = self.check(verdict, QualityMode.AUDIT)
+                self.assertEqual(observed._review_report["decision"], "audit")
+                self.assertEqual(observed._review_report["details"]["assessment"]["critical"],
+                                 "regenerate")
+                with self.assertRaises(QualityRegenerationError):
+                    self.check(verdict, QualityMode.ENFORCE)
 
-    def test_false_premise_is_mandatory_even_if_fact_valid_was_misreported(self):
-        with self.assertRaises(QualityRegenerationError):
-            self.check({
-                **self.verdict, "facts": "fail", "options": "pass",
-                "fact_valid": "pass", "rationale": "The first-date claim is wrong.",
-            }, QualityMode.AUDIT)
 
     def test_question_review_prompt_explicitly_checks_all_four_and_quantifiers(self):
         from tagging.review import TAGGED_REVIEW_PROMPT
@@ -582,9 +583,9 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIn("единственный", TAGGED_REVIEW_PROMPT)
         self.assertIn("facts=pass and options=pass", TAGGED_REVIEW_PROMPT)
 
-    def test_gta_vice_city_answer_leak_regenerates_even_below_threshold(self):
-        # The level-4 candidate with Vice City in the title was incorrectly
-        # accepted by audit despite critic.leakage=fail and only 1.25 penalty.
+    def test_gta_vice_city_leak_is_logged_in_audit_and_rejected_in_enforce(self):
+        # Real level-4 regression: the critic correctly catches the giveaway.
+        # Audit intentionally accepts for observation; enforce regenerates.
         verdict = {
             **self.verdict,
             "leakage": "fail",
@@ -614,16 +615,27 @@ class TaggedCriticTests(unittest.TestCase):
         })
         assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer)
         self.assertEqual(assessment["total"], 1.25)
-        for mode in (QualityMode.OFF, QualityMode.AUDIT, QualityMode.ENFORCE):
+        for mode in (QualityMode.OFF, QualityMode.AUDIT):
             with self.subTest(mode=mode):
-                with self.assertRaises(QualityRegenerationError):
-                    self.check(verdict, mode, item=gta)
-
-    def test_answer_leak_issue_code_is_mandatory_on_status_disagreement(self):
+                reviewed = self.check(verdict, mode, item=gta)
+                report = reviewed._review_report
+                self.assertEqual(report["decision"], "audit")
+                self.assertEqual(report["details"]["verdict"]["leakage"], "fail")
+                self.assertIn("answer_leak", report["issues"])
+                self.assertEqual(report["details"]["assessment"]["critical"], "regenerate")
         with self.assertRaises(QualityRegenerationError):
-            self.check({
-                **self.verdict, "leakage": "pass", "issue_codes": ["answer_leak"],
-            }, QualityMode.AUDIT)
+            self.check(verdict, QualityMode.ENFORCE, item=gta)
+
+    def test_answer_leak_issue_code_is_audit_only_but_blocks_enforce(self):
+        verdict = {
+            **self.verdict, "leakage": "pass", "issue_codes": ["answer_leak"],
+        }
+        observed = self.check(verdict, QualityMode.AUDIT)
+        self.assertEqual(observed._review_report["decision"], "audit")
+        self.assertEqual(observed._review_report["details"]["assessment"]["critical"],
+                         "regenerate")
+        with self.assertRaises(QualityRegenerationError):
+            self.check(verdict, QualityMode.ENFORCE)
 
     def test_high_difficulty_penalty_without_leak_still_audit_only(self):
         verdict = {
