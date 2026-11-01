@@ -212,17 +212,21 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         mode == QualityMode.ENFORCE
         and assessment["total"] >= TAGGED_REGEN_SCORE_THRESHOLD
     )
-    # Factual failures are mandatory even in audit: editorial difficulty,
-    # leakage and weighted penalties remain mode-gated. Some reviewers can
-    # contradict themselves (options=fail but fact_valid=pass); fail closed.
+    # Factual failures and decisive answer leaks are mandatory even in audit.
+    # Editorial difficulty and weighted penalties remain mode-gated.
     factual_rejection = (
         verdict.facts == CheckStatus.FAIL
         or verdict.options == CheckStatus.FAIL
+    )
+    answer_leak_rejection = (
+        verdict.leakage == CheckStatus.FAIL
+        or IssueCode.ANSWER_LEAK in verdict.issue_codes
     )
     review_rejected = (
         verdict.tags_valid != CheckStatus.PASS
         or verdict.fact_valid != CheckStatus.PASS
         or factual_rejection
+        or answer_leak_rejection
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
         or score_rejection
@@ -254,11 +258,11 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
 
     if (verdict.tags_valid != CheckStatus.PASS
             or verdict.fact_valid != CheckStatus.PASS
-            or factual_rejection):
+            or factual_rejection or answer_leak_rejection):
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
         raise SemanticDuplicateError()
-    # Audit remains entirely diagnostic for editorial penalties.
+    # Audit remains diagnostic for subjective/editorial penalties only.
     # In enforce, critical faults OR a high weighted score trigger retry.
     if mode == QualityMode.ENFORCE and (
         assessment["critical"] != "none" or score_rejection
