@@ -162,6 +162,8 @@ class DebugGenerationTests(unittest.TestCase):
         [row] = trace_lines(logger)
         self.assertEqual(row["rejection_reason"], "duplicate_rejected")
         self.assertEqual(row["duplicate_reason"], "same_fact")
+        self.assertEqual(row["python_duplicate_check"]["matched_question_id"],
+                         "old-question")
         self.assertEqual(row["correct_answer"], "B")
         self.assertEqual(row["fact_key"], repeated.fact.key)
         self.assertIsNone(row["critic"])
