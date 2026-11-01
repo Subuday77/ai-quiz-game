@@ -97,7 +97,7 @@
       <div class="question-actions">
         <button class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || configLoading || authLoading || authBusy || restoringGame">
-          {{ locale.t(!account ? 'game.loginToPlay' : gameId ? 'game.resume' : 'game.start') }}
+          {{ locale.t(setupButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
