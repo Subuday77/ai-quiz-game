@@ -134,8 +134,9 @@ class TaggedContractTests(unittest.TestCase):
         match = similarity(same_words, history)
         self.assertEqual((match.score, match.reason, match.previous_id),
                          (100, "same_question_text", "the-original-1984"))
-        with self.assertRaises(DuplicateQuestionError):
+        with self.assertRaises(DuplicateQuestionError) as rejected:
             require_unique(same_words, [history])
+        self.assertEqual(rejected.exception.previous_id, "the-original-1984")
 
     def test_distinct_works_by_same_author_do_not_collide(self):
         history = HistoryItem(
