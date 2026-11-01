@@ -26,17 +26,27 @@ five normal question fields plus tags (entity, concept, keyword) and fact
 3. Pydantic validates the tagged JSON. Python computes the canonical fact
    signature from subject + relation; object is intentionally excluded so an
    altered answer cannot evade detection.
-4. Exact fact signature -> hard reject. Otherwise score each prior question
-   individually and take the maximum: same entity 20, entity+relation 25,
-   any shared concept 20, entity+answer 20, nearly identical wording 35.
-   Same broad category adds zero. Default reject threshold: 70.
+4. Exact fact signature OR identical normalized question text -> hard reject
+   (100 points), even when the generator reverses subject and object or
+   changes the answer order. Exact text normalization handles typography,
+   quote styles, case and whitespace, but preserves numerical operators.
+   Otherwise score against each prior question: shared entity 20, same
+   fact subject+relation 25, shared concept 20, same fact subject+answer 20,
+   very similar wording 35. Different works by the same author must not gain
+   relation/answer points merely for sharing that author. Same broad
+   category adds zero. Default threshold: 70.
 5. Remaining candidates are checked by ONE mandatory critic v4 call,
    including ordinary v3 quality diagnostics and tag/fact correctness,
    semantic duplicate detection, and matching prior question if any. This
    REPLACES the older critic call, rather than adding a second one when
    quality review was already enabled. Tag checks are mandatory even if
    AI_QUALITY_MODE=off. Ordinary editorial enforcement continues to depend on
-   AI_QUALITY_MODE. Python hard rejects cannot be overruled by the critic.
+   AI_QUALITY_MODE. Explicit factual/premise failures (facts=fail or
+   options=fail) are mandatory rejections even in audit; subjective
+   difficulty, leakage and weighted editorial penalties still follow
+   AI_QUALITY_MODE. The critic is instructed to test A-D independently,
+   especially when a claim says "only", "first", "all" or "never". Python
+   hard rejects cannot be overruled by the critic.
 6. Rejected candidates use the existing generation retry/budget policy.
    At commit, a PostgreSQL user-row lock serializes all concurrent rounds
    for that user, followed by a fresh full-history strict recheck.
@@ -169,7 +179,8 @@ review duration, and details with:
 
 - verdict: complete typed reviewer output, including rationale;
 - assessment: computed total and four individual penalties;
-- python_duplicate_check: similarity score, threshold and reason;
+- python_duplicate_check: similarity score, threshold, reason, and matching
+  prior question ID (private developer diagnostics only);
 - general_mode, requested_difficulty, category.
 
 The rationale, correct answer and question body are NOT included in ordinary
@@ -184,8 +195,10 @@ question_reviews row because that table has a mandatory question_id foreign
 key. Their score breakdown is still logged for debugging.
 
 With AI_QUALITY_MODE=audit (as observed in the user's live trace), editorial
-penalties and even editor-reported difficulty remain diagnostic; they do not
-automatically reject an otherwise valid tagged question. With enforce, critical editorial findings reject; in tagged v4
+penalties and editor-reported difficulty remain diagnostic; they do not
+reject an otherwise valid tagged question. Explicit facts=fail or options=fail
+DO reject in any mode, as do invalid/uncertain canonical metadata and semantic
+duplicates. In enforce, critical editorial findings reject; in tagged v4
 a weighted editorial score of at least 3.25 now also triggers regeneration.
 For non-tagged v3 the numeric thresholds are still diagnostic only.
 
@@ -231,8 +244,9 @@ Difficulty alone cannot exceed 0.5 and can NEVER cause rejection.
 
 With `AI_QUALITY_MODE=audit`, scoring remains purely diagnostic,
 including the threshold preview. Tagged fact/tag correctness and semantic
-duplicate checks still reject in all modes. Critical factual failures in
-`enforce` still reject independently of numerical penalties. No
+duplicate checks AND explicit facts/options failures reject in all modes.
+Critical editorial failures in `enforce` still reject independently of
+numerical penalties. No
 database migration or AI JSON schema change is required.
 
 ## DEBUG: all generated candidate traces
@@ -252,7 +266,8 @@ starts literally with `DEBUG: `**, e.g.:
 Every accepted/rejected record uses the same payload format. An accepted
 candidate has passed Python/model checks but is NOT necessarily committed
 to PostgreSQL yet. The actual records include the timestamp, fact_key (when available),
-Python duplication assessment, error type and full reviewer verdict
+Python duplication assessment (including matched_question_id when known),
+error type and full reviewer verdict
 when the critic completed a valid review. Candidate content and the correct
 answer are absent from INFO logs. A malformed JSON completion produces
 `DEBUG: {"event":"question_candidate_invalid_json",...}` with up to 3,000
@@ -275,3 +290,25 @@ through this debug feature. No candidate DEBUG logs are persisted by the applica
 any external log capture remains the operator's responsibility.
 
 Tests: `python -m unittest discover -s tests -v` from `backend/`.
+
+## 2026-11-01 deterministic and factual review fixes
+
+- Python: exact normalized question text is an unconditional duplicate even
+  when fact triples vary. Subject-specific relation/answer weights prevent
+  false 85/70 collisions for different works sharing one author.
+- Python: the matching prior question ID is available only in private
+  `_duplicate_assessment` / opt-in DEBUG and persisted reviewer details;
+  INFO duplicate events remain content-free and ID-free.
+- Critic: the final v4 prompt explicitly tests A, B, C, D against the literal
+  stem, including exclusivity/quantifier words; it must not assume the
+  generator's selected answer is uniquely correct.
+- Policy: `facts=fail` or `options=fail` are mandatory regeneration
+  reasons even in `AI_QUALITY_MODE=audit`. The subjective difficulty score
+  (0–0.5) and editor threshold (3.25) remain unchanged and mode-gated.
+- **Important limitation:** the model can still wrongly report all four
+  options as checked and valid, as in the historical The Jam case. A stronger
+  prompt and consistent rejection handling do NOT guarantee factual truth;
+  external fact verification remains a separate potential next phase.
+- Tests cover the literal 1984 repeat, the Mona Lisa/Last Supper distinction,
+  numeric notation safety and the mandatory facts/options failure gate.
+  Run tests locally in PyCharm; no database migration was introduced.
