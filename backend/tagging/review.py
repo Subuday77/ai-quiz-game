@@ -212,21 +212,12 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         mode == QualityMode.ENFORCE
         and assessment["total"] >= TAGGED_REGEN_SCORE_THRESHOLD
     )
-    # Factual failures and decisive answer leaks are mandatory even in audit.
-    # Editorial difficulty and weighted penalties remain mode-gated.
-    factual_rejection = (
-        verdict.facts == CheckStatus.FAIL
-        or verdict.options == CheckStatus.FAIL
-    )
-    answer_leak_rejection = (
-        verdict.leakage == CheckStatus.FAIL
-        or IssueCode.ANSWER_LEAK in verdict.issue_codes
-    )
+    # In AUDIT/OFF, the critic's factual, option, language and leakage
+    # judgments are diagnostic only. The established hard gates protect
+    # fact/tag metadata and user-specific duplicate history in all modes.
     review_rejected = (
         verdict.tags_valid != CheckStatus.PASS
         or verdict.fact_valid != CheckStatus.PASS
-        or factual_rejection
-        or answer_leak_rejection
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
         or score_rejection
@@ -256,13 +247,11 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         "duration_ms": max(0, round((clock() - review_start) * 1000)),
     }
 
-    if (verdict.tags_valid != CheckStatus.PASS
-            or verdict.fact_valid != CheckStatus.PASS
-            or factual_rejection or answer_leak_rejection):
+    if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
         raise SemanticDuplicateError()
-    # Audit remains diagnostic for subjective/editorial penalties only.
+    # Audit keeps critic-only quality findings diagnostic (even critical ones).
     # In enforce, critical faults OR a high weighted score trigger retry.
     if mode == QualityMode.ENFORCE and (
         assessment["critical"] != "none" or score_rejection
