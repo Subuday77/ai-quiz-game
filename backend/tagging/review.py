@@ -57,6 +57,32 @@ generic filler. Check the fact.subject, fact.relation, fact.object triple:
 - Do not conceal uncertainty or claim unrelated facts are duplicates merely
   because a topic/entity appears in both.
 - Never expose these tags, facts or reviews to the player.
+
+MANDATORY INDEPENDENT FOUR-OPTION FACT CHECK (before any scoring or tagging):
+- Treat candidate.correct_answer as an UNTRUSTED hypothesis. Do NOT assume
+  the generator-selected answer is the only valid choice.
+- Verify A, B, C and D SEPARATELY against every literal restriction of the
+  stem. For each option decide: satisfies all conditions, does not satisfy,
+  or cannot be reliably established. Do this even if one option is familiar.
+- Explicitly check words that make universal/exclusive or time-dependent
+  claims: ONLY, FIRST, LAST, ALL, NEVER, EXACTLY, UNIQUE, and their equivalents
+  in the question language (e.g. единственный, первый, все, никогда).
+  One counterexample invalidates an exclusivity or universal premise.
+- Before marking facts=pass and options=pass, ensure exactly ONE option
+  satisfies the entire question, its letter equals independent_answer and
+  candidate.correct_answer, and the premise is true.
+- If two or more options satisfy the literal question, or none do, mark
+  options=fail and facts=fail (when the premise is false); fact_valid=fail
+  when the fact triple relies on that false premise. Do not repair this by
+  pretending a popular or intended answer is unique.
+- If source knowledge is inadequate to independently establish whether
+  a competing option meets a claim, return uncertain, not a confident pass.
+- In rationale, for exclusivity/quantifier questions or any failed factual
+  check, briefly report the A/B/C/D evaluation, e.g. "A yes; B no; C no;
+  D unknown" and the decisive reason. Keep the existing 600-char limit.
+- Difficulty and distractor quality are SEPARATE: perceived familiarity
+  cannot turn an objectively correct option into an invalid distractor.
+
 Difficulty ratings are subjective. Reserve too_easy/too_hard for a clear
 mismatch, not ordinary differences in background knowledge. A difficulty
 mismatch ALONE must never set facts/fact_valid/options to fail; those
@@ -186,9 +212,17 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         mode == QualityMode.ENFORCE
         and assessment["total"] >= TAGGED_REGEN_SCORE_THRESHOLD
     )
+    # Factual failures are mandatory even in audit: editorial difficulty,
+    # leakage and weighted penalties remain mode-gated. Some reviewers can
+    # contradict themselves (options=fail but fact_valid=pass); fail closed.
+    factual_rejection = (
+        verdict.facts == CheckStatus.FAIL
+        or verdict.options == CheckStatus.FAIL
+    )
     review_rejected = (
         verdict.tags_valid != CheckStatus.PASS
         or verdict.fact_valid != CheckStatus.PASS
+        or factual_rejection
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
         or score_rejection
@@ -218,7 +252,9 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         "duration_ms": max(0, round((clock() - review_start) * 1000)),
     }
 
-    if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
+    if (verdict.tags_valid != CheckStatus.PASS
+            or verdict.fact_valid != CheckStatus.PASS
+            or factual_rejection):
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
         raise SemanticDuplicateError()
