@@ -133,6 +133,14 @@ export class AppComponent implements OnInit, OnDestroy {
     this.locale = new LocalizationStore(http);
   }
 
+  // A game ID is allocated before the first question arrives. While that
+  // request is pending, the setup button must not claim the game is resumable.
+  get setupButtonLabelKey(): string {
+    if (!this.account) return 'game.loginToPlay';
+    if (this.loading) return 'game.loading';
+    return this.gameId ? 'game.resume' : 'game.start';
+  }
+
   ngOnInit(): void {
     this.locale.load('en');
     this.subscriptions.add(this.http.get<{
