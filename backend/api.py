@@ -214,6 +214,14 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 try:
                     closest = require_unique(question, tag_history)
                 except DuplicateQuestionError as duplicate:
+                    # The private DEBUG trace can identify the exact prior
+                    # question; INFO events do not expose user history IDs.
+                    question._duplicate_assessment = {
+                        "score": duplicate.score,
+                        "threshold": threshold(),
+                        "reason": str(duplicate),
+                        "matched_question_id": duplicate.previous_id,
+                    }
                     event("tag_similarity_score", score=duplicate.score,
                           threshold=threshold(), reason=str(duplicate),
                           rejected=True)
@@ -222,8 +230,12 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                     "score": closest.score if closest else 0,
                     "threshold": threshold(),
                     "reason": closest.reason if closest else "no_history",
+                    "matched_question_id": closest.previous_id if closest else None,
                 }
-                event("tag_similarity_score", **question._duplicate_assessment,
+                event("tag_similarity_score",
+                      score=question._duplicate_assessment["score"],
+                      threshold=question._duplicate_assessment["threshold"],
+                      reason=question._duplicate_assessment["reason"],
                       rejected=False)
             check_local_leak(question, leak_mode)
             if tagged:
