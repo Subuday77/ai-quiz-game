@@ -284,6 +284,11 @@ export class AppComponent implements OnInit, OnDestroy {
     return this.feedback?.phase === 'completed' || this.feedback?.phase === 'lost';
   }
 
+  get feedbackButtonLabelKey(): string {
+    if (this.gameEnded) return 'game.seeResults';
+    return this.loading ? 'game.loading' : 'game.nextQuestion';
+  }
+
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
   async openAuthDialog(mode: AuthMode): Promise<void> {
     if (this.authBusy || this.loading || this.authLoading) return;
