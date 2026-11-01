@@ -580,6 +580,38 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIn("единственный", TAGGED_REVIEW_PROMPT)
         self.assertIn("facts=pass and options=pass", TAGGED_REVIEW_PROMPT)
 
+    def test_gta_vice_city_answer_leak_regenerates_even_below_threshold(self):
+        # The level-4 candidate with Vice City in the title was incorrectly
+        # accepted by audit despite critic.leakage=fail and only 1.25 penalty.
+        verdict = {
+            **self.verdict,
+            "leakage": "fail",
+            "issue_codes": ["answer_leak", "difficulty_mismatch"],
+            "difficulty": "too_easy", "distractor_penalty": 1,
+            "knowledge_penalty": 0,
+            "rationale": "Vice City in the title matches Вайс-Сити.",
+        }
+        assessment = tagged_assessment(TaggedReview.model_validate(verdict), "B")
+        self.assertEqual(assessment["total"], 1.25)
+        for mode in (QualityMode.OFF, QualityMode.AUDIT, QualityMode.ENFORCE):
+            with self.subTest(mode=mode):
+                with self.assertRaises(QualityRegenerationError):
+                    self.check(verdict, mode)
+
+    def test_answer_leak_issue_code_is_mandatory_on_status_disagreement(self):
+        with self.assertRaises(QualityRegenerationError):
+            self.check({
+                **self.verdict, "leakage": "pass", "issue_codes": ["answer_leak"],
+            }, QualityMode.AUDIT)
+
+    def test_high_difficulty_penalty_without_leak_still_audit_only(self):
+        verdict = {
+            **self.verdict, "difficulty": "too_easy",
+            "issue_codes": ["difficulty_mismatch"], "distractor_penalty": 3,
+        }
+        accepted = self.check(verdict, QualityMode.AUDIT)
+        self.assertEqual(accepted._review_report["decision"], "audit")
+
     def test_semantic_duplicate_is_rejected_even_in_audit(self):
         with self.assertRaises(QualityRegenerationError):
             self.check({**self.verdict, "semantic_duplicate": True,
