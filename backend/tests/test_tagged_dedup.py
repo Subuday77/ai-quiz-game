@@ -555,6 +555,30 @@ class TaggedCriticTests(unittest.TestCase):
         with self.assertRaises(QualityRegenerationError):
             self.check({**self.verdict, "tags_valid": "fail"})
 
+    def test_option_failure_is_mandatory_even_in_audit_with_inconsistent_fact_valid(self):
+        # The Jam case: critic correctly recognizes four valid choices but
+        # contradictorily labels the fact triple as pass.
+        with self.assertRaises(QualityRegenerationError):
+            self.check({
+                **self.verdict, "facts": "pass", "options": "fail",
+                "fact_valid": "pass", "rationale": "All A-D are number-one singles.",
+            }, QualityMode.AUDIT)
+
+    def test_false_premise_is_mandatory_even_if_fact_valid_was_misreported(self):
+        with self.assertRaises(QualityRegenerationError):
+            self.check({
+                **self.verdict, "facts": "fail", "options": "pass",
+                "fact_valid": "pass", "rationale": "The first-date claim is wrong.",
+            }, QualityMode.AUDIT)
+
+    def test_question_review_prompt_explicitly_checks_all_four_and_quantifiers(self):
+        from tagging.review import TAGGED_REVIEW_PROMPT
+        self.assertIn("A, B, C and D SEPARATELY", TAGGED_REVIEW_PROMPT)
+        self.assertIn("candidate.correct_answer as an UNTRUSTED hypothesis", TAGGED_REVIEW_PROMPT)
+        self.assertIn("One counterexample", TAGGED_REVIEW_PROMPT)
+        self.assertIn("единственный", TAGGED_REVIEW_PROMPT)
+        self.assertIn("facts=pass and options=pass", TAGGED_REVIEW_PROMPT)
+
     def test_semantic_duplicate_is_rejected_even_in_audit(self):
         with self.assertRaises(QualityRegenerationError):
             self.check({**self.verdict, "semantic_duplicate": True,
