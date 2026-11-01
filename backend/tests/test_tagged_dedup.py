@@ -102,6 +102,75 @@ class TaggedContractTests(unittest.TestCase):
         self.assertLess(similarity(other, previous).score, threshold())
         require_unique(other, [previous])
 
+
+    def test_literal_1984_repeat_rejected_even_when_fact_direction_and_answers_change(self):
+        first = TaggedQuestion.model_validate({
+            "question": 'Кто написал роман «1984»?', "difficulty": 2,
+            "answers": {"A": "Джордж Оруэлл", "B": "Олдос Хаксли",
+                        "C": "Рэй Брэдбери", "D": "Герберт Уэллс"},
+            "correct_answer": "A",
+            "tags": {"entity": ["george-orwell", "aldous-huxley", "ray-bradbury"],
+                     "concept": ["authors", "novels"], "keyword": ["1984"]},
+            "fact": {"subject": "george-orwell", "relation": "author-of",
+                     "object": "nineteen-eighty-four"},
+        })
+        same_words = TaggedQuestion.model_validate({
+            "question": '  КТО  написал роман "1984" ?  ', "difficulty": 2,
+            "answers": {"A": "Олдос Хаксли", "B": "Джордж Оруэлл",
+                        "C": "Рэй Брэдбери", "D": "Грэм Грин"},
+            "correct_answer": "B",
+            "tags": {"entity": ["nineteen-eighty-four", "george-orwell"],
+                     "concept": ["author", "literature"], "keyword": ["dystopia"]},
+            "fact": {"subject": "nineteen-eighty-four", "relation": "author",
+                     "object": "george-orwell"},
+        })
+        history = HistoryItem(
+            question_id="the-original-1984", category_slug="literature",
+            question_text=first.question, fact_key=first.fact.key,
+            subject=first.fact.subject, relation=first.fact.relation,
+            object=first.fact.object,
+            tags={kind: tuple(values) for kind, values in first.tags.model_dump().items()},
+        )
+        match = similarity(same_words, history)
+        self.assertEqual((match.score, match.reason, match.previous_id),
+                         (100, "same_question_text", "the-original-1984"))
+        with self.assertRaises(DuplicateQuestionError):
+            require_unique(same_words, [history])
+
+    def test_distinct_works_by_same_author_do_not_collide(self):
+        history = HistoryItem(
+            question_id="mona", category_slug="art",
+            question_text='Кто написал картину «Мона Лиза»?',
+            fact_key="mona-lisa-historical-key",
+            subject="mona-lisa", relation="painter", object="leonardo-da-vinci",
+            tags={"entity": ("mona-lisa", "leonardo-da-vinci"),
+                  "concept": ("painting-authorship", "renaissance"),
+                  "keyword": ("artist",)},
+        )
+        candidate_question = TaggedQuestion.model_validate({
+            "question": 'Кто создал «Тайную вечерю»?', "difficulty": 0,
+            "answers": {"A": "Микеланджело", "B": "Леонардо да Винчи",
+                        "C": "Рафаэль", "D": "Боттичелли"},
+            "correct_answer": "B",
+            "tags": {"entity": ["the-last-supper", "leonardo-da-vinci"],
+                     "concept": ["painting-authorship", "renaissance"],
+                     "keyword": ["art"]},
+            "fact": {"subject": "the-last-supper", "relation": "painter",
+                     "object": "leonardo-da-vinci"},
+        })
+        match = similarity(candidate_question, history)
+        self.assertEqual((match.score, match.reason), (40, "entity+concept"))
+        require_unique(candidate_question, [history])
+
+    def test_exact_text_comparison_keeps_numeric_operators_and_decimals(self):
+        from tagging.core import _exact_question
+        self.assertNotEqual(_exact_question("Значение при x=-2?"),
+                            _exact_question("Значение при x=2?"))
+        self.assertNotEqual(_exact_question("Сколько будет 1.5?"),
+                            _exact_question("Сколько будет 15?"))
+        self.assertEqual(_exact_question(' Кто написал роман «1984»? '),
+                         _exact_question('кто написал роман "1984" ?'))
+
     def test_weight_threshold_rejects_near_identical_questions(self):
         original = candidate()
         old = HistoryItem(
