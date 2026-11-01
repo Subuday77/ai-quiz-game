@@ -126,7 +126,7 @@
       </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="continue()" [disabled]="loading">
-          {{ locale.t(gameEnded ? 'game.seeResults' : 'game.nextQuestion') }}
+          {{ locale.t(feedbackButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
