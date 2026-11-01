@@ -284,6 +284,34 @@ test('destroying the component cancels warning and HTTP subscriptions', () => {
   assert.equal(app.longWait, false);
 });
 
+test('next-question button switches to generation label until the response arrives', () => {
+  const { app, requests, scheduler } = setup();
+  app.screen = 'feedback';
+  app.feedback = { phase: 'main', correct: true, correct_answer: 'B',
+    correct_main_answers: 2, achievement: null };
+  assert.equal(app.feedbackButtonLabelKey, 'game.nextQuestion');
+  scheduler.run(() => {
+    app.continue();
+    assert.equal(app.loading, true);
+    assert.equal(app.feedbackButtonLabelKey, 'game.loading');
+    assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
+    succeed(requests[0]);
+  });
+  assert.equal(app.loading, false);
+  assert.equal(app.screen, 'question');
+});
+
+test('results button keeps results label and does not generate a new question', () => {
+  const { app, requests } = setup();
+  app.screen = 'feedback';
+  app.feedback = { phase: 'completed', correct: true, correct_answer: 'B',
+    correct_main_answers: 15, achievement: 'gold' };
+  assert.equal(app.feedbackButtonLabelKey, 'game.seeResults');
+  app.continue();
+  assert.equal(app.screen, 'done');
+  assert.equal(requests.length, 0);
+});
+
 test('starting a game hands loading state to generation and preserves its game ID', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
@@ -396,6 +424,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
   assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
+  assert.match(template, /locale\.t\(feedbackButtonLabelKey\)/);
   assert.match(template, /stars\.allTime/);
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
