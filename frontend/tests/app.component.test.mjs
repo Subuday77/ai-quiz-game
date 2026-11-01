@@ -304,6 +304,46 @@ test('starting a game hands loading state to generation and preserves its game I
   assert.equal(app.gameId, 'created-game');
 });
 
+test('setup button shows loading until the first question arrives, not resume prematurely', () => {
+  const { app, requests, posts, scheduler } = setup();
+  app.gameId = '';
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(app.setupButtonLabelKey, 'game.loading');
+    succeed(posts[0], { game_id: 'created-game', language: 'English', phase: 'main',
+      correct_main_answers: 0 });
+    assert.equal(app.gameId, 'created-game');
+    assert.equal(app.loading, true);
+    assert.equal(app.setupButtonLabelKey, 'game.loading');
+    succeed(requests[0]);
+  });
+  assert.equal(app.screen, 'question');
+  assert.equal(app.loading, false);
+  assert.equal(app.setupButtonLabelKey, 'game.resume');
+});
+
+test('setup button shows loading during resume and start again after failed creation', () => {
+  const { app, requests, posts, scheduler } = setup();
+  assert.equal(app.setupButtonLabelKey, 'game.resume');
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(app.setupButtonLabelKey, 'game.loading');
+    succeed(requests[0]);
+  });
+  assert.equal(app.screen, 'question');
+  app.gameId = '';
+  app.screen = 'setup';
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(app.setupButtonLabelKey, 'game.loading');
+    posts[0].subject.error(new Error('offline'));
+  });
+  assert.equal(app.loading, false);
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+});
+
 test('restores unfinished round on login without creating another game', () => {
   const previous = globalThis.localStorage;
   const saved = new Map([['ai-quiz-game:active-round:v2:user-1', 'saved-game-id']]);
@@ -355,6 +395,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /openAuthDialog\('register'\)/);
   assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
   assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"[\s\S]*?\(click\)="retryQuestion\(\)"/);
+  assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
   assert.match(template, /stars\.allTime/);
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
