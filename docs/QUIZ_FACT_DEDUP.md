@@ -42,9 +42,9 @@ five normal question fields plus tags (entity, concept, keyword) and fact
    quality review was already enabled. Tag checks are mandatory even if
    AI_QUALITY_MODE=off. Ordinary editorial enforcement continues to depend on
    AI_QUALITY_MODE. Explicit factual/premise failures (facts=fail or
-   options=fail) are mandatory rejections even in audit; subjective
-   difficulty, leakage and weighted editorial penalties still follow
-   AI_QUALITY_MODE. The critic is instructed to test A-D independently,
+   options=fail) and decisive answer leaks (leakage=fail or answer_leak)
+   are mandatory rejections even in audit; subjective difficulty and
+   weighted editorial penalties still follow AI_QUALITY_MODE. The critic is instructed to test A-D independently,
    especially when a claim says "only", "first", "all" or "never". Python
    hard rejects cannot be overruled by the critic.
 6. Rejected candidates use the existing generation retry/budget policy.
@@ -196,9 +196,9 @@ key. Their score breakdown is still logged for debugging.
 
 With AI_QUALITY_MODE=audit (as observed in the user's live trace), editorial
 penalties and editor-reported difficulty remain diagnostic; they do not
-reject an otherwise valid tagged question. Explicit facts=fail or options=fail
-DO reject in any mode, as do invalid/uncertain canonical metadata and semantic
-duplicates. In enforce, critical editorial findings reject; in tagged v4
+reject an otherwise valid tagged question. Explicit facts=fail,
+options=fail, and decisive answer leakage=fail / answer_leak
+DO reject in any mode, as do invalid/uncertain metadata and semantic duplicates. In enforce, critical editorial findings reject; in tagged v4
 a weighted editorial score of at least 3.25 now also triggers regeneration.
 For non-tagged v3 the numeric thresholds are still diagnostic only.
 
@@ -244,7 +244,8 @@ Difficulty alone cannot exceed 0.5 and can NEVER cause rejection.
 
 With `AI_QUALITY_MODE=audit`, scoring remains purely diagnostic,
 including the threshold preview. Tagged fact/tag correctness and semantic
-duplicate checks AND explicit facts/options failures reject in all modes.
+duplicate checks, explicit facts/options failures and decisive answer leaks
+reject in all modes.
 Critical editorial failures in `enforce` still reject independently of
 numerical penalties. No
 database migration or AI JSON schema change is required.
@@ -312,3 +313,15 @@ Tests: `python -m unittest discover -s tests -v` from `backend/`.
 - Tests cover the literal 1984 repeat, the Mona Lisa/Last Supper distinction,
   numeric notation safety and the mandatory facts/options failure gate.
   Run tests locally in PyCharm; no database migration was introduced.
+
+## 2026-11-01: mandatory answer leakage gate
+
+The live level-4 question "How is the fictional city in Grand Theft Auto:
+Vice City named?" offered `Вайс-Сити`, directly repeating the title.
+The v4 critic correctly said `leakage=fail`, `answer_leak`,
+`critical=regenerate`, but `AI_QUALITY_MODE=audit` accepted it at score 1.25.
+Tagged v4 now treats `leakage=fail` or the `answer_leak` issue code as a
+hard regeneration reason in all modes, just as for explicit facts/options
+failures. Subjective/editorial scores and the 3.25 threshold are unchanged.
+This is limited to tagged v4; legacy quality contracts remain untouched.
+The critic can still misjudge leaks, so false positive warnings remain possible.
