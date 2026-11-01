@@ -443,16 +443,18 @@ class TaggedCriticTests(unittest.TestCase):
             "semantic_duplicate": False, "duplicate_match": "",
         }
 
-    def check(self, verdict, mode=QualityMode.OFF):
+    def check(self, verdict, mode=QualityMode.OFF, *, item=None):
         with patch("tagging.review.ReviewerSettings.from_env",
                    return_value=Mock(provider="openai", model_id="stub",
                                      structured_output_mode="off")), \
              patch("tagging.review.LLMClient") as factory, \
              patch("tagging.review.completed_text", return_value=json.dumps(verdict)):
-            reviewed = candidate()
+            reviewed = item if item is not None else candidate()
             check_tagged_quality(
-                reviewed, language="English", requested_difficulty=0,
-                category="History", neighbors=[], mode=mode,
+                reviewed, language="Russian" if item is not None else "English",
+                requested_difficulty=reviewed.difficulty,
+                category="Entertainment" if item is not None else "History",
+                neighbors=[], mode=mode,
                 deadline=perf_counter() + 10, timeout_seconds=5,
             )
             self.assertEqual(factory.return_value.responses.create.call_count, 1)
@@ -591,12 +593,31 @@ class TaggedCriticTests(unittest.TestCase):
             "knowledge_penalty": 0,
             "rationale": "Vice City in the title matches Вайс-Сити.",
         }
-        assessment = tagged_assessment(TaggedReview.model_validate(verdict), "B")
+        gta = TaggedQuestion.model_validate({
+            "difficulty": 4,
+            "question": ("Как называется вымышленный город, в котором происходит "
+                         "действие игры Grand Theft Auto: Vice City?"),
+            "answers": {
+                "A": "Либерти-Сити", "B": "Вайс-Сити",
+                "C": "Сан-Андреас", "D": "Лос-Сантос",
+            },
+            "correct_answer": "B",
+            "tags": {
+                "entity": ["grand-theft-auto-vice-city", "vice-city"],
+                "concept": ["video-game-setting", "fictional-city", "game-location"],
+                "keyword": ["gta", "setting"],
+            },
+            "fact": {
+                "subject": "grand-theft-auto-vice-city",
+                "relation": "setting-city", "object": "vice-city",
+            },
+        })
+        assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer)
         self.assertEqual(assessment["total"], 1.25)
         for mode in (QualityMode.OFF, QualityMode.AUDIT, QualityMode.ENFORCE):
             with self.subTest(mode=mode):
                 with self.assertRaises(QualityRegenerationError):
-                    self.check(verdict, mode)
+                    self.check(verdict, mode, item=gta)
 
     def test_answer_leak_issue_code_is_mandatory_on_status_disagreement(self):
         with self.assertRaises(QualityRegenerationError):
