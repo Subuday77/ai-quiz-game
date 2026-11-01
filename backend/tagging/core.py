@@ -61,16 +61,36 @@ def _words(value: str) -> str:
     return " ".join(re.findall(r"\w+", norm, flags=re.UNICODE))
 
 
+def _exact_question(value: str) -> str:
+    """Normalize only typography, whitespace and terminal question punctuation.
+
+    Keep minus signs, decimal points and other meaningful notation intact:
+    '-2' and '2', or '1.5' and '15', must NOT become exact matches.
+    """
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = normalized.translate(str.maketrans({
+        "«": '"', "»": '"', "„": '"', "“": '"', "”": '"', "‟": '"',
+    }))
+    normalized = " ".join(normalized.split())
+    normalized = re.sub(r'\s*"\s*', '"', normalized)
+    return normalized.rstrip("?!").strip()
+
+
 def similarity(candidate: TaggedQuestion, previous: HistoryItem) -> Similarity:
     if candidate.fact.key == previous.fact_key:
         return Similarity(100, "same_fact", previous.question_id)
+    # Wording is a source-of-truth fallback when model-provided canonical
+    # fact metadata differs (e.g. author->book vs book->author for '1984').
+    if _exact_question(candidate.question) == _exact_question(previous.question_text):
+        return Similarity(100, "same_question_text", previous.question_id)
     tags = candidate.tags
     same_entity = bool(set(tags.entity) & set(previous.tags.get("entity", ())))
     same_concept = bool(set(tags.concept) & set(previous.tags.get("concept", ())))
-    # Comparing properties without the same subject is weak evidence:
-    # birth-year questions about different people must not be rejected.
-    same_relation = same_entity and candidate.fact.relation == previous.relation
-    same_answer = same_entity and candidate.fact.object == previous.object
+    # Sharing a related entity (e.g. the painter Leonardo da Vinci) does NOT
+    # make two distinct subjects (Mona Lisa / Last Supper) the same knowledge.
+    same_subject = candidate.fact.subject == previous.subject
+    same_relation = same_subject and candidate.fact.relation == previous.relation
+    same_answer = same_subject and candidate.fact.object == previous.object
     relative_text = SequenceMatcher(None, _words(candidate.question),
                                     _words(previous.question_text)).ratio()
     wording = relative_text >= .86 and len(_words(candidate.question)) >= 22
@@ -93,7 +113,7 @@ def require_unique(candidate: TaggedQuestion, history: list[HistoryItem],
                    *, limit: int | None = None) -> Similarity | None:
     ordered = rank(candidate, history)
     highest = ordered[0] if ordered else None
-    if highest and (highest.reason == "same_fact" or
+    if highest and (highest.reason in ("same_fact", "same_question_text") or
                     highest.score >= (threshold() if limit is None else limit)):
         raise DuplicateQuestionError(highest.reason, score=highest.score)
     return highest
