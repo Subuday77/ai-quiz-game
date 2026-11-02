@@ -248,6 +248,29 @@ class GlobalPoolTests(unittest.TestCase):
                 category=self.category,
             ))
 
+    def test_known_false_approved_fact_is_blocked_before_quarantine(self):
+        # A historical critic accepted the false Hopper/Turing 1972 item.
+        # It must not be served even if the operator has not run the
+        # one-time DB quarantine yet.
+        from test_fact_quarantine import WRONG
+        from tagging.contract import TaggedQuestion
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            wrong = TaggedQuestion.model_validate(WRONG)
+            wrong._review_report = review_report()
+            _, stored = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob,
+                question=wrong, category=self.category,
+                provider="test", model="stub", dedup_enforce=True,
+            )
+            self.assertEqual(stored.status, "approved")
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category,
+            ))
+            # The caller can still quarantine the original DB record.
+            self.assertEqual(db.get(Question, stored.id).status, "approved")
+
     def test_no_review_no_pool(self):
         self.seed_other_user_question(accepted=False)
         with patch("api.generate_valid_question", side_effect=HTTPException(
