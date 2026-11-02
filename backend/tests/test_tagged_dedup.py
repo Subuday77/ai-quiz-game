@@ -187,6 +187,93 @@ class TaggedContractTests(unittest.TestCase):
         self.assertEqual((match.score, match.reason), (40, "entity+concept"))
         require_unique(candidate_question, [history])
 
+    def test_real_lermontov_log_distinct_poems_do_not_collide(self):
+        # 2026-11-02: old key of author + wrote-poem was the SAME for
+        # Borodino and Parus. Three retries exhausted at level 2.
+        from tagging.contract import Fact
+        from tagging.core import generator_context
+        author, relation = "mikhail-lermontov", "wrote-poem"
+
+        def tagged_poem(work: str, text: str) -> TaggedQuestion:
+            return TaggedQuestion.model_validate({
+                "difficulty": 2, "question": text,
+                "answers": {"A": "Александр Пушкин", "B": "Михаил Лермонтов",
+                            "C": "Фёдор Тютчев", "D": "Николай Некрасов"},
+                "correct_answer": "B",
+                "tags": {
+                    "entity": [author, work],
+                    "concept": ["poem-authorship", "russian-poetry"],
+                    "keyword": ["author"],
+                },
+                "fact": {"subject": author, "relation": relation, "object": work},
+            })
+
+        borodino = tagged_poem("borodino", 'Кто написал стихотворение «Бородино»?')
+        parus = tagged_poem("parus", 'Кто написал стихотворение «Парус»?')
+        self.assertEqual(borodino.fact.legacy_key, parus.fact.legacy_key)
+        self.assertNotEqual(borodino.fact.key, parus.fact.key)
+
+        # Simulate the user's existing historical DB record, not a rekey.
+        prior = HistoryItem(
+            question_id="historical-borodino", category_slug="literature",
+            question_text=borodino.question, fact_key=borodino.fact.legacy_key,
+            subject=author, relation=relation, object="borodino",
+            tags={kind: tuple(values)
+                  for kind, values in borodino.tags.model_dump().items()},
+        )
+        match = similarity(parus, prior)
+        self.assertEqual(match.score, 40)
+        self.assertEqual(match.reason, "entity+concept")
+        require_unique(parus, [prior])
+        self.assertEqual(generator_context([prior], "literature")[0]["object"],
+                         "borodino")
+
+        # The SAME work remains a duplicate under old keys, even if worded
+        # differently and options are permuted.
+        repeated = tagged_poem("borodino", "Автор поэмы «Бородино» — кто?")
+        self.assertEqual(similarity(repeated, prior).reason, "same_fact")
+        with self.assertRaises(DuplicateQuestionError):
+            require_unique(repeated, [prior])
+
+        # Modern orientation: the work, not its author, is the subject.
+        work_first = TaggedQuestion.model_validate({
+            **parus.model_dump(),
+            "tags": {
+                "entity": ["parus", author],
+                "concept": ["poem-authorship"], "keyword": ["author"],
+            },
+            "fact": {
+                "subject": "parus", "relation": "author",
+                "object": author,
+            },
+            "question": 'Кем написан «Парус»?',
+        })
+        self.assertEqual(work_first.fact.key, parus.fact.key)
+        self.assertNotEqual(work_first.fact.key, borodino.fact.key)
+        with self.assertRaises(DuplicateQuestionError):
+            require_unique(work_first, [HistoryItem(
+                question_id="earlier-parus", category_slug="literature",
+                question_text=parus.question, fact_key=parus.fact.legacy_key,
+                subject=author, relation=relation, object="parus",
+                tags={kind: tuple(values)
+                      for kind, values in parus.tags.model_dump().items()},
+            )])
+
+    def test_different_creative_works_do_not_gain_wording_points(self):
+        from tagging.contract import Fact
+        poem_a = Fact(subject="mikhail-lermontov", relation="wrote-poem",
+                      object="borodino")
+        poem_b = Fact(subject="mikhail-lermontov", relation="wrote-poem",
+                      object="parus")
+        self.assertNotEqual(poem_a.key, poem_b.key)
+        # By contrast, stable one-to-one facts exclude the potentially
+        # wrong answer object to detect changed-key duplicates.
+        year_a = Fact(subject="albert-einstein", relation="birth-year",
+                      object="1879")
+        year_b = Fact(subject="albert-einstein", relation="birth-year",
+                      object="1880")
+        self.assertEqual(year_a.key, year_b.key)
+
     def test_exact_text_comparison_keeps_numeric_operators_and_decimals(self):
         from tagging.core import _exact_question
         self.assertNotEqual(_exact_question("Значение при x=-2?"),
