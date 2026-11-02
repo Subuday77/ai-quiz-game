@@ -61,6 +61,25 @@ class ProviderConfigurationTests(unittest.TestCase):
         self.bedrock.assert_not_called()
         return adapter
 
+    def test_model_logging_is_non_null_for_public_and_private_ids(self):
+        with patch.dict("os.environ", {"OPENAI_MODEL_ID": "gpt-5.4-mini"}):
+            with self.assertLogs("quiz.diagnostics", level="INFO") as captured:
+                public = LLMClient("openai", role="reviewer")
+            self.addCleanup(public.client.close)
+            payload = json.loads(captured.records[0].getMessage())
+            self.assertEqual(payload["model_id"], "gpt-5.4-mini")
+            self.assertEqual(len(payload["model_fingerprint"]), 12)
+
+        secret_id = "my-private-tenant-model-deployment"
+        with patch.dict("os.environ", {"OPENAI_MODEL_ID": secret_id}):
+            with self.assertLogs("quiz.diagnostics", level="INFO") as captured:
+                private = LLMClient("openai", role="reviewer")
+            self.addCleanup(private.client.close)
+            payload = json.loads(captured.records[0].getMessage())
+            self.assertTrue(payload["model_id"].startswith("private:"))
+            self.assertIsNotNone(payload["model_id"])
+            self.assertNotIn(secret_id, "\\n".join(captured.output))
+
     def test_openai_real_client_numeric_timeout(self):
         adapter = self.construct_and_check("openai", dict.fromkeys(SOCKET_NAMES, 12.0))
         self.assertEqual(adapter.client.timeout, 12.0)
