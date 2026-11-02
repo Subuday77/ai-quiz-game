@@ -156,8 +156,11 @@ class TaggedContractTests(unittest.TestCase):
             tags={kind: tuple(values) for kind, values in first.tags.model_dump().items()},
         )
         match = similarity(same_words, history)
+        # New work-centered identity matches even if the fact direction was
+        # inverted by older models. This is now a SAME FACT, not merely a
+        # same-text fallback.
         self.assertEqual((match.score, match.reason, match.previous_id),
-                         (100, "same_question_text", "the-original-1984"))
+                         (100, "same_fact", "the-original-1984"))
         with self.assertRaises(DuplicateQuestionError) as rejected:
             require_unique(same_words, [history])
         self.assertEqual(rejected.exception.previous_id, "the-original-1984")
