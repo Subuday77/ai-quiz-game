@@ -8,6 +8,51 @@ from question_schema import QuizQuestion
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+# Authorship is one-to-many: one writer may create many different works.
+# Historical records sometimes encoded creator -> work (wrote-poem)
+# and newer ones work -> creator (author). Both must identify the WORK,
+# not collapse every work by an author into a single "fact".
+# Extend only for unambiguous relation slugs; unknown relations retain the
+# original subject+relation scheme (the answer object stays excluded).
+_CREATOR_TO_WORK = {
+    "wrote-poem": "written-work",
+    "wrote-novel": "written-work",
+    "wrote-book": "written-work",
+    "wrote-play": "written-work",
+    "wrote-work": "written-work",
+    "author-of": "written-work",
+    "painted-work": "visual-work",
+    "painted-painting": "visual-work",
+    "composed-work": "musical-work",
+}
+_WORK_TO_CREATOR = {
+    "author": "written-work",
+    "written-by": "written-work",
+    "poem-author": "written-work",
+    "novel-author": "written-work",
+    "book-author": "written-work",
+    "play-author": "written-work",
+    "painter": "visual-work",
+    "painted-by": "visual-work",
+    "composer": "musical-work",
+    "composed-by": "musical-work",
+}
+
+
+def creator_work_anchor(subject: str, relation: str, object: str) -> tuple[str, str] | None:
+    """Canonical knowledge identity for a specifically named creative work.
+
+    Return (domain, work slug) regardless of whether the LLM encoded the
+    creator or the work as subject. This is a conservative allowlist, not
+    an attempt to infer arbitrary natural-language relations.
+    """
+    if domain := _CREATOR_TO_WORK.get(relation):
+        return domain, object
+    if domain := _WORK_TO_CREATOR.get(relation):
+        return domain, subject
+    return None
+
+
 
 def canonical(value: str) -> str:
     """Validate stable English ASCII slug; do not silently transliterate facts."""
@@ -43,10 +88,15 @@ class Fact(BaseModel):
 
     @property
     def key(self) -> str:
-        # Subject + specific relation identify the KNOWLEDGE BEING TESTED.
-        # Answer is intentionally excluded: the same question with changed
-        # answer options or another claimed answer remains a duplicate.
-        return hashlib.sha256(f"{self.subject}|{self.relation}".encode("ascii")).hexdigest()
+        # For most facts the tested subject+property identify the knowledge;
+        # the (possibly wrong) answer object deliberately does not.
+        # For known one-to-many creator relations the WORK is the knowledge
+        # anchor, even in older creator->work metadata. This prevents the
+        # writer of two poems from causing a false duplicate collision.
+        anchor = creator_work_anchor(self.subject, self.relation, self.object)
+        source = (f"creator-work-v2|{anchor[0]}|{anchor[1]}" if anchor
+                  else f"{self.subject}|{self.relation}")
+        return hashlib.sha256(source.encode("ascii")).hexdigest()
 
 
 class TaggedQuestion(QuizQuestion):
