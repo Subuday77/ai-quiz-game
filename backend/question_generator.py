@@ -105,19 +105,9 @@ def create_question(complexity: int, language: str, category: str,
             + json.dumps(tag_context, ensure_ascii=False, separators=(",", ":"))
         )
         if retry_feedback is not None:
-            from tagging.repair import validation_retry_hint
-            # Only immutable, server-authored messages from validation_retry_hint
-            # are allowed. Never insert untrusted exception/candidate contents.
-            if retry_feedback not in {
-                validation_retry_hint(ValueError("AI returned the wrong difficulty")),
-                validation_retry_hint(ValueError("invalid JSON")),
-                validation_retry_hint(Exception()),
-                validation_retry_hint(__import__("pydantic").ValidationError.from_exception_data(
-                    "TaggedQuestion", [{"type": "too_long", "loc": ("tags", "entity"),
-                     "input": ["a", "b", "c", "d"], "ctx": {
-                         "field_type": "List", "max_length": 3, "actual_length": 4}}]
-                )),
-            }:
+            from tagging.repair import is_known_retry_feedback
+            # Never insert untrusted exception/candidate contents.
+            if not is_known_retry_feedback(retry_feedback):
                 raise ValueError("Invalid tagged retry guidance")
             question_input += (
                 "\nSERVER VALIDATION FEEDBACK FOR THIS RETRY (not an exclusion): "
