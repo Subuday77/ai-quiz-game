@@ -22,6 +22,7 @@ from persistence.models import (
 from persistence.seed_topics import category_slug
 from tagging.contract import Fact, TagCloud, TaggedQuestion
 from tagging.core import DuplicateQuestionError, require_unique
+from tagging.quality_skill.fact_tool import known_false_fact
 from tagging.repository import history_for_user
 
 
@@ -59,7 +60,7 @@ def _tagged_from_saved(db: Session, question: Question) -> TaggedQuestion | None
     if not tags["entity"] or not tags["concept"]:
         return None
     try:
-        return TaggedQuestion(
+        candidate = TaggedQuestion(
             difficulty=question.requested_difficulty,
             question=question.text,
             answers=question.choices,
@@ -67,6 +68,12 @@ def _tagged_from_saved(db: Session, question: Question) -> TaggedQuestion | None
             tags=TagCloud(**tags),
             fact=Fact(subject=fact.subject, relation=fact.relation, object=fact.object),
         )
+        # Defense in depth: even before the one-off DB quarantine runs,
+        # a previously accepted but now source-disproven fact is never
+        # re-issued from the shared pool.
+        if known_false_fact(candidate) is not None:
+            return None
+        return candidate
     except ValueError:
         # Historical backfills may contain metadata from an older schema.
         return None
