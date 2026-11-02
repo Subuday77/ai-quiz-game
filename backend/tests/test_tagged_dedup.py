@@ -473,6 +473,54 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertEqual(len(history_for_user(self.db, self.alice)), 2)
 
 
+    def test_postgres_history_legacy_author_key_survives_and_allows_other_work(self):
+        # In-place compatibility: legacy DB hashes are NOT rewritten.
+        from tagging.contract import Fact
+
+        def poem(slug, title):
+            return TaggedQuestion.model_validate({
+                "difficulty": 2,
+                "question": f'Кто написал стихотворение «{title}»?',
+                "answers": {"A": "Александр Пушкин",
+                            "B": "Михаил Лермонтов",
+                            "C": "Фёдор Тютчев", "D": "Николай Некрасов"},
+                "correct_answer": "B",
+                "tags": {
+                    "entity": ["mikhail-lermontov", slug],
+                    "concept": ["poem-authorship"], "keyword": [],
+                },
+                "fact": {
+                    "subject": "mikhail-lermontov",
+                    "relation": "wrote-poem", "object": slug,
+                },
+            })
+
+        original = poem("borodino", "Бородино")
+        _, stored = self.offer(self.first_run, self.alice, original)
+        persisted = self.db.get(QuestionFact, stored.id)
+        persisted.fact_key = original.fact.legacy_key
+        self.db.commit()
+
+        historical = history_for_user(self.db, self.alice)
+        self.assertEqual(historical[0].fact_key, original.fact.legacy_key)
+        # Resumable backfill must not reject a record it originally wrote.
+        save_from_repo = __import__(
+            "tagging.repository", fromlist=["save_metadata"]
+        ).save_metadata
+        save_from_repo(self.db, stored, original, origin="backfill")
+        self.db.flush()
+        self.assertEqual(self.db.get(QuestionFact, stored.id).fact_key,
+                         original.fact.legacy_key)
+
+        second = poem("parus", "Парус")
+        another_run = create_game(self.db, user_id=self.alice, language="Russian")
+        _, saved_second = self.offer(another_run, self.alice, second)
+        self.assertNotEqual(stored.id, saved_second.id)
+        self.assertEqual(len(history_for_user(self.db, self.alice)), 2)
+        self.assertEqual(
+            self.db.get(QuestionFact, saved_second.id).fact_key, second.fact.key
+        )
+
     def test_backfill_dry_run_never_calls_ai_or_mutates_db(self):
         from contextlib import redirect_stdout
         from io import StringIO
