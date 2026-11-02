@@ -223,6 +223,93 @@ class IndependentAnswerTests(unittest.TestCase):
         self.assertEqual(actual["expected_release"], "block")
         self.assertEqual(actual["choices_match"], True)
 
+    def test_playthrough_positive_fixtures_are_exact_diverse_and_key_blind(self):
+        # Extracted from the accepted DEBUG records of the 2026-10-31 game,
+        # not invented or obtained by asking the evaluator for examples.
+        selected = select_cases(group="playthrough-positive")
+        self.assertEqual(len(selected), 12)
+        self.assertEqual(len({case["id"] for case in selected}), 12)
+        self.assertEqual({case["expected"] for case in selected},
+                         {"single_correct"})
+        self.assertEqual({case["accepted"] for case in selected},
+                         {"A", "B", "C"})
+        self.assertGreaterEqual(max(case["level"] for case in selected), 12)
+        self.assertLessEqual(min(case["level"] for case in selected), 1)
+
+        by_id = {case["id"]: case for case in selected}
+        self.assertEqual(
+            by_id["good_20261031_tape_measure_hook"]["answers"][0],
+            "Чтобы компенсировать толщину крючка при измерении от края или за край",
+        )
+        self.assertEqual(
+            by_id["good_20261031_sagrada_familia_city"]["stem"],
+            "В каком городе находится знаменитый храм Святого Семейства (Саграда Фамилия)?",
+        )
+        self.assertEqual(
+            by_id["good_20261031_hyoid_unarticulated"]["answers"],
+            ("Подъязычная кость", "Лопатка", "Грудина", "Ключица"),
+        )
+        self.assertEqual(
+            by_id["good_20261031_guatemala_two_coasts"]["answers"],
+            ("Гватемала", "Эквадор", "Суринам", "Гайана"),
+        )
+        for case in selected:
+            with self.subTest(case=case["id"]):
+                self.assertEqual(case["group"], "playthrough-positive")
+                self.assertEqual(expected_publication(case["id"]), "allow")
+                question, payload = payload_for_case(case)
+                content = json.loads(payload)
+                self.assertEqual(tuple(content["answers"][key] for key in "ABCD"),
+                                 case["answers"])
+                self.assertEqual(question.question, case["stem"])
+                self.assertEqual(question.correct_answer, case["key"])
+                self.assertEqual(set(content), {"language", "question", "answers"})
+                self.assertNotIn("correct_answer", content)
+                self.assertNotIn("difficulty", content)
+                self.assertNotIn("expected", content)
+                self.assertNotIn("group", content)
+
+    def test_good_playthrough_cases_have_no_false_rejection_with_correct_mock_review(self):
+        # Positive-control regression of the REDUCER, not LLM accuracy.
+        # The independent LLM must still be measured using paid calls.
+        for case in select_cases(group="playthrough-positive"):
+            with self.subTest(case=case["id"]):
+                statuses = tuple("yes" if key == case["key"] else "no"
+                                 for key in "ABCD")
+                verdict = review(statuses)
+                summarized = summarize_answer_review(verdict)
+                self.assertEqual(summarized["outcome"], "single_correct")
+                self.assertEqual(summarized["supported_choices"], [case["key"]])
+                preview = publication_preview(verdict, case["key"], literal_leak=False)
+                self.assertFalse(preview["would_block"])
+                self.assertEqual(preview["reasons"], [])
+                self.assertEqual(preview["verified_choice"], case["key"])
+
+    def test_positive_group_selection_is_exclusive_and_list_is_offline(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        selected = select_cases(group="playthrough-positive")
+        self.assertEqual(len(selected), 12)
+        self.assertEqual(selected[0]["id"], "good_20261031_lava")
+        self.assertEqual(selected[-1]["id"], "good_20261031_cannoli_ricotta")
+        with self.assertRaisesRegex(ValueError, "Unknown case group"):
+            select_cases(group="unexpected")
+        with self.assertRaisesRegex(ValueError, "only one"):
+            select_cases(group="playthrough-positive", limit=3)
+        with self.assertRaisesRegex(ValueError, "only one"):
+            select_cases(group="playthrough-positive", ids=["jam_only_number_one"])
+
+        from test_openai_answer_check import main
+        with patch("sys.argv", ["test_openai_answer_check.py", "--list"]), \
+             patch("test_openai_answer_check.OpenAI",
+                   side_effect=AssertionError("--list must not call a provider")), \
+             redirect_stdout(io.StringIO()) as output:
+            main()
+        self.assertIn("good_20261031_lava", output.getvalue())
+        self.assertIn("[playthrough-positive]", output.getvalue())
+
     def test_wrong_generator_key_stays_hidden(self):
         case = next(c for c in CASES if c["id"] == "saturn_wrong_key")
         q, raw = payload_for_case(case)
