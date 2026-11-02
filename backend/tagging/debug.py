@@ -96,9 +96,11 @@ def _debug_candidate(candidate: object, *, outcome: str,
         fact_key=fact_key,
         python_duplicate_check=python_score,
         critic={
+            "contract_version": report.get("contract_version"),
             "decision": report.get("decision"),
             "verdict": details.get("verdict"),
             "assessment": details.get("assessment"),
+            "option_diagnostics": details.get("option_diagnostics"),
             "duration_ms": report.get("duration_ms"),
         } if isinstance(report, dict) else None,
     )
