@@ -45,6 +45,52 @@ class LiteralLeakTests(unittest.TestCase):
         self.assertTrue(exact_answer_leak(question(
             "Как называется ЭБЛА?", "Эбла")))
 
+    def test_real_bonus_xerox_alto_brand_gives_away_research_center(self):
+        # Real 2026-11-02 level-15 bonus question. The complete correct
+        # option does not appear in the stem, but its distinctive FIRST
+        # token is shared with the Xerox Alto name and no other choice.
+        q = QuizQuestion.model_validate({
+            "difficulty": 15,
+            "question": ("Какой исследовательский центр разработал компьютер "
+                         "Xerox Alto, часто называемый одним из первых "
+                         "компьютеров с графическим интерфейсом и мышью?"),
+            "answers": {
+                "A": "Bell Labs", "B": "MIT Media Lab",
+                "C": "Xerox PARC", "D": "IBM Research",
+            },
+            "correct_answer": "C",
+        })
+        self.assertTrue(exact_answer_leak(q))
+        with self.assertRaises(QualityRegenerationError):
+            check_local_leak(q, "enforce")
+        # AI_QUALITY_MODE=audit is independent: local_leak_mode controls
+        # this conservative high-confidence shortcut.
+        check_local_leak(q, "audit")
+        check_local_leak(q, "off")
+
+    def test_branded_overlap_requires_unique_token_and_organization_request(self):
+        q = question("Какой исследовательский центр разработал Xerox Alto?",
+                     "Xerox PARC")
+        self.assertTrue(exact_answer_leak(q))
+        duplicated_brand = q.model_copy(update={
+            "answers": {**q.answers, "A": "Xerox Labs"},
+        })
+        self.assertFalse(exact_answer_leak(duplicated_brand))
+        no_organization_request = q.model_copy(update={
+            "question": "Какое устройство стало прототипом Xerox Alto?",
+        })
+        self.assertFalse(exact_answer_leak(no_organization_request))
+        generic_word = question(
+            "Какой исследовательский центр был основным?",
+            "Research Center",
+        )
+        self.assertFalse(exact_answer_leak(generic_word))
+        no_full_key = question(
+            "Какой исследовательский центр разработал Xerox Alto?",
+            "PARC",
+        )
+        self.assertFalse(exact_answer_leak(no_full_key))
+
     def test_quotes_are_not_automatically_leaks(self):
         self.assertFalse(exact_answer_leak(question(
             "С каким телесериалом связан слоган «The truth is out there»?",
