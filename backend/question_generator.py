@@ -34,6 +34,34 @@ entity tags. The relation must describe the EXACT knowledge being asked
 (e.g. birth-year, not simply date); object represents the correct answer.
 Different wordings and answer orders for the same knowledge MUST produce
 the same subject and relation. Do NOT use the difficulty as a tag.
+
+IMPORTANT ONE-TO-MANY FACTS: When asking WHO wrote/painted/composed a NAMED
+work (book, poem, painting, song), set fact.subject to the WORK, not the
+author/artist (e.g. subject=borodino, relation=author,
+object=mikhail-lermontov; subject=parus, relation=author,
+object=mikhail-lermontov). Each DIFFERENT work tests distinct knowledge.
+Never collapse all works by an author into creator + generic wrote-poem.
+Historical exclusions may still use creator->work direction: compare the
+WORK identity, not merely the author name or relation.
+
+Before adding ANY extra historical assertion to the stem (e.g. "shared
+the award with...", "first", "the only"), verify every clause, not merely
+the final key. Prefer a simpler verifiable stem to an unnecessary claim
+about a second person, film, or year. A wrong additional clause makes the
+ENTIRE question invalid, even if one answer remains recognizable.
+
+At level 6 or higher, check ALL THREE distractors by the constraints in
+the stem. For a direction/terminus question (western, eastern, northern,
+southern, first/last stop), do not put ONE obviously extreme city among
+three locations that can be eliminated from basic geography. Use credible,
+factually WRONG competitors from the relevant geography and time period.
+Do not fake facts to make distractors competitive.
+
+Avoid a direct name shortcut where a branded product in the stem and
+exactly one answer naming its maker/research organization share a
+distinctive brand token (e.g. "Xerox Alto" -> "Xerox PARC"). Reword the
+question or replace the choices so the player must know an external fact.
+
 The question must NOT test any excluded knowledge from the user's
 prior-question history. Different facts about the same entity ARE allowed.
 Keep metadata private to the server. Return one strict JSON object.
