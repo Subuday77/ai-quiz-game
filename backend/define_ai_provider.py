@@ -1,6 +1,7 @@
 import hashlib
 import math
 import os
+import re
 from importlib.metadata import version
 from typing import Any, Callable, Literal
 
@@ -273,9 +274,22 @@ class LLMClient:
         # IDs/ARNs can carry tenant data; retain a stable fingerprint instead.
         public_models = {"nvidia/nemotron-3-super-120b-a12b",
                          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"}
+        # Public OpenAI model IDs are safe to display; custom deployment names
+        # can embed tenant/private data, so show an explicit fingerprint instead
+        # of null (and never print a private identifier verbatim).
+        public_openai = (
+            self.provider == OPENAI
+            and re.fullmatch(
+                r"gpt-(?:4o(?:-mini)?|4\.1(?:-mini|-nano)?|"
+                r"5(?:\.[0-9]+)?(?:-mini|-nano)?|6(?:\.[0-9]+)?(?:-luna|-sol)?)",
+                self.model,
+            ) is not None
+        )
+        fingerprint = hashlib.sha256(self.model.encode()).hexdigest()[:12]
+        model_id = (self.model if self.model in public_models or public_openai
+                    else f"private:{fingerprint}")
         return {"role": self.role, "provider": self.provider,
-                "model_id": self.model if self.model in public_models else None,
-                "model_fingerprint": hashlib.sha256(self.model.encode()).hexdigest()[:12]}
+                "model_id": model_id, "model_fingerprint": fingerprint}
 
     def _record_completion(self, result: ProviderResult) -> ProviderResult:
         event("provider_completion", **self._identity(),
