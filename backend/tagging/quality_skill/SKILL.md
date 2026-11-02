@@ -9,7 +9,7 @@ tag deduplication, before local leakage gates and the paid tagged reviewer.
 
 - **Correctness tools:** `lexical_tool` (shared-root answer shortcuts),
   `taxonomy_tool` (option type/subtype relations), `fact_tool`
-  (risky superlative, exclusive and chronology claims).
+  (risky superlative, exclusive, chronology and compound award/year/rationale claims).
 - **One decision owner:** the existing tagged reviewer is still the
   publication decision maker. Shadow findings **never** reject, change a
   question, modify critic scores or call an arbiter.
@@ -79,3 +79,42 @@ Current limits: morphological prefix matching is heuristic, the subtype
 knowledge base is deliberately small, and the fact tool does **not**
 verify external facts. False positives and missed facts are to be measured
 from real game logs before turning on arbitration or authority.
+
+
+## Source-backed false-fact guard and incident quarantine
+
+The shadow Fact Tool now nominates award + year (+ stated rationale) claims
+for independent evidence using `needs_source_verification:award_year_attribution`
+or `needs_source_verification:compound_award_year_reason`. Such a signal
+is **not** evidence that the claim is false and does not block a question
+or make a paid arbiter call.
+
+A separate **narrow deterministic pre-review hard gate** recognizes only
+explicitly source-backed *false structured fact triples*. Initial incident:
+`grace-hopper / turing-award-year / 1972`, contradicted by the ACM
+1972 laureate listing (Edsger W. Dijkstra). This specific false triple
+is rejected before the paid reviewer in ALL tagged quality modes. Other
+awards, people and years remain subject to the regular critic;
+the current guard is not general-purpose fact verification.
+
+ACM: https://amturing.acm.org/laureates.cfm
+
+To quarantine an already-persisted incident **without rewriting history**,
+stop FastAPI and run from the backend using the same `DATABASE_URL`:
+
+```powershell
+python -m persistence.quarantine_known_bad
+python -m persistence.quarantine_known_bad --apply
+```
+
+The first command only previews. The second changes only the exact logged
+question (matching stem, correct answer and structured fact) from
+`approved` to `quarantined`, appends a source-backed audit review, and
+preserves the original critic review, question attempts, answers and stars.
+It is idempotent and does not change other questions. On a different DB,
+a zero-match result is a warning to verify `DATABASE_URL`.
+The approved global pool excludes quarantined questions by status.
+
+The source-backed hard gate and its tests do **not** establish general
+accuracy of GPT-5.4-mini or of the Fact Tool. Future arbitrary compound
+claims still require external verification or a separate arbiter.
