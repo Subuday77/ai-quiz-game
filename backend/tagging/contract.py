@@ -98,6 +98,13 @@ class Fact(BaseModel):
                   else f"{self.subject}|{self.relation}")
         return hashlib.sha256(source.encode("ascii")).hexdigest()
 
+    @property
+    def legacy_key(self) -> str:
+        """Pre-v2 hash retained only for comparison with already-stored rows."""
+        return hashlib.sha256(
+            f"{self.subject}|{self.relation}".encode("ascii")
+        ).hexdigest()
+
 
 class TaggedQuestion(QuizQuestion):
     tags: TagCloud
