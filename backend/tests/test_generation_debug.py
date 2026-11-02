@@ -19,7 +19,12 @@ def trace_lines(logger):
     for call in logger.call_args_list:
         rendered = call.args[0] % call.args[1:]
         assert rendered.startswith("DEBUG: "), rendered
-        results.append(json.loads(rendered[len("DEBUG: "):]))
+        row = json.loads(rendered[len("DEBUG: "):])
+        # Candidate-tracing tests predate the independent quality-skill
+        # shadow. Its four additional records are tested separately.
+        if row["event"].startswith("quality_skill_shadow"):
+            continue
+        results.append(row)
     return results
 
 
