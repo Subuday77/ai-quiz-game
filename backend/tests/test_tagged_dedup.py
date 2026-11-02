@@ -332,6 +332,13 @@ class TaggedPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(review)
         self.assertEqual(review.checker_type, "ai_tagged_critic")
         self.assertEqual(review.provider, "openai")
+        self.assertEqual(review.contract_version, "tagged_review_v5")
+        self.assertEqual(review.details["verdict"]["premise"], "valid")
+        self.assertEqual(
+            review.details["verdict"]["option_assessments"]["B"]["status"], "yes",
+        )
+        self.assertEqual(review.details["option_diagnostics"]["outcome"], "single_correct")
+        self.assertEqual(review.details["option_diagnostics"]["consistency_flags"], [])
         self.assertEqual(review.details["assessment"]["total"], 2.25)
         self.assertEqual(review.details["python_duplicate_check"]["score"], 0)
         self.assertEqual(review.details["python_duplicate_check"]["threshold"], 70)
