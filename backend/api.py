@@ -171,6 +171,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from tagging.contract import TaggedQuestion
         from tagging.core import require_unique, critic_neighbors, threshold
         from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
+        from tagging.quality_skill.fact_tool import known_false_fact
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
@@ -210,6 +211,15 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                             else QuizQuestion.model_validate(raw))
                 if question.difficulty != difficulty:
                     raise InvalidQuestionError("AI returned the wrong difficulty")
+            # Sourced exact contradictions are hard failures even if the paid
+            # critic would incorrectly pass them. Unverified fact-tool
+            # heuristics remain shadow-only and NEVER block publication.
+            if tagged:
+                contradiction = known_false_fact(question)
+                if contradiction is not None:
+                    event("known_fact_contradiction_blocked",
+                          code=contradiction["code"])
+                    raise QualityRegenerationError()
             # Strict deterministic Python check runs BEFORE the paid critic.
             if tagged:
                 try:
