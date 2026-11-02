@@ -153,7 +153,8 @@ from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
-                            tag_history=None, tag_context=None) -> QuizQuestion:
+                            tag_history=None, tag_context=None,
+                            too_easy_reserve: list | None = None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
         policy = GenerationPolicy.from_env()
@@ -169,7 +170,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     if tagged:
         from tagging.contract import TaggedQuestion
         from tagging.core import require_unique, critic_neighbors, threshold
-        from tagging.review import check_tagged_quality
+        from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
@@ -281,6 +282,12 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
+            if (tagged and too_easy_reserve is not None and question is not None
+                    and is_strict_too_easy_reserve(question)):
+                # Keep only a fully checked, strictly too-easy-only question;
+                # publication is a separate last resort AFTER the global pool.
+                too_easy_reserve.append(question.model_copy(deep=True))
+                event("question_too_easy_reserve", outcome="eligible")
             if tagged:
                 exclusions.append({"subject": question.fact.subject,
                                    "relation": question.fact.relation,
