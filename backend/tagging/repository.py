@@ -71,7 +71,20 @@ def save_metadata(db: Session, question: Question, candidate: TaggedQuestion,
     current = db.get(QuestionFact, question.id)
     if current:
         if current.fact_key != candidate.fact.key:
-            raise DuplicateQuestionError("Conflicting canonical fact for existing question")
+            # A historical question may still have its pre-v2 key. When
+            # backfill resumes to repair tags, accept the ORIGINAL key only
+            # if the full stored fact triple matches verbatim. Do not rewrite
+            # old keys in place, or silently accept conflicting knowledge.
+            same_fact_metadata = (
+                (current.subject, current.relation, current.object)
+                == (candidate.fact.subject, candidate.fact.relation,
+                    candidate.fact.object)
+            )
+            if not (same_fact_metadata
+                    and current.fact_key == candidate.fact.legacy_key):
+                raise DuplicateQuestionError(
+                    "Conflicting canonical fact for existing question"
+                )
         # Repair missing tag links during a resumed historical backfill.
     else:
         db.add(QuestionFact(
