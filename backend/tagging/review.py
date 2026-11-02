@@ -23,6 +23,7 @@ from quality_schema_v3 import QualityReviewV3, audit_score
 from question_generator import normalize_output
 from tagging.contract import TaggedQuestion
 from tagging.core import SemanticDuplicateError
+from tagging.review_safeguards import find_safeguards, SafeguardFindings
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from independent_answer_check import AnswerStatus, OptionAssessment, PremiseStatus
@@ -207,6 +208,57 @@ def option_evidence_diagnostics(verdict: TaggedReview, generator_key: str) -> di
     }
 
 
+def reconcile_tagged_review(verdict: TaggedReview, question: TaggedQuestion,
+                            *, requested_difficulty: int) -> tuple[TaggedReview, SafeguardFindings]:
+    """Reconcile independent evidence and locally proven facts with model output.
+
+    Never manufacture positive factual evidence: only confirmed contradictions,
+    multiple supported choices and conservative lexical shortcuts can override
+    an optimistic AI verdict. Keep the raw critic report for diagnosis.
+    """
+    findings = find_safeguards(question, requested_difficulty=requested_difficulty)
+    data = verdict.model_dump(mode="json")
+    issues = list(data["issue_codes"])
+
+    def issue(code: IssueCode) -> None:
+        if code.value not in issues and len(issues) < 8:
+            issues.append(code.value)
+
+    evidence = option_evidence_diagnostics(verdict, question.correct_answer)
+    if data["premise"] == PremiseStatus.INVALID.value or findings.false_premise:
+        data["premise"] = PremiseStatus.INVALID.value
+        data["facts"] = CheckStatus.FAIL.value
+        data["fact_valid"] = CheckStatus.FAIL.value
+        issue(IssueCode.FACTUAL_ERROR)
+    elif data["premise"] == PremiseStatus.UNCERTAIN.value:
+        if data["facts"] == CheckStatus.PASS.value:
+            data["facts"] = CheckStatus.UNCERTAIN.value
+        issue(IssueCode.NEEDS_VERIFICATION)
+
+    if evidence["outcome"] == "multiple_correct":
+        data["options"] = CheckStatus.FAIL.value
+        issue(IssueCode.MULTIPLE_CORRECT)
+    elif evidence["outcome"] in ("no_correct", "uncertain"):
+        if data["options"] == CheckStatus.PASS.value:
+            data["options"] = CheckStatus.UNCERTAIN.value
+        issue(IssueCode.NEEDS_VERIFICATION)
+    elif evidence["outcome"] == "single_correct":
+        supported = evidence["supported_choices"]
+        if supported and supported[0] != question.correct_answer:
+            data["options"] = CheckStatus.FAIL.value
+            issue(IssueCode.FACTUAL_ERROR)
+
+    if findings.literal_answer_leak:
+        data["leakage"] = CheckStatus.FAIL.value
+        issue(IssueCode.ANSWER_LEAK)
+
+    data["distractor_penalty"] = max(
+        data["distractor_penalty"], findings.minimum_distractor_penalty
+    )
+    data["issue_codes"] = issues
+    return TaggedReview.model_validate(data), findings
+
+
 # A near-threshold subjective mismatch can tip a seriously flawed question
 # into regeneration, but cannot reject a good question by itself.
 TAGGED_REGEN_SCORE_THRESHOLD = 3.25
@@ -296,10 +348,23 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     finally:
         provider_timeout.reset(token)
 
-    # Score and log EVERY well-formed review, including candidates that
-    # will be rejected for invalid metadata or repeated knowledge.
+    # Score and log EVERY well-formed review, including rejected candidates.
+    # Preserve the model's untouched verdict for inspection; the reconciled
+    # report, not prompt-following alone, determines the publication gate.
+    raw_verdict = verdict
+    raw_option_diagnostics = option_evidence_diagnostics(raw_verdict, question.correct_answer)
+    verdict, safeguards = reconcile_tagged_review(
+        raw_verdict, question, requested_difficulty=requested_difficulty
+    )
     assessment = tagged_assessment(verdict, question.correct_answer)
     option_diagnostics = option_evidence_diagnostics(verdict, question.correct_answer)
+    event("tagged_safeguards", findings=safeguards.codes,
+          model_missed=[name for name in safeguards.codes if (
+              (name == "source_backed_false_premise" and raw_verdict.premise != PremiseStatus.INVALID)
+              or (name == "literal_answer_leak" and raw_verdict.leakage != CheckStatus.FAIL)
+              or (name == "source_backed_distractor_calibration"
+                  and raw_verdict.distractor_penalty < safeguards.minimum_distractor_penalty)
+          )], mode=mode.value)
     # Content-free INFO: full per-option rationales remain private inside the
     # accepted DB review or opt-in DEBUG trace, never routine logs.
     event("tagged_option_audit", **option_diagnostics, mode=mode.value)
@@ -354,6 +419,9 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
             "general_mode": mode.value,
             "python_duplicate_check": question._duplicate_assessment,
             "verdict": verdict.model_dump(mode="json"),
+            "critic_verdict": raw_verdict.model_dump(mode="json"),
+            "safeguard_codes": safeguards.codes,
+            "raw_option_diagnostics": raw_option_diagnostics,
             "assessment": assessment,
             "option_diagnostics": option_diagnostics,
         },
