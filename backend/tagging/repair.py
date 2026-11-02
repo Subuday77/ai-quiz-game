@@ -60,7 +60,7 @@ def repair_four_entity_tags(raw: object, error: ValidationError) -> dict | None:
     subject = fact.get("subject")
     if (not isinstance(entities, list) or len(entities) != 4
             or not isinstance(subject, str) or subject not in entities
-            or not isinstance(subject, str) or not SLUG_PATTERN.fullmatch(subject)
+            or not SLUG_PATTERN.fullmatch(subject)
             or len(subject) > 140):
         return None
     if any(
@@ -90,3 +90,10 @@ def validation_retry_hint(exc: Exception) -> str:
     if isinstance(exc, ValueError) and str(exc) == "AI returned the wrong difficulty":
         return _DIFFICULTY_HINT
     return _JSON_HINT
+
+
+def is_known_retry_feedback(value: object) -> bool:
+    """Only allow predefined guidance, never arbitrary prompt text."""
+    return isinstance(value, str) and value in (
+        _ENTITY_HINT, _SCHEMA_HINT, _DIFFICULTY_HINT, _JSON_HINT,
+    )
