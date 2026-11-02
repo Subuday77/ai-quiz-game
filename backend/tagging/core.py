@@ -7,7 +7,7 @@ from difflib import SequenceMatcher
 
 from generation_policy import InvalidQuestionError
 from quality_errors import QualityRegenerationError
-from tagging.contract import TaggedQuestion
+from tagging.contract import TaggedQuestion, creator_work_anchor
 
 
 class DuplicateQuestionError(InvalidQuestionError):
@@ -79,15 +79,39 @@ def _exact_question(value: str) -> str:
 
 
 def similarity(candidate: TaggedQuestion, previous: HistoryItem) -> Similarity:
-    if candidate.fact.key == previous.fact_key:
-        return Similarity(100, "same_fact", previous.question_id)
-    # Wording is a source-of-truth fallback when model-provided canonical
-    # fact metadata differs (e.g. author->book vs book->author for '1984').
+    # Verbatim knowledge remains a duplicate regardless of old or new tags.
     if _exact_question(candidate.question) == _exact_question(previous.question_text):
         return Similarity(100, "same_question_text", previous.question_id)
     tags = candidate.tags
     same_entity = bool(set(tags.entity) & set(previous.tags.get("entity", ())))
     same_concept = bool(set(tags.concept) & set(previous.tags.get("concept", ())))
+
+    current_work = creator_work_anchor(
+        candidate.fact.subject, candidate.fact.relation, candidate.fact.object,
+    )
+    previous_work = creator_work_anchor(
+        previous.subject, previous.relation, previous.object,
+    )
+    if current_work is not None and previous_work is not None:
+        if current_work == previous_work:
+            # Works encoded as author->book and book->author, and historical
+            # (pre-v2) fact_key rows, are all compared by the same work.
+            return Similarity(100, "same_fact", previous.question_id)
+        # Two DIFFERENT named works remain different facts even if the
+        # author, subject+relation, genre and question template coincide.
+        # In particular, do not give extra 25 relation + 35 wording points
+        # for "Бородино" versus "Парус".
+        reasons = [name for name, found in (
+            ("entity", same_entity), ("concept", same_concept),
+        ) if found]
+        return Similarity(20 * same_entity + 20 * same_concept,
+                          "+".join(reasons) or "different_works", previous.question_id)
+
+    if candidate.fact.key == previous.fact_key:
+        return Similarity(100, "same_fact", previous.question_id)
+
+    # Unknown relation slugs retain the original conservative tag+wording
+    # scoring; the AI critic can still detect semantic aliases.
     # Sharing a related entity (e.g. the painter Leonardo da Vinci) does NOT
     # make two distinct subjects (Mona Lisa / Last Supper) the same knowledge.
     same_subject = candidate.fact.subject == previous.subject
