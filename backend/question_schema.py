@@ -1,8 +1,9 @@
 """Validate model-generated trivia before it enters a game session."""
 
 from typing import Literal
+import unicodedata
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Choice = Literal["A", "B", "C", "D"]
 
@@ -14,6 +15,21 @@ class QuizQuestion(BaseModel):
     question: str = Field(min_length=5)
     answers: dict[Choice, str] = Field(min_length=4, max_length=4)
     correct_answer: Choice
+
+    @field_validator("question", "answers")
+    @classmethod
+    def reject_control_characters(cls, value: str | dict[Choice, str]):
+        """Reject all Unicode Cc controls before quality review / PostgreSQL.
+
+        JSON Schema allows escaped NUL such as \\u0000. PostgreSQL text
+        rejects it. Never guess or replace a damaged mathematical symbol.
+        Tag/fact slugs are separately limited to canonical ASCII in TaggedQuestion.
+        """
+        strings = (value.values() if isinstance(value, dict) else (value,))
+        for string in strings:
+            if any(unicodedata.category(char) == "Cc" for char in string):
+                raise ValueError("Question text and answers must not contain control characters")
+        return value
 
     @model_validator(mode="after")
     def check_choices(self) -> "QuizQuestion":
