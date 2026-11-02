@@ -146,6 +146,69 @@ CASES = (
          answers=("Тривиальные нули", "Критическая полоса",
                   "Нетронутый спектр", "Единичные корни"),
          key="A", expected="single_correct", accepted="A"),
+    # Frozen verbatim accepted questions in the 2026-10-31 full playthrough.
+    # Editorially selected factual positives (NOT automatic live approvals).
+    # Include high-score but factually sound questions to measure false rejects.
+    dict(id="good_20261031_lava", level=1,
+         stem="Как называется расплавленная горная порода, изливающаяся на поверхность Земли во время извержения вулкана?",
+         answers=("Магма", "Лава", "Базальт", "Гранит"),
+         key="B", expected="single_correct", accepted="B",
+         group="playthrough-positive"),
+    dict(id="good_20261031_mayakovsky_cloud", level=4,
+         stem="Какой поэт написал поэму «Облако в штанах»?",
+         answers=("Александр Блок", "Сергей Есенин", "Владимир Маяковский", "Анна Ахматова"),
+         key="C", expected="single_correct", accepted="C",
+         group="playthrough-positive"),
+    dict(id="good_20261031_tape_measure_hook", level=5,
+         stem="Для чего на большинстве рулеток есть небольшой металлический крючок на конце измерительной ленты, который слегка двигается?",
+         answers=("Чтобы компенсировать толщину крючка при измерении от края или за край", "Чтобы фиксировать ленту на любой цифре без кнопки стопора", "Чтобы защищать ленту от перегиба при сматывании", "Чтобы определять угол наклона поверхности"),
+         key="A", expected="single_correct", accepted="A",
+         group="playthrough-positive"),
+    dict(id="good_20261031_chamonix_1924", level=6,
+         stem="Какой город принимал первые зимние Олимпийские игры в 1924 году?",
+         answers=("Санкт-Мориц", "Осло", "Шамони", "Гармиш-Партенкирхен"),
+         key="C", expected="single_correct", accepted="C",
+         group="playthrough-positive"),
+    dict(id="good_20261031_lassi_india", level=3,
+         stem="Какой молочный напиток традиционно ассоциируется с Индией и часто готовится с йогуртом, водой и специями или фруктами?",
+         answers=("Ласси", "Кефир", "Айран", "Ряженка"),
+         key="A", expected="single_correct", accepted="A",
+         group="playthrough-positive"),
+    dict(id="good_20261031_echidna_eggs", level=4,
+         stem="Какое млекопитающее откладывает яйца?",
+         answers=("Коала", "Ехидна", "Ленивец", "Выдра"),
+         key="B", expected="single_correct", accepted="B",
+         group="playthrough-positive"),
+    dict(id="good_20261031_sudoku_rules", level=6,
+         stem="Как называется японская логическая головоломка, в которой нужно заполнить сетку цифрами так, чтобы в каждой строке, каждом столбце и каждом малом квадрате 3×3 числа не повторялись?",
+         answers=("Какуро", "Судоку", "Нонограмма", "Хидато"),
+         key="B", expected="single_correct", accepted="B",
+         group="playthrough-positive"),
+    dict(id="good_20261031_guatemala_two_coasts", level=7,
+         stem="Какая из этих стран имеет выход и к Карибскому морю, и к Тихому океану?",
+         answers=("Гватемала", "Эквадор", "Суринам", "Гайана"),
+         key="A", expected="single_correct", accepted="A",
+         group="playthrough-positive"),
+    dict(id="good_20261031_sagrada_familia_city", level=8,
+         stem="В каком городе находится знаменитый храм Святого Семейства (Саграда Фамилия)?",
+         answers=("Севилья", "Валенсия", "Барселона", "Мадрид"),
+         key="C", expected="single_correct", accepted="C",
+         group="playthrough-positive"),
+    dict(id="good_20261031_munich_agreement_1938", level=9,
+         stem="Какое соглашение 1938 года позволило нацистской Германии присоединить Судетскую область Чехословакии?",
+         answers=("Версальский договор", "Пакт Молотова — Риббентропа", "Мюнхенское соглашение", "Локарнские договоры"),
+         key="C", expected="single_correct", accepted="C",
+         group="playthrough-positive"),
+    dict(id="good_20261031_hyoid_unarticulated", level=10,
+         stem="Какая кость человека не сочленяется ни с одной другой костью и удерживается в основном мышцами и связками?",
+         answers=("Подъязычная кость", "Лопатка", "Грудина", "Ключица"),
+         key="A", expected="single_correct", accepted="A",
+         group="playthrough-positive"),
+    dict(id="good_20261031_cannoli_ricotta", level=12,
+         stem="Какой итальянский сыр традиционно используют для начинки десерта канноли по-сицилийски?",
+         answers=("Маскарпоне", "Пекорино романо", "Рикотта", "Горгонзола"),
+         key="C", expected="single_correct", accepted="C",
+         group="playthrough-positive"),
 )
 
 
@@ -172,8 +235,15 @@ def expected_publication(case_id: str) -> str:
 
 
 def select_cases(*, ids: list[str] | None = None,
-                 limit: int | None = None) -> tuple[dict, ...]:
+                 limit: int | None = None,
+                 group: str | None = None) -> tuple[dict, ...]:
     """Choose a bounded calibration sample without touching the API."""
+    if sum(value is not None for value in (ids, limit, group)) > 1:
+        raise ValueError("Use only one of ids, limit, group")
+    if group is not None:
+        if group != "playthrough-positive":
+            raise ValueError("Unknown case group: " + group)
+        return tuple(case for case in CASES if case.get("group") == group)
     if ids:
         requested = set(ids)
         known = {case["id"] for case in CASES}
@@ -244,6 +314,8 @@ def main():
                         help="First N frozen cases (default: all)")
     parser.add_argument("--case", action="append", dest="case_ids",
                         help="Run one named case; repeat this flag for several")
+    parser.add_argument("--group", choices=["playthrough-positive"],
+                        help="Run all 12 factual positives from the 2026-10-31 playthrough")
     parser.add_argument("--list", action="store_true",
                         help="List case IDs without sending any API request")
     parser.add_argument("--repeats", type=int, default=1,
@@ -251,14 +323,16 @@ def main():
     args = parser.parse_args()
     if args.list:
         for case in CASES:
-            print(f"{case['id']:<30} {case['expected']}")
+            print(f"{case['id']:<40} {case['expected']}"
+                  + (" [playthrough-positive]" if case.get("group") else ""))
         return
-    if args.case_ids and args.limit is not None:
-        parser.error("Use either --case or --limit, not both")
+    if sum(value is not None for value in (args.case_ids, args.limit, args.group)) > 1:
+        parser.error("Use only one of --case, --limit or --group")
     if not 1 <= args.repeats <= 5:
         parser.error("--repeats must be 1..5")
     try:
-        selected = select_cases(ids=args.case_ids, limit=args.limit)
+        selected = select_cases(ids=args.case_ids, limit=args.limit,
+                                group=args.group)
     except ValueError as exc:
         parser.error(str(exc))
     key = os.getenv("OPENAI_API_KEY")
