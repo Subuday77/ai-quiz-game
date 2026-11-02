@@ -237,6 +237,14 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                       threshold=question._duplicate_assessment["threshold"],
                       reason=question._duplicate_assessment["reason"],
                       rejected=False)
+            if tagged:
+                # Local-only diagnostics: NEVER fail or slow an otherwise valid
+                # candidate if the experimental shadow checker has a bug.
+                from tagging.quality_skill import evaluate_shadow
+                try:
+                    evaluate_shadow(question, requested_difficulty=difficulty)
+                except Exception as exc:
+                    event("quality_skill_shadow_failed", error_type=type(exc).__name__)
             check_local_leak(question, leak_mode)
             if tagged:
                 check_tagged_quality(question, requested_difficulty=difficulty,
