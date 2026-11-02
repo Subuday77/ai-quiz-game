@@ -66,6 +66,7 @@ def main():
     print(f"TAGGED V5 CRITIC REPLAY | {len(targets)} case(s), {len(targets)} billable critic calls")
     path = ROOT / ("tagged_critic_replay_nov2_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".jsonl")
     correct = 0
+    raw_correct = 0
     try:
         timeout_seconds = float(os.getenv("AI_PROVIDER_TIMEOUT_SECONDS", "12"))
     except ValueError:
@@ -92,28 +93,43 @@ def main():
             except Exception as exc:
                 failure = type(exc).__name__
             report = question._review_report
-            verdict = (report or {}).get("details", {}).get("verdict", {})
-            diagnostic = (report or {}).get("details", {}).get("option_diagnostics", {})
+            details = (report or {}).get("details", {})
+            verdict = details.get("verdict", {})
+            critic_verdict = details.get("critic_verdict", verdict)
+            safeguards = details.get("safeguard_codes", [])
+            diagnostic = details.get("option_diagnostics", {})
             match = verdict_matches_expected(case["expected"], verdict) if verdict else False
+            raw_match = (verdict_matches_expected(case["expected"], critic_verdict)
+                         if critic_verdict else False)
             correct += int(match)
+            raw_correct += int(raw_match)
             row = {
                 "case": case["id"], "expected": case["expected"],
-                "match": match, "failure": failure,
+                "match": match, "raw_match": raw_match, "failure": failure,
+                "model": (report or {}).get("model"),
+                "safeguard_codes": safeguards,
                 "premise": verdict.get("premise"),
+                "raw_premise": critic_verdict.get("premise"),
                 "facts": verdict.get("facts"), "options": verdict.get("options"),
                 "fact_valid": verdict.get("fact_valid"),
                 "leakage": verdict.get("leakage"),
+                "raw_leakage": critic_verdict.get("leakage"),
                 "issue_codes": verdict.get("issue_codes"),
                 "distractor_penalty": verdict.get("distractor_penalty"),
+                "raw_distractor_penalty": critic_verdict.get("distractor_penalty"),
                 "diagnostics": diagnostic, "review": report,
                 "elapsed_seconds": round(perf_counter() - started, 3),
             }
             dest.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
-            print(f"[{index}/{len(targets)}] {case['id']} | match={match} | "
-                  f"premise={row['premise']} | leakage={row['leakage']} | "
-                  f"distractors={row['distractor_penalty']} | "
-                  f"fact_valid={row['fact_valid']} | error={failure or '-'}")
-    print(f"EXPECTED LABELS MATCHED: {correct}/{len(targets)} (not a global accuracy estimate)")
+            print(f"[{index}/{len(targets)}] {case['id']} | "
+                  f"raw_match={raw_match} | protected_match={match} | "
+                  f"premise={row['raw_premise']}->{row['premise']} | "
+                  f"leakage={row['raw_leakage']}->{row['leakage']} | "
+                  f"distractors={row['raw_distractor_penalty']}->{row['distractor_penalty']} | "
+                  f"protections={safeguards} | model={row['model']} | error={failure or '-'}")
+    print(f"RAW CRITIC LABELS MATCHED: {raw_correct}/{len(targets)}")
+    print(f"AFTER PYTHON SAFEGUARDS MATCHED: {correct}/{len(targets)} "
+          "(neither is a global accuracy estimate)")
     print("JSONL:", path)
 
 
