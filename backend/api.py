@@ -4,6 +4,7 @@ Sessions are intentionally in memory for the first playable web prototype.
 Do not deploy publicly before persistent storage, authentication and quotas.
 """
 
+import hashlib
 import json
 import random
 from dataclasses import dataclass, field
@@ -179,6 +180,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     duplicate_rejections = 0
     other_failures = 0
     retry_feedback = None  # Static server-authored guidance; never raw error text.
+    invalid_signatures: set[str] = set()  # Request-local; no user history stored.
 
     def failure(fallback_status: int, fallback_detail: str) -> HTTPException:
         # Only an exclusively duplicate-related exhaustion earns this code.
@@ -339,6 +341,19 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             failure_status = 502
             event("generation_attempt_completed", outcome="invalid_question",
                   error_type=type(exc).__name__)
+            if tagged and isinstance(raw, (dict, list)):
+                # A second byte-for-byte equivalent invalid candidate after
+                # explicit retry feedback is strong evidence that another
+                # paid call will repeat the same mistake. Stop early and let
+                # the existing approved pool / strict reserve handle it.
+                signature = hashlib.sha256(json.dumps(
+                    raw, sort_keys=True, ensure_ascii=True, separators=(",", ":")
+                ).encode("utf-8")).hexdigest()
+                if signature in invalid_signatures:
+                    event("generation_repeated_invalid_stopped",
+                          attempt=attempt, error_type=type(exc).__name__)
+                    raise failure(502, "AI could not generate a valid question")
+                invalid_signatures.add(signature)
         except Exception as exc:
             retry_feedback = None
             rejection_reason = "provider_failure"
