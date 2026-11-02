@@ -79,7 +79,14 @@ class MetadataRepairTests(unittest.TestCase):
             "albert-einstein", "nikola-tesla", "marie-curie", "isaac-newton",
         ])
         raw["answers"]["A"] = raw["answers"]["C"]
-        self.assertIsNone(self._repaired(raw))
+        # The extra entity may be the sole *field* error because Pydantic
+        # defers model-level answer validation until all fields validate.
+        # The repair returns a copy, but mandatory second full validation
+        # must reject the duplicated answer.
+        corrected = self._repaired(raw)
+        self.assertIsNotNone(corrected)
+        with self.assertRaises(ValidationError):
+            TaggedQuestion.model_validate(corrected)
         wrong = raw_with_entities([
             "albert-einstein", "nikola-tesla", "marie-curie", "isaac-newton",
         ])
