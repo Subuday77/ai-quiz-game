@@ -131,6 +131,56 @@ The preview is **experimental only**: it changes neither the actual
 tagged critic nor `AI_QUALITY_MODE=audit/enforce`, and costs no AI calls
 during ordinary gameplay.
 
+### 2 Nov 2026 — positive regression from the 31 Oct full game log
+
+The 31 October playthrough contained 23 accepted candidates. We selected
+**12 factually sound, single-answer examples**, preserving the exact
+question text, order of A–D and generator key from their DEBUG records.
+The goal is to measure the independent reviewer's **false rejections**,
+not to teach it to reject more questions.
+
+The `playthrough-positive` group covers lava, Mayakovsky's poem,
+tape-measure hook slack, the 1924 Winter Olympics (Chamonix),
+lassi, egg-laying echidna, Sudoku, Guatemala's two coasts,
+Sagrada Família (Barcelona), the 1938 Munich Agreement,
+the unarticulated hyoid bone and cannoli's ricotta filling.
+These include factual questions that the in-game critic rated
+`too_easy` (Chamonix, Sagrada Família and cannoli): such subjective
+difficulty should **not** become a factual failure.
+
+Run from the **repository root** in the Python virtual environment
+(PyCharm terminal or PowerShell):
+
+~~~powershell
+# Offline tests; no AI calls:
+python -m unittest discover -s tests -v
+
+# See every case name without any AI calls:
+python test_openai_answer_check.py --list
+
+# First run just 4 selected GOOD cases (4 billable calls):
+python test_openai_answer_check.py --case good_20261031_tape_measure_hook --case good_20261031_guatemala_two_coasts --case good_20261031_hyoid_unarticulated --case good_20261031_cannoli_ricotta
+
+# Then, if desired, all 12 positives (12 billable calls):
+python test_openai_answer_check.py --group playthrough-positive
+~~~
+
+`--group` cannot be combined with `--case` or `--limit`. The
+`--repeats N` option also works with the group and multiplies cost;
+default is one call per selected case. Results go to timestamped
+`answer_check_*.jsonl` and `.csv` in the root. Look for
+`FALSE REJECTION`, `observed=uncertain` and cases incorrectly
+classified as `no_correct` / `multiple_correct`.
+
+The 12 questions are provisional **positive editorial labels** based
+on the historical game transcript, not evidence-backed source
+citations for every fact and not proof the model will agree. Offline
+mock tests establish that the evaluation and scoring code WOULD accept
+a correct four-option review, not that the model produces one.
+Do not interpret a slow or incomplete model response as a false factual
+rejection. No production API changes, new model calls in gameplay,
+database migration or `audit/enforce` policy changes are involved.
+
 ### First live result (24 Oct 2026)
 
 The original 14-case run completed without model errors. With combined
