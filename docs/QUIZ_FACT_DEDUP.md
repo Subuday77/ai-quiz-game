@@ -395,3 +395,93 @@ still one critic call per candidate, not two.
 If a valid reviewer reply cannot fit the schema/token/time budget, diagnose
 completion status and review latency before altering scoring or rejection
 policy. No cloud deployment or merge to master is part of this change.
+
+
+## 2026-11-02 follow-up — false duplicate / premises / distractors / shortcuts
+
+The user's complete local game log (16 issued questions, one HTTP 409) exposed
+four issues. These changes are limited to the feature branch and do not merge
+to master or deploy anything.
+
+**P0: same-author / different-work false duplicates.** Historical tagged facts
+sometimes encode a poem's author as `subject`, `relation=wrote-poem`, and
+the named work as `object`. The old hash used only `subject|relation`, so
+`Бородино` and `Парус` both appeared to be the exact SAME fact and the
+three-try generation loop exhausted. New canonical keys use a *named work*
+identity for an explicit conservative allowlist of authorship/creator relation
+slugs. Work->author and author->work encoding converge to that identity.
+For unknown relation slugs, the existing subject+relation scheme remains.
+When reading history, the full old subject/relation/object fields are used
+to recognize same-work duplicates despite historical `fact_key` values, and
+to avoid treating different works as duplicates even when their text templates
+are similar. Historical database hashes are NOT rewritten. Backfill repairing
+an unchanged legacy triple accepts its original key.
+
+The tagged generator now asks for
+`fact.subject=borodino, fact.relation=author, fact.object=mikhail-lermontov`
+for a "who wrote Borodino?" question, and similarly `parus` for "Парус".
+These choices are intentionally two distinct facts. New hashes should not
+be used to alter or blindly migrate existing rows. Novel/slightly different
+relation names outside the allowlist still need careful logs/review.
+
+**Critic quality from real November 2 log:**
+- Cannes, level 11: `Таксист` won the 1976 Palme d'Or, but the named
+  supposed *co-winner* `Хроника лет огня` won in **1975**, not 1976.
+  The old reviewer checked the key and missed the false secondary premise.
+  Official Festival award lists:
+  https://www.festival-cannes.com/en/retrospective/1975/awards/
+  https://www.festival-cannes.com/en/retrospective/1976/awards/
+  Generator/reviewer prompts now separately scrutinize named side-claims,
+  comparisons, dates, and "shared with" clauses. This is an AI behavioral
+  improvement, NOT a deterministic historical fact database.
+- Trans-Siberian railway, level 6: the correct western terminus is
+  Moscow; the other three options were Vladivostok, Novosibirsk and
+  Yekaterinburg. The old reviewer assigned distractor_penalty=0.
+  Reviewer instructions now explicitly test easy elimination by
+  direction/geography, without confusing it with factual correctness.
+  Generator instructions discourage an obviously unique geographical
+  extreme at levels >=6.
+- Xerox Alto, bonus level 15: the correct answer `Xerox PARC` repeats the
+  distinctive brand `Xerox` in the named computer. A narrow local
+  deterministic precheck now identifies such organization-name clues
+  (only if the question explicitly asks for an organization, one answer
+  has a unique long shared token, and other options do not share it).
+  It is governed by the EXISTING `AI_LOCAL_LEAK_MODE` variable:
+  default/enforce rejects before the tagged critic even when
+  `AI_QUALITY_MODE=audit`; local audit logs but does not reject.
+  The full tagged reviewer also received an explicit example.
+  These are intentionally separate gates.
+
+**Mode and scoring policy:** No new rejection rule was added for the
+model's new v5 premise/options evidence, issue codes, or subjective
+distractor penalties. Existing tagged `audit` vs `enforce` thresholds
+and metadata guards remain unchanged. `AI_LOCAL_LEAK_MODE=enforce` is
+already an independent strict local rule; this update extends its narrow
+detection scope. The browser's "taking longer" warning configuration
+was adjusted separately by the operator and was **not changed in code**.
+
+**Regression and paid replay:**
+
+Run from repository root:
+
+    git switch feature/quiz-fact-dedup-tags
+    git pull
+    python -m unittest discover -s tests -v
+    cd backend
+    python -m unittest discover -s tests -v
+    python replay_tagged_quality_nov2.py --list       # free
+    python replay_tagged_quality_nov2.py --all        # 3 paid critic calls
+
+The optional replay uses the production `check_tagged_quality` function
+with three exact frozen candidate payloads and NO generated questions,
+database writes or second model calls. Expected labels are excluded from
+provider input and only compared *after* the model's answer. The script
+saves a timestamped JSONL in project root for inspecting the outcomes:
+`premise=invalid` for Cannes, `leakage=fail` for Xerox and
+`distractor_penalty>=2` for Transsib. These editorial expectations
+are NOT proof the updated prompt will always produce them; a model
+can still confidently miss an unsupported side claim.
+
+Offline GitHub Actions on the feature branch run both suites in
+`.github/workflows/offline-python-tests.yml`, with no paid provider calls.
+Review CI and local results before another full game or a merge.
