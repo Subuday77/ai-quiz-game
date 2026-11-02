@@ -24,7 +24,9 @@ _SCHEMA_HINT = (
     "four different answer strings keyed A, B, C, D; a valid correct_answer; "
     "tags.entity 1-3, tags.concept 1-4 and tags.keyword 0-4 unique canonical "
     "English kebab-case slugs; fact.subject must occur in tags.entity. "
-    "Use exactly the requested difficulty. Correct the previous invalid structure."
+    "Use exactly the requested difficulty. Do not include U+0000 (NUL) or "
+    "other Unicode control characters (category Cc) in the question or any "
+    "answer. Correct the previous invalid structure."
 )
 _DIFFICULTY_HINT = (
     "The previous question used the wrong difficulty. Return the exact requested "
