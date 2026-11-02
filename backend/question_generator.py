@@ -69,6 +69,10 @@ exactly one answer naming its maker/research organization share a
 distinctive brand token (e.g. "Xerox Alto" -> "Xerox PARC"). Reword the
 question or replace the choices so the player must know an external fact.
 
+Do not output Unicode control characters (category Cc) in the question
+or answer options. Escaped NUL (\\u0000) is equally forbidden: do NOT
+invent or repair a broken mathematical symbol by encoding it as NUL.
+
 The question must NOT test any excluded knowledge from the user's
 prior-question history. Different facts about the same entity ARE allowed.
 Keep metadata private to the server. Return one strict JSON object.
