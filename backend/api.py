@@ -172,11 +172,13 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from tagging.core import require_unique, critic_neighbors, threshold
         from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
         from tagging.quality_skill.fact_tool import known_false_fact
+        from tagging.repair import repair_four_entity_tags, validation_retry_hint
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
     duplicate_rejections = 0
     other_failures = 0
+    retry_feedback = None  # Static server-authored guidance; never raw error text.
 
     def failure(fallback_status: int, fallback_detail: str) -> HTTPException:
         # Only an exclusively duplicate-related exhaustion earns this code.
@@ -204,11 +206,27 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         rejection_error_type = None
         duplicate_reason = None
         try:
-            raw = (create_question(difficulty, language, category, tag_context=exclusions)
-                   if tagged else create_question(difficulty, language, category))
+            raw = (create_question(
+                difficulty, language, category, tag_context=exclusions,
+                **({"retry_feedback": retry_feedback} if retry_feedback else {}),
+            ) if tagged else create_question(difficulty, language, category))
             with timed_stage("question_validation"):
-                question = (TaggedQuestion.model_validate(raw) if tagged
-                            else QuizQuestion.model_validate(raw))
+                if tagged:
+                    try:
+                        question = TaggedQuestion.model_validate(raw)
+                    except ValidationError as validation_error:
+                        corrected = repair_four_entity_tags(raw, validation_error)
+                        if corrected is None:
+                            raise
+                        # A second complete validation is mandatory. If it
+                        # fails, the attempt is rejected as usual; never
+                        # mutate the original raw provider response.
+                        question = TaggedQuestion.model_validate(corrected)
+                        event("tagged_metadata_repaired", repair="four_entity_overflow",
+                              previous_count=4, current_count=3,
+                              fact_subject_preserved=True)
+                else:
+                    question = QuizQuestion.model_validate(raw)
                 if question.difficulty != difficulty:
                     raise InvalidQuestionError("AI returned the wrong difficulty")
             # Sourced exact contradictions are hard failures even if the paid
@@ -275,6 +293,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             event("generation_attempt_completed", outcome="success")
             break
         except (DuplicateQuestionError, SemanticDuplicateError) as exc:
+            retry_feedback = None
             rejection_reason = "duplicate_rejected"
             rejection_error_type = type(exc).__name__
             if isinstance(exc, DuplicateQuestionError):
@@ -288,6 +307,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                "object": question.fact.object,
                                "rejected": True})
         except QualityRegenerationError as exc:
+            retry_feedback = None
             rejection_reason = "quality_rejected"
             rejection_error_type = type(exc).__name__
             other_failures += 1
@@ -305,6 +325,14 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                    "rejected": True})
             event("generation_attempt_completed", outcome="quality_rejected")
         except (json.JSONDecodeError, ValidationError, InvalidQuestionError) as exc:
+            if tagged:
+                retry_feedback = validation_retry_hint(exc)
+                # Do not log the hint or raw Pydantic messages; they may
+                # include candidate data. Only classify this retry.
+                event("tagged_validation_retry_feedback",
+                      kind="validation" if isinstance(exc, ValidationError)
+                      else "difficulty" if isinstance(exc, InvalidQuestionError)
+                      else "json")
             rejection_reason = "invalid_question"
             rejection_error_type = type(exc).__name__
             other_failures += 1
@@ -312,6 +340,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             event("generation_attempt_completed", outcome="invalid_question",
                   error_type=type(exc).__name__)
         except Exception as exc:
+            retry_feedback = None
             rejection_reason = "provider_failure"
             rejection_error_type = type(exc).__name__
             other_failures += 1
