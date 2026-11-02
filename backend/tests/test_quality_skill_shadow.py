@@ -46,7 +46,7 @@ class ShadowSkillTests(unittest.TestCase):
         self.assertEqual(len(lexical), 1)
         self.assertEqual(lexical[0]["code"], "unique_morphological_shortcut")
         self.assertEqual(lexical[0]["evidence"]["option"], "B")
-        self.assertEqual(lexical[0]["evidence"]["common_prefix"], "цирко")
+        self.assertEqual(lexical[0]["evidence"]["common_prefix"], "циркон")
         self.assertTrue(r["would_arbitrate"])
         self.assertFalse(r["arbiter_called"])
         self.assertEqual(r["decision"], "observe_only")
