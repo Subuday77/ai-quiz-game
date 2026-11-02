@@ -35,7 +35,7 @@ five normal question fields plus tags (entity, concept, keyword) and fact
    very similar wording 35. Different works by the same author must not gain
    relation/answer points merely for sharing that author. Same broad
    category adds zero. Default threshold: 70.
-5. Remaining candidates are checked by ONE mandatory critic v4 call,
+5. Remaining candidates are checked by ONE mandatory critic v5 call,
    including ordinary v3 quality diagnostics and tag/fact correctness,
    semantic duplicate detection, and matching prior question if any. This
    REPLACES the older critic call, rather than adding a second one when
@@ -157,7 +157,7 @@ translation keys, no extra game POST, and unaffected error handling.
 
 ## Critic scoring and database audit
 
-The tagged v4 reviewer returns the full v3 editorial assessment:
+The tagged v5 reviewer retains the full v3 editorial assessment:
 
 - distractors penalty: 0..3;
 - knowledge penalty: 0..2;
@@ -174,11 +174,13 @@ tag_similarity_score with score, rejection threshold, reason and rejected flag.
 The accepted tagged candidate carries a PRIVATE reviewer payload to the
 same PostgreSQL transaction that creates the question, fact, tags and attempt.
 The existing question_reviews table stores checker_type=ai_tagged_critic,
-contract_version=tagged_review_v4, decision, issue codes, provider/model,
+contract_version=tagged_review_v5 (older rows remain v4), decision, issue codes, provider/model,
 review duration, and details with:
 
 - verdict: complete typed reviewer output, including rationale;
 - assessment: computed total and four individual penalties;
+- option_diagnostics: Python-derived premise, A–D yes/no/uncertain statuses,
+  supported/uncertain choices, outcome and consistency flags (nonblocking);
 - python_duplicate_check: similarity score, threshold, reason, and matching
   prior question ID (private developer diagnostics only);
 - general_mode, requested_difficulty, category.
@@ -200,7 +202,7 @@ and editorial penalties) are diagnostic, even when critical=regenerate.
 They do NOT reject an otherwise valid tagged question. The established
 metadata and history guards remain mandatory in all modes: tags_valid and
 fact_valid must pass, and semantic_duplicate must be false. In enforce,
-critical quality findings reject; in tagged v4 a weighted editorial score
+critical quality findings reject; in tagged v5 a weighted editorial score
 of at least 3.25 also triggers regeneration.
 For non-tagged v3 the numeric thresholds are still diagnostic only.
 
@@ -221,10 +223,10 @@ Developer SQL:
 
 ## Weighted difficulty in tagged reviewer (v4)
 
-The tagged v4 reviewer keeps the strict existing critic JSON schema unchanged:
-`knowledge_penalty` stays an integer 0..2, and `difficulty` stays an enum.
-Only the **server-side TAGGED score** changes; legacy/v3 audit scoring is
-untouched.
+The tagged v5 reviewer extends the strict tagged JSON contract with
+diagnostic option evidence. The existing numeric fields remain unchanged:
+`knowledge_penalty` stays an integer 0..2 and `difficulty` stays an enum.
+The **server-side TAGGED score** is unchanged; legacy/v3 scoring is untouched.
 
 Difficulty is subjective, so its contribution is deliberately tiny:
 - No difficulty mismatch and raw knowledge penalty 0: **0**.
@@ -249,8 +251,8 @@ diagnostic, including factual/options flags, leakage, critical recommendation
 and threshold preview. Tagged fact/tag METADATA correctness
 (`tags_valid`/`fact_valid`) and semantic duplicates still reject in all
 modes. In `enforce`, critical quality failures reject independently of
-numerical penalties. No database migration or AI JSON schema change is
-required.
+numerical penalties. The AI tagged-review schema is now **v5**, but no
+database migration is required; existing v4 reviewer rows remain readable.
 
 ## DEBUG: all generated candidate traces
 
@@ -270,8 +272,8 @@ Every accepted/rejected record uses the same payload format. An accepted
 candidate has passed Python/model checks but is NOT necessarily committed
 to PostgreSQL yet. The actual records include the timestamp, fact_key (when available),
 Python duplication assessment (including matched_question_id when known),
-error type and full reviewer verdict
-when the critic completed a valid review. Candidate content and the correct
+error type, reviewer contract version, full reviewer verdict and structured
+A–D option diagnostics when the critic completed a valid review. Candidate content and the correct
 answer are absent from INFO logs. A malformed JSON completion produces
 `DEBUG: {"event":"question_candidate_invalid_json",...}` with up to 3,000
 characters of unparseable model output.
@@ -332,3 +334,64 @@ candidate and checks both modes. Never introduce another mandatory quality
 rejection from a log without first checking how enforce would behave.
 The mandatory `tags_valid`/`fact_valid`/semantic-duplicate guards are
 intentionally separate, because they protect database dedup metadata.
+
+## 2026-11-02: tagged critic v5 — A–D evidence in one call
+
+The same mandatory tagged reviewer call now returns two additional strict
+fields: `premise` (`valid|invalid|uncertain`) and `option_assessments` with
+**exactly A, B, C, D**, each containing `status` (`yes|no|uncertain`)
+and a short, specific `rationale`. All previous reviewer fields remain.
+`OutputContract.TAGGED_REVIEW` now uses schema `quiz_tagged_review_v5`.
+The private persisted reviewer row has `contract_version=tagged_review_v5`.
+Older rows remain unchanged. No new PostgreSQL column or table is needed.
+
+One content-free INFO event is added per successfully parsed reviewer result:
+
+    {"event":"tagged_option_audit","premise":"valid","statuses":{"A":"no","B":"yes","C":"no","D":"no"},"supported_choices":["B"],"uncertain_choices":[],"outcome":"single_correct","consistency_flags":[],"mode":"audit",...}
+
+`outcome` can be `single_correct`, `multiple_correct`,
+`no_correct`, `invalid_premise` or `uncertain`.
+`consistency_flags` highlight disagreements between A–D evidence and
+legacy fields, such as `invalid_premise_but_facts_pass`,
+`nonunique_options_but_options_pass`,
+`independent_answer_disagrees_with_options` and
+`generator_key_disagrees_with_options`.
+The accepted `question_reviews.details.verdict` and the private opt-in
+`DEBUG: question_candidate_accepted/rejected` records retain the full
+per-option rationales.
+
+**No new rejection gates.** The new premise, A–D results and consistency
+flags are OBSERVATION ONLY. `AI_QUALITY_MODE=audit` still accepts
+critic-only quality findings, while `enforce` uses exactly the previous
+`critical` and score >= 3.25 rules. The existing mandatory
+`tags_valid` / `fact_valid` / semantic-duplicate guards still apply in
+both modes. The increased tagged-review output cap (1600 → 2400 tokens)
+accommodates four concise reasons; this may increase latency/cost but is
+still one critic call per candidate, not two.
+
+### Recommended full local audit run
+
+1. Update the feature branch and run backend offline regressions:
+
+       git switch feature/quiz-fact-dedup-tags
+       git pull
+       cd backend
+       python -m unittest discover -s tests -v
+
+2. In the loaded **backend/.env**, set `AI_TAG_DEDUP_ENABLED=true`,
+   `AI_QUALITY_MODE=audit` and `AI_GENERATION_DEBUG=true`. Keep the
+   existing reviewer/provider/structured-output configuration. Restart FastAPI.
+3. Play a full game with varied levels. Preserve the **complete** console
+   log, including INFO `tagged_option_audit`, `tagged_review_score`, and
+   the opt-in `DEBUG:` candidate records (accepted and rejected).
+   Compare by `request_id` and `attempt`. Check false premise and
+   multi-correct warnings, but also high-quality questions accepted
+   without warnings. A failed or truncated reviewer response will still
+   use the existing generation retry/error policy.
+4. After collecting the private log, turn `AI_GENERATION_DEBUG=false`
+   again. Never post credentials or private player data. Do not enable
+   new enforce gates based on a single log.
+
+If a valid reviewer reply cannot fit the schema/token/time budget, diagnose
+completion status and review latency before altering scoring or rejection
+policy. No cloud deployment or merge to master is part of this change.
