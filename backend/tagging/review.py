@@ -440,3 +440,48 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     ):
         raise QualityRegenerationError()
 
+
+
+def is_strict_too_easy_reserve(question: TaggedQuestion) -> bool:
+    """Allow ONLY a critic rejection caused exclusively by 'too_easy'.
+
+    The raw editorial penalties are checked independently. Weighted penalties
+    alone cannot tell whether a non-difficulty issue was present. All hard
+    checks, metadata, and single-correct-option evidence must still pass.
+    """
+    report = question._review_report
+    if not isinstance(report, dict) or report.get("decision") != "reject":
+        return False
+    details = report.get("details")
+    if not isinstance(details, dict):
+        return False
+    verdict = details.get("verdict")
+    assessment = details.get("assessment")
+    options = details.get("option_diagnostics")
+    if not all(isinstance(item, dict) for item in (verdict, assessment, options)):
+        return False
+    if verdict.get("difficulty") != "too_easy":
+        return False
+    if verdict.get("issue_codes") != ["difficulty_mismatch"]:
+        return False
+    if any(verdict.get(key) != "pass" for key in (
+        "facts", "options", "language", "leakage", "tags_valid", "fact_valid"
+    )):
+        return False
+    if verdict.get("semantic_duplicate") is not False:
+        return False
+    if verdict.get("premise") != "valid" or assessment.get("critical") != "none":
+        return False
+    if details.get("safeguard_codes"):
+        return False
+    raw = assessment.get("raw_penalties")
+    if not isinstance(raw, dict) or any(
+        raw.get(key) != 0 for key in
+        ("distractors", "knowledge", "suitability", "wording")
+    ):
+        return False
+    if (options.get("outcome") != "single_correct"
+            or options.get("supported_choices") != [question.correct_answer]
+            or options.get("uncertain_choices") != []):
+        return False
+    return True
