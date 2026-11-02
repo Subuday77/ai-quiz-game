@@ -352,6 +352,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 if signature in invalid_signatures:
                     event("generation_repeated_invalid_stopped",
                           attempt=attempt, error_type=type(exc).__name__)
+                    event("generation_retries_exhausted",
+                          attempts=attempt, reason="repeated_invalid")
                     raise failure(502, "AI could not generate a valid question")
                 invalid_signatures.add(signature)
         except Exception as exc:
