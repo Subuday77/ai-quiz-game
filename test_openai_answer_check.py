@@ -95,6 +95,57 @@ CASES = (
          answers=("Юрий Долгорукий", "Александр Невский",
                   "Владимир Мономах", "Иван Калита"),
          key="A", expected="invalid_premise", accepted=""),
+
+    # Real questions from user playtesting (31 Oct–1 Nov 2026).
+    # PROVISIONAL editorial labels, no effect on the actual publication gate.
+    dict(id="jam_only_number_one", level=13,
+         stem="Какая песня стала единственным хитом №1 в британском чарте синглов для The Jam?",
+         answers=("Going Underground", "Town Called Malice",
+                  "Start!", "Beat Surrender"),
+         key="A", expected="invalid_premise", accepted=""),
+    dict(id="jam_four_number_ones", level=13,
+         stem="Какие из перечисленных песен The Jam достигали первого места в британском чарте синглов?",
+         answers=("Going Underground", "Town Called Malice",
+                  "Start!", "Beat Surrender"),
+         key="A", expected="multiple_correct", accepted="ABCD"),
+    dict(id="beatles_1967_drums", level=13,
+         stem=("Какой хит 1967 года стал единственным синглом группы The Beatles, "
+               "на котором ударные сыграл не Ринго Старр, а Пол Маккартни?"),
+         answers=("Penny Lane", "The Ballad of John and Yoko",
+                  "Back in the U.S.S.R.", "Hello, Goodbye"),
+         key="C", expected="invalid_premise", accepted=""),
+    dict(id="kate_bush_2022_debut", level=13,
+         stem=("Какая песня стала для Кейт Буш первым синглом, дебютировавшим "
+               "на первом месте британского чарта после того, как этому "
+               "способствовало её использование в сериале "
+               "«Очень странные дела» в 2022 году?"),
+         answers=("Wuthering Heights", "Cloudbusting",
+                  "Running Up That Hill (A Deal with God)", "Babooshka"),
+         key="C", expected="invalid_premise", accepted=""),
+    dict(id="ginkgo_motile_sperm", level=14,
+         stem=("Какое голосеменное растение известно тем, что у него "
+               "сохраняются подвижные сперматозоиды, что является редкой "
+               "древней чертой среди семенных растений?"),
+         answers=("Гинкго двулопастный", "Сосна обыкновенная",
+                  "Тис ягодный", "Лиственница европейская"),
+         key="A", expected="single_correct", accepted="A"),
+    dict(id="vice_city_title_leak", level=4,
+         stem=("Как называется вымышленный город, в котором происходит "
+               "действие игры Grand Theft Auto: Vice City?"),
+         answers=("Либерти-Сити", "Вайс-Сити", "Сан-Андреас", "Лос-Сантос"),
+         key="B", expected="single_correct", accepted="B"),
+    dict(id="fenrir_odin", level=9,
+         stem=("В скандинавской мифологии какой волк, согласно пророчеству, "
+               "должен проглотить Одина во время Рагнарёка?"),
+         answers=("Гарм", "Сколль", "Фенрир", "Хати"),
+         key="C", expected="single_correct", accepted="C"),
+    dict(id="riemann_trivial_zeros", level=15,
+         stem=("Какое имя носит множество всех действительных чисел x, "
+               "для которых функция Римана ζ(x) обращается в нуль "
+               "на отрицательных чётных целых значениях?"),
+         answers=("Тривиальные нули", "Критическая полоса",
+                  "Нетронутый спектр", "Единичные корни"),
+         key="A", expected="single_correct", accepted="A"),
 )
 
 
@@ -105,6 +156,9 @@ KNOWN_BLOCK_CASES = frozenset({
     "saturn_wrong_key", "enclave_three_correct", "mrs_dalloway_direct_leak",
     "hanno_periplus", "ebla_direct_leak", "empty_answer_set",
     "incorrect_nickname_premise",
+    "jam_only_number_one", "jam_four_number_ones",
+    "beatles_1967_drums", "kate_bush_2022_debut",
+    "vice_city_title_leak",
 })
 UNADJUDICATED_CASES = frozenset({"mussorgsky_versions"})
 
@@ -115,6 +169,23 @@ def expected_publication(case_id: str) -> str:
     if case_id in KNOWN_BLOCK_CASES:
         return "block"
     return "allow"
+
+
+def select_cases(*, ids: list[str] | None = None,
+                 limit: int | None = None) -> tuple[dict, ...]:
+    """Choose a bounded calibration sample without touching the API."""
+    if ids:
+        requested = set(ids)
+        known = {case["id"] for case in CASES}
+        unknown = requested - known
+        if unknown:
+            raise ValueError("Unknown cases: " + ", ".join(sorted(unknown)))
+        return tuple(case for case in CASES if case["id"] in requested)
+    if limit is None:
+        return CASES
+    if not 1 <= limit <= len(CASES):
+        raise ValueError(f"limit must be 1..{len(CASES)}")
+    return CASES[:limit]
 
 
 def payload_for_case(case: dict) -> tuple[QuizQuestion, str]:
@@ -169,36 +240,63 @@ def run_case(client: OpenAI, case: dict) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--limit", type=int, default=len(CASES),
+    parser.add_argument("--limit", type=int,
                         help="First N frozen cases (default: all)")
+    parser.add_argument("--case", action="append", dest="case_ids",
+                        help="Run one named case; repeat this flag for several")
+    parser.add_argument("--list", action="store_true",
+                        help="List case IDs without sending any API request")
+    parser.add_argument("--repeats", type=int, default=1,
+                        help="Run each selected case N times (1..5, billable)")
     args = parser.parse_args()
-    if not 1 <= args.limit <= len(CASES):
-        parser.error(f"--limit must be 1..{len(CASES)}")
+    if args.list:
+        for case in CASES:
+            print(f"{case['id']:<30} {case['expected']}")
+        return
+    if args.case_ids and args.limit is not None:
+        parser.error("Use either --case or --limit, not both")
+    if not 1 <= args.repeats <= 5:
+        parser.error("--repeats must be 1..5")
+    try:
+        selected = select_cases(ids=args.case_ids, limit=args.limit)
+    except ValueError as exc:
+        parser.error(str(exc))
     key = os.getenv("OPENAI_API_KEY")
     if not key or key.startswith("REPLACE_"):
         parser.error("Set OPENAI_API_KEY in the root .env before running")
     client = OpenAI(api_key=key, timeout=30, max_retries=0)
     prefix = ROOT / f"answer_check_{datetime.now():%Y%m%d_%H%M%S}"
     rows = []
-    print(f"KEY-BLIND ANSWER CHECK | {MODEL} | {args.limit} cases")
-    for i, case in enumerate(CASES[:args.limit], 1):
+    print(f"KEY-BLIND ANSWER CHECK | {MODEL} | {len(selected)} cases "
+          f"x {args.repeats} = {len(selected) * args.repeats} billable calls")
+    total = len(selected) * args.repeats
+    for i, (case, repeat) in enumerate(
+            ((case, trial) for case in selected
+             for trial in range(1, args.repeats + 1)), 1):
         try:
             row = run_case(client, case)
         except Exception as exc:
             row = {"case": case["id"], "expected": case["expected"],
                    "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+        row["trial"] = repeat
         rows.append(row)
-        print(f"[{i}/{args.limit}] {case['id']} | expected={case['expected']} "
+        option_status = (
+            " ".join(f"{letter}:{row['per_option'][letter]['status']}"
+                     for letter in "ABCD")
+            if "per_option" in row else "not available"
+        )
+        print(f"[{i}/{total}] {case['id']} (trial {repeat}) "
+              f"| expected={case['expected']} "
               f"| observed={row.get('observed', 'ERROR')} "
-              f"| key={row.get('generator_key', '?')} "
               f"| choices={row.get('observed_choices', '?')} "
+              f"| A-D={option_status} "
               f"| PREVIEW={row.get('release_preview', 'error')}")
         if "error" in row:
             print(f"    ERROR {row['error']}")
     with prefix.with_suffix(".jsonl").open("w", encoding="utf-8") as out:
         for row in rows:
             out.write(json.dumps(row, ensure_ascii=False) + "\n")
-    fields = ["case", "level", "expected", "observed", "status_match",
+    fields = ["case", "trial", "level", "expected", "observed", "status_match",
               "expected_choices", "observed_choices", "choices_match",
               "generator_key", "key_supported", "local_leak", "premise",
               "release_preview", "release_reasons", "expected_release", "release_match",
