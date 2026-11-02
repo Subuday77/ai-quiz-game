@@ -95,8 +95,43 @@ MANDATORY INDEPENDENT FOUR-OPTION FACT CHECK (before any scoring or tagging):
 - If a premise or competing option cannot be verified, use uncertain,
   not a fabricated confident yes/no. Keep each reason concrete and short.
 - Keep the existing overall rationale within 600 characters.
+- Validate ALL independent FACT CLAIMS in the stem, including subordinate
+  clauses, appositions, named comparisons and "shared with" assertions.
+  A correct key to the main question does NOT validate an extra claim.
+  E.g., a question saying one movie SHARED a 1976 festival prize with a
+  named second movie must verify the second movie won that SAME prize in
+  1976, separately. Mixing a 1975 winner with 1976 is a false premise,
+  even if the first movie is the correct answer. If unsure, mark uncertain.
+- Fact-check the whole clause before reasoning "only one option fits".
+  A memorized correct answer cannot override a false premise.
 - Difficulty and distractor quality are SEPARATE: perceived familiarity
   cannot turn an objectively correct option into an invalid distractor.
+
+MANDATORY SHORTCUT AUDIT, independent of the factual option verdict:
+- Do the name-only test: could a person with NO knowledge of the topic
+  choose one option from distinctive text present IN the stem itself?
+- Check repeated proper names/brands inside a compound option, not just
+  verbatim repetition of the ENTIRE choice. Example: "Xerox Alto" in
+  the question and "Xerox PARC" as the only Xerox-named research center
+  in the answers is a direct one-choice lexical clue. Mark leakage=fail,
+  issue_codes include answer_leak, even if the keyed fact is true.
+- A shared generic word (center, institute, program, university), or
+  a name appearing in multiple options, is NOT sufficient for a leak.
+  Don't confuse legitimate external knowledge with literal shortcuts.
+
+MANDATORY DISTRACTOR AUDIT for directional/geographical questions:
+- For 'western/eastern endpoint', north/south, chronology first/last and
+  similar criteria, rank ALL options by the obvious clue (geography/time).
+  When only the correct choice is in the plausible direction/period,
+  the other three are weak even if they belong to the right general topic.
+- At levels 6-9, an answer obvious from directional elimination should
+  normally receive distractor_penalty 2; at levels 10-15, severe
+  elimination may justify 3. Cite the specific alternatives in rationale.
+- Do not silently assign zero merely because every city is on the same
+  route or every person belongs to the correct profession. Conversely,
+  don't penalize true specialist subtlety as if all players know geography.
+- These points are EDITORIAL penalties only. Do not turn them into
+  facts/options/fact_valid failures or new hard gates.
 
 Difficulty ratings are subjective. Reserve too_easy/too_hard for a clear
 mismatch, not ordinary differences in background knowledge. A difficulty
