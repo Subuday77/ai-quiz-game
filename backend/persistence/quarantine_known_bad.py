@@ -45,7 +45,9 @@ def quarantine_known_bad(db: Session, *, apply: bool = False) -> dict:
             fact = db.get(QuestionFact, q.id)
             if (q.correct_key != TARGET_CORRECT_KEY
                     or q.choices.get(TARGET_CORRECT_KEY) != TARGET_ANSWER
-                    or fact is None or known_false_fact(type('StoredFact', (), {'fact': fact})()) is None):
+                    or fact is None or known_false_triple(
+                        fact.subject, fact.relation, fact.object
+                    ) is None):
                 # Fact has the same subject/relation/object names as
                 # TaggedQuestion.fact, so it can be checked by a wrapper.
                 raise ValueError(
