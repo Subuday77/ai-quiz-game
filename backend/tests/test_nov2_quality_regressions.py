@@ -61,6 +61,35 @@ class NovemberGameRegressionTests(unittest.TestCase):
         self.assertIn("direction/terminus question", TAGGING_GENERATOR_INSTRUCTIONS)
         self.assertFalse(exact_answer_leak(TaggedQuestion.model_validate(q["question"])))
 
+    def test_live_replay_evaluator_compares_expected_fields_without_model_calls(self):
+        from replay_tagged_quality_nov2 import verdict_matches_expected
+        good_cannes = {"premise": "invalid", "leakage": "pass",
+                       "distractor_penalty": 0}
+        wrong_cannes = {"premise": "valid", "leakage": "pass",
+                        "distractor_penalty": 0}
+        self.assertTrue(verdict_matches_expected(
+            CASES["cannes_1976_false_shared_winner"]["expected"], good_cannes
+        ))
+        self.assertFalse(verdict_matches_expected(
+            CASES["cannes_1976_false_shared_winner"]["expected"], wrong_cannes
+        ))
+        self.assertFalse(verdict_matches_expected(
+            CASES["xerox_alto_brand_leak"]["expected"],
+            {"premise": "valid", "leakage": "pass"},
+        ))
+        self.assertTrue(verdict_matches_expected(
+            CASES["xerox_alto_brand_leak"]["expected"],
+            {"premise": "valid", "leakage": "fail"},
+        ))
+        self.assertFalse(verdict_matches_expected(
+            CASES["transsib_obvious_western_terminus"]["expected"],
+            {"premise": "valid", "distractor_penalty": 0},
+        ))
+        self.assertTrue(verdict_matches_expected(
+            CASES["transsib_obvious_western_terminus"]["expected"],
+            {"premise": "valid", "distractor_penalty": 2},
+        ))
+
     def test_xerox_is_locally_detected_without_new_model_gates(self):
         q = CASES["xerox_alto_brand_leak"]
         item = TaggedQuestion.model_validate(q["question"])
