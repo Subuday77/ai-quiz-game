@@ -137,6 +137,37 @@ results for false positives and missed multiple/no-correct-answer cases
 before allowing AI-based rejection. Persistent storage, player reports,
 tags and game telemetry will be implemented with the PostgreSQL phase.
 
+## P1: bounded tagged metadata recovery (2 Nov 2026)
+
+The tagged generator uses provider-native strict JSON Schema plus a stricter
+Pydantic contract. The portable provider schema does not constrain array
+lengths, while `TagCloud.entity` allows **1-3** items. In a real browser run
+the generator repeatedly returned four entity tags and exhausted three
+otherwise valid candidate attempts.
+
+The server now performs an extremely narrow, deterministic metadata repair:
+if the **only Pydantic field error** is four entity tags, all four are unique
+valid canonical slugs, and the unchanged `fact.subject` is present, keep three
+entities (always retaining the fact subject). Then validate the **whole**
+question again. No question text, choices, answer key, category, difficulty
+or fact triple is modified. Five or more entities, bad slugs, missing
+fact subjects, or any other failing validation are still rejected.
+
+For unrepaired invalid tagged responses, the next generation gets a fixed,
+server-authored instruction about the required schema; previous raw provider
+text, Pydantic error content and private user history are never inserted into
+this feedback. If the generator returns an identical invalid JSON object on
+two attempts, a request-local hash terminates the redundant third call;
+the existing approved-question pool / strict reserve fallback then runs.
+
+INFO diagnostics: `tagged_metadata_repaired`,
+`tagged_validation_retry_feedback`, `generation_repeated_invalid_stopped`,
+and the usual `generation_retries_exhausted`. Legacy untagged generation
+remains unchanged. No extra LLM model or paid validation call is introduced.
+
+Offline regression:
+`cd backend; python -m unittest test_tagged_metadata_recovery -v`.
+
 ## PostgreSQL accounts + question history foundation (24 Oct 2026)
 
 The dev branch now contains a versioned PostgreSQL schema
