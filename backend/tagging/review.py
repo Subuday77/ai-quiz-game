@@ -24,6 +24,7 @@ from question_generator import normalize_output
 from tagging.contract import TaggedQuestion
 from tagging.core import SemanticDuplicateError
 from tagging.review_safeguards import find_safeguards, SafeguardFindings
+from tagging.quality_skill.config import EditorialSettings
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from independent_answer_check import AnswerStatus, OptionAssessment, PremiseStatus
@@ -244,44 +245,57 @@ def reconcile_tagged_review(verdict: TaggedReview, question: TaggedQuestion,
     return TaggedReview.model_validate(data), findings
 
 
-# A near-threshold subjective mismatch can tip a seriously flawed question
-# into regeneration, but cannot reject a good question by itself.
+# Legacy defaults. Runtime settings live in EditableSettings.from_env; the
+# reviewer model's JSON schema and penalties remain completely unchanged.
 TAGGED_REGEN_SCORE_THRESHOLD = 3.25
 DIFFICULTY_STEP = 0.25
 DIFFICULTY_MAX_PENALTY = 0.5
 
 
-def tagged_assessment(verdict: TaggedReview, answer: str) -> dict:
-    """Compute tagged scores without changing the older v3 scoring contract.
+def tagged_assessment(verdict: TaggedReview, answer: str,
+                      *, requested_difficulty: int = 0) -> dict:
+    """Independently configurable editorial weights with a smooth late-game curve.
 
-    Only the difficulty-related knowledge component is downweighted. Critic's
-    integer source fields remain unchanged for the strict JSON Schema.
+    A two-point \'too_easy\' on level 15 is much more serious than at level 0.
+    A \'too_hard\' judgment stays deliberately gentler. Correctness hard gates
+    are independent of this score and unchanged.
     """
+    settings = EditorialSettings.from_env()
     assessment = audit_score(verdict, answer)
-    raw_penalties = assessment["penalties"]
-    difficulty_mismatch = (
-        verdict.difficulty in (DifficultyRating.TOO_EASY, DifficultyRating.TOO_HARD)
-        or IssueCode.DIFFICULTY_MISMATCH in verdict.issue_codes
-    )
-    # A reported mismatch is worth a quarter even if the critic assigns no
-    # knowledge penalty (e.g. it blames easy distractors). Strong mismatch
-    # reaches half a point; it is never an independent hard failure.
-    difficulty_units = max(
-        raw_penalties["knowledge"], 1 if difficulty_mismatch else 0,
-    )
-    difficulty_penalty = min(
-        DIFFICULTY_MAX_PENALTY, difficulty_units * DIFFICULTY_STEP,
-    )
-    penalties = {**raw_penalties, "knowledge": difficulty_penalty}
-    total = sum(penalties.values())
+    raw = assessment["penalties"]
+    mismatch = (verdict.difficulty in (DifficultyRating.TOO_EASY, DifficultyRating.TOO_HARD)
+                or IssueCode.DIFFICULTY_MISMATCH in verdict.issue_codes)
+    units = max(raw["knowledge"], 1 if mismatch else 0)
+    level = max(0, min(15, requested_difficulty))
+    progress = (level / 15) ** settings.too_easy_curve
+    if verdict.difficulty == DifficultyRating.TOO_EASY:
+        unit = (settings.too_easy_unit_start
+                + (settings.too_easy_unit_end - settings.too_easy_unit_start) * progress)
+        cap = (settings.too_easy_cap_start
+               + (settings.too_easy_cap_end - settings.too_easy_cap_start) * progress)
+    elif verdict.difficulty == DifficultyRating.TOO_HARD:
+        unit, cap = settings.too_hard_unit, settings.too_hard_cap
+    else:
+        unit, cap = settings.ordinary_knowledge_unit, settings.ordinary_knowledge_cap
+    difficulty_penalty = min(cap, units * unit)
+    penalties = {
+        "distractors": raw["distractors"] * settings.distractors_weight,
+        "knowledge": round(difficulty_penalty, 4),
+        "suitability": raw["suitability"] * settings.suitability_weight,
+        "wording": raw["wording"] * settings.wording_weight,
+    }
+    total = round(sum(penalties.values()), 4)
+    limit = settings.score_threshold
     return {
         **assessment,
         "total": total,
         "penalties": penalties,
-        "raw_penalties": raw_penalties,
-        "score_threshold": TAGGED_REGEN_SCORE_THRESHOLD,
+        "raw_penalties": raw,
+        "difficulty_units": units,
+        "difficulty_progress": round(progress, 4),
+        "score_threshold": limit,
         "threshold_preview": {
-            str(t): total >= t for t in (2, 3, TAGGED_REGEN_SCORE_THRESHOLD, 4, 5)
+            str(t): total >= t for t in (2, 3, limit, 4, 5)
         },
     }
 
@@ -341,7 +355,8 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     verdict, safeguards = reconcile_tagged_review(
         raw_verdict, question, requested_difficulty=requested_difficulty
     )
-    assessment = tagged_assessment(verdict, question.correct_answer)
+    assessment = tagged_assessment(verdict, question.correct_answer,
+                                   requested_difficulty=requested_difficulty)
     option_diagnostics = option_evidence_diagnostics(verdict, question.correct_answer)
     event("tagged_safeguards", findings=safeguards.codes,
           model_missed=[name for name in safeguards.codes if (
@@ -359,7 +374,8 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     event("tagged_review_score", score=assessment["total"],
           penalties=assessment["penalties"],
           threshold_preview=assessment["threshold_preview"],
-          score_threshold=TAGGED_REGEN_SCORE_THRESHOLD,
+          score_threshold=assessment["score_threshold"],
+          difficulty_progress=assessment["difficulty_progress"],
           critical=assessment["critical"], difficulty=verdict.difficulty.value,
           facts=verdict.facts.value, options=verdict.options.value,
           language=verdict.language.value, leakage=verdict.leakage.value,
@@ -372,7 +388,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     # are stored in question_reviews; rejected verdicts stay in process memory.
     score_rejection = (
         mode == QualityMode.ENFORCE
-        and assessment["total"] >= TAGGED_REGEN_SCORE_THRESHOLD
+        and assessment["total"] >= assessment["score_threshold"]
     )
     # In AUDIT/OFF, the critic's factual, option, language and leakage
     # judgments are diagnostic only. The established hard gates protect
