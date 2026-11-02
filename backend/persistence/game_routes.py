@@ -159,10 +159,70 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
             ) from None
         exclusions = generator_context(history, category_slug(category))
         db.rollback()  # No database connection held during slow AI calls.
-        candidate = generate_valid_question(
-            difficulty, language, category,
-            tag_history=history, tag_context=exclusions,
-        )
+        # A rejected-but-factually-clean, too-easy-only question can be
+        # retained in memory. A globally approved pooled question always wins.
+        too_easy_reserve = []
+        try:
+            candidate = generate_valid_question(
+                difficulty, language, category,
+                tag_history=history, tag_context=exclusions,
+                too_easy_reserve=too_easy_reserve,
+            )
+        except HTTPException as generation_error:
+            recoverable = (generation_error.status_code in (502, 503)
+                           or (generation_error.status_code == 409
+                               and generation_error.detail == {"code": "duplicate_exhausted"}))
+            if not recoverable:
+                raise
+            from persistence.question_pool import (
+                enabled as fallback_enabled, offer_approved_pool_question, scan_limit,
+            )
+            from tagging.review import is_strict_too_easy_reserve
+            try:
+                use_pool = fallback_enabled("QUIZ_QUESTION_POOL_FALLBACK_ENABLED")
+                use_reserve = fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
+                limit = scan_limit() if use_pool else 1
+            except ValueError:
+                event("question_fallback_configuration_failed")
+                raise HTTPException(
+                    status_code=503, detail="Invalid question fallback configuration"
+                ) from None
+            if use_pool:
+                try:
+                    pooled = offer_approved_pool_question(
+                        db, run_id=run_id, user_id=user.id,
+                        category=category, max_candidates=limit,
+                    )
+                except Exception as exc:
+                    # A broken optional fallback must not accidentally bypass
+                    # the normal quality gates or expose a private answer.
+                    event("question_pool_fallback_failed", error_type=type(exc).__name__)
+                    db.rollback()
+                else:
+                    if pooled is not None:
+                        return _public(
+                            *pooled, phase="bonus" if pooled[0].number == 16 else "main",
+                        )
+            if not use_reserve or not too_easy_reserve:
+                raise
+            candidate = next(
+                (item for item in too_easy_reserve
+                 if is_strict_too_easy_reserve(item)), None,
+            )
+            if candidate is None:
+                raise
+            # Keep the original rejected verdict for audit. This emergency
+            # publication is NEVER eligible for the normal approved pool,
+            # which requires a prior critic decision='accept'.
+            report = candidate._review_report
+            report["details"]["fallback"] = {
+                "reason": "too_easy_only",
+                "original_decision": report["decision"],
+                "generation_status": generation_error.status_code,
+            }
+            report["decision"] = "fallback_too_easy"
+            event("question_too_easy_fallback", outcome="selected",
+                  requested_difficulty=difficulty)
     else:
         candidate = generate_valid_question(difficulty, language, category)
     provider, model = _generation_metadata()
