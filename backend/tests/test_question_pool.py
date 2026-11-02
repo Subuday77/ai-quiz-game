@@ -209,6 +209,45 @@ class GlobalPoolTests(unittest.TestCase):
             ))
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
 
+    def test_semantically_same_fact_in_other_language_is_not_reissued(self):
+        # Exact-question exclusion alone would miss this: Alice saw the fact
+        # in German, Bob's approved reusable question is in English.
+        self.seed_other_user_question()
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            german_run = create_game(db, user_id=self.alice, language="German")
+            offer_question(
+                db, run_id=german_run.id, user_id=self.alice,
+                question=candidate(language="German"),
+                category=self.category, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category,
+            ))
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+
+    def test_pool_requires_exact_language_category_and_difficulty(self):
+        self.seed_other_user_question()
+        with Session(self.engine) as db:
+            german_run = create_game(db, user_id=self.alice, language="German")
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=german_run.id, user_id=self.alice,
+                category=self.category,
+            ))
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category="A category with no matching question",
+            ))
+            from persistence.models import GameRun
+            alice_run = db.get(GameRun, self.run_id)
+            alice_run.correct_main_answers = 1
+            db.commit()
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category,
+            ))
+
     def test_no_review_no_pool(self):
         self.seed_other_user_question(accepted=False)
         with patch("api.generate_valid_question", side_effect=HTTPException(
