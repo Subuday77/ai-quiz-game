@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from persistence.database import engine
 from persistence.models import Question, QuestionFact, QuestionReview
-from tagging.quality_skill.fact_tool import known_false_fact
+from tagging.quality_skill.fact_tool import known_false_triple
 
 TARGET_STEM = (
     "Какой учёный получил Премию Тьюринга 1972 года за вклад "
