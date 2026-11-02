@@ -52,17 +52,17 @@ def _normalized(text: str) -> str:
     return unicodedata.normalize("NFKC", text).casefold().replace("ё", "е")
 
 
-def known_false_fact(question) -> dict | None:
-    """A sourced, exact contradiction. No fuzzy name/award matching.
+def known_false_triple(subject: str, relation: str, object_: str) -> dict | None:
+    """Return a curated contradiction only on exact structured triple match."""
+    return _KNOWN_FALSE_FACTS.get((subject, relation, object_))
 
-    A matching structured triple is already an invalid knowledge assertion
-    even if the stem paraphrases it. No other question is rejected here.
-    """
+
+def known_false_fact(question) -> dict | None:
+    """Check a tagged candidate without guessing from names/wording."""
     fact = getattr(question, "fact", None)
     if fact is None:
         return None
-    triple = (fact.subject, fact.relation, fact.object)
-    return _KNOWN_FALSE_FACTS.get(triple)
+    return known_false_triple(fact.subject, fact.relation, fact.object)
 
 
 def inspect(question, settings) -> list[Finding]:
