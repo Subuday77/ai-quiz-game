@@ -123,6 +123,8 @@ class TaggedReview(QualityReviewV3):
     def require_all_option_assessments(self):
         if set(self.option_assessments) != set("ABCD"):
             raise ValueError("Option assessments must contain exactly A, B, C, D")
+        if any(not entry.rationale.strip() for entry in self.option_assessments.values()):
+            raise ValueError("Option assessments must have nonblank reasons")
         return self
 
 
