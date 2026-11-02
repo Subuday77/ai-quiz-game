@@ -20,7 +20,7 @@ from persistence.models import (
     Base, Question, QuestionAttempt, QuestionFact, QuestionReview, QuestionTag, Tag, Topic, User,
 )
 from persistence.seed_topics import category_slug
-from quality_errors import QualityRegenerationError
+from quality_errors import QualityRegenerationError, QualityReviewFailure
 from quality_schema import QualityMode
 from question_schema import QuizQuestion
 from tagging.contract import TaggedQuestion
@@ -646,6 +646,15 @@ class TaggedCriticTests(unittest.TestCase):
                 TaggedReview.model_validate(verdict)
         with self.assertRaises(ValidationError):
             TaggedReview.model_validate({**self.verdict, "unexpected": 123})
+
+    def test_v4_model_reply_cannot_be_mistaken_for_complete_v5_evidence(self):
+        # A missing new field is an invalid/incomplete review, NOT an audit
+        # success and NOT a newly invented factual rejection.
+        old_reply = {k: v for k, v in self.verdict.items()
+                     if k not in ("premise", "option_assessments")}
+        with self.assertRaises(QualityReviewFailure) as caught:
+            self.check(old_reply, QualityMode.AUDIT)
+        self.assertEqual(caught.exception.classification, "invalid_tag_review")
 
     def test_false_only_premise_is_visible_but_does_not_silently_enforce(self):
         # The Jam: old critic incorrectly says facts/options pass, while
