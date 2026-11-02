@@ -112,25 +112,31 @@ class SourceBackedSafeguardTests(unittest.TestCase):
         q = q.model_copy(update={"answers": {**q.answers, "A": "Xerox Labs"}})
         self.assertFalse(find_safeguards(q, requested_difficulty=15).literal_answer_leak)
 
-    def test_raw_option_evidence_multiple_correct_cannot_be_overruled_by_pass(self):
+    def test_raw_option_evidence_multiple_correct_remains_diagnostic(self):
+        from tagging.review import option_evidence_diagnostics
+
         q = candidate("transsib_obvious_western_terminus")
         raw = overly_optimistic_critic(q)
         raw_dict = raw.model_dump(mode="json")
         raw_dict["option_assessments"]["B"]["status"] = "yes"
         raw = TaggedReview.model_validate(raw_dict)
         effective, _ = reconcile_tagged_review(raw, q, requested_difficulty=6)
-        self.assertEqual(effective.options.value, "fail")
-        self.assertIn(IssueCode.MULTIPLE_CORRECT, effective.issue_codes)
+        self.assertEqual(effective.options.value, "pass")
+        self.assertIn("nonunique_options_but_options_pass",
+                      option_evidence_diagnostics(effective, q.correct_answer)["consistency_flags"])
 
-    def test_uncertain_option_evidence_is_not_silently_accepted(self):
+    def test_uncertain_option_evidence_remains_visible_without_new_gate(self):
+        from tagging.review import option_evidence_diagnostics
+
         q = candidate("transsib_obvious_western_terminus")
         raw = overly_optimistic_critic(q)
         raw_dict = raw.model_dump(mode="json")
         raw_dict["option_assessments"]["A"]["status"] = "uncertain"
         raw = TaggedReview.model_validate(raw_dict)
         effective, _ = reconcile_tagged_review(raw, q, requested_difficulty=6)
-        self.assertEqual(effective.options.value, "uncertain")
-        self.assertIn(IssueCode.NEEDS_VERIFICATION, effective.issue_codes)
+        self.assertEqual(effective.options.value, "pass")
+        self.assertIn("uncertain_choices_but_options_pass",
+                      option_evidence_diagnostics(effective, q.correct_answer)["consistency_flags"])
 
 
 if __name__ == "__main__":
