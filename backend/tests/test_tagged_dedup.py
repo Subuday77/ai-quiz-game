@@ -29,7 +29,9 @@ from tagging.core import (
     similarity, threshold,
 )
 from tagging.repository import history_for_user
-from tagging.review import TaggedReview, check_tagged_quality, tagged_assessment
+from tagging.review import (
+    TaggedReview, check_tagged_quality, option_evidence_diagnostics, tagged_assessment,
+)
 from tagging.schemas import (
     tagged_question_schema, tagged_review_schema, tag_extraction_schema,
 )
@@ -70,6 +72,28 @@ class TaggedContractTests(unittest.TestCase):
         self.assertEqual(set(schema["required"]), set(TaggedQuestion.model_fields))
         self.assertEqual(set(tag_extraction_schema()["properties"]), {"tags", "fact"})
         self.assertIn("semantic_duplicate", tagged_review_schema()["required"])
+        review_name, review_schema = transport_contract(OutputContract.TAGGED_REVIEW)
+        self.assertEqual(review_name, "quiz_tagged_review_v5")
+        self.assertEqual(set(review_schema["required"]), set(TaggedReview.model_fields))
+        self.assertEqual(set(review_schema["properties"]), set(TaggedReview.model_fields))
+        self.assertFalse(review_schema["additionalProperties"])
+        self.assertEqual(review_schema["properties"]["premise"]["enum"],
+                         ["valid", "invalid", "uncertain"])
+        option_schema = review_schema["properties"]["option_assessments"]
+        self.assertFalse(option_schema["additionalProperties"])
+        self.assertEqual(option_schema["required"], list("ABCD"))
+        for key in "ABCD":
+            item = option_schema["properties"][key]
+            self.assertFalse(item["additionalProperties"])
+            self.assertEqual(item["required"], ["status", "rationale"])
+            self.assertEqual(item["properties"]["status"]["enum"],
+                             ["yes", "no", "uncertain"])
+        # The schema factory must not leak mutations to later calls.
+        option_schema["properties"]["A"]["required"].clear()
+        self.assertEqual(
+            tagged_review_schema()["properties"]["option_assessments"]
+            ["properties"]["A"]["required"], ["status", "rationale"],
+        )
 
     def test_canonical_tags_are_required_and_stable_across_languages(self):
         self.assertEqual(candidate().fact.key, candidate(language="German").fact.key)
@@ -282,6 +306,12 @@ class TaggedPersistenceTests(unittest.TestCase):
             "rationale": "The question is simple and awkwardly worded.",
             "tags_valid": "pass", "fact_valid": "pass",
             "semantic_duplicate": False, "duplicate_match": "",
+            "premise": "valid",
+            "option_assessments": {
+                k: {"status": "yes" if k == "B" else "no",
+                    "rationale": f"Validated {k} against the literal stem."}
+                for k in "ABCD"
+            },
         }
         with patch.dict(os.environ, {"AI_QUALITY_MODE": "audit",
                                       "AI_LOCAL_LEAK_MODE": "off"}), \
@@ -441,6 +471,12 @@ class TaggedCriticTests(unittest.TestCase):
             "rationale": "Question, fact and tags have been checked.",
             "tags_valid": "pass", "fact_valid": "pass",
             "semantic_duplicate": False, "duplicate_match": "",
+            "premise": "valid",
+            "option_assessments": {
+                k: {"status": "yes" if k == "B" else "no",
+                    "rationale": f"Independently checked option {k}."}
+                for k in "ABCD"
+            },
         }
 
     def check(self, verdict, mode=QualityMode.OFF, *, item=None):
@@ -458,6 +494,10 @@ class TaggedCriticTests(unittest.TestCase):
                 deadline=perf_counter() + 10, timeout_seconds=5,
             )
             self.assertEqual(factory.return_value.responses.create.call_count, 1)
+            self.assertGreaterEqual(
+                factory.return_value.responses.create.call_args.kwargs["max_output_tokens"],
+                2400,
+            )
             self.assertEqual(
                 factory.return_value.responses.create.call_args.kwargs["output_contract"],
                 OutputContract.TAGGED_REVIEW,
@@ -575,6 +615,124 @@ class TaggedCriticTests(unittest.TestCase):
                     self.check(verdict, QualityMode.ENFORCE)
 
 
+
+    def test_v5_requires_complete_valid_a_to_d_evidence(self):
+        bad = [
+            {"premise": "bogus"},
+            {"option_assessments": {"A": self.verdict["option_assessments"]["A"]}},
+            {"option_assessments": {**self.verdict["option_assessments"],
+                                    "E": {"status": "no", "rationale": "Extra option"}}},
+            {"option_assessments": {**self.verdict["option_assessments"],
+                                    "C": {"status": "maybe", "rationale": "Not sure"}}},
+            {"option_assessments": {**self.verdict["option_assessments"],
+                                    "C": {"status": "uncertain", "rationale": " "}}},
+            {"option_assessments": {**self.verdict["option_assessments"],
+                                    "D": {"status": "no", "rationale": "x" * 251}}},
+        ]
+        for change in bad:
+            with self.subTest(change=change), self.assertRaises(ValidationError):
+                TaggedReview.model_validate({**self.verdict, **change})
+        for omitted in ("premise", "option_assessments"):
+            verdict = {**self.verdict}
+            del verdict[omitted]
+            with self.subTest(omitted=omitted), self.assertRaises(ValidationError):
+                TaggedReview.model_validate(verdict)
+        with self.assertRaises(ValidationError):
+            TaggedReview.model_validate({**self.verdict, "unexpected": 123})
+
+    def test_false_only_premise_is_visible_but_does_not_silently_enforce(self):
+        # The Jam: old critic incorrectly says facts/options pass, while
+        # the new per-option evidence exposes a false "only" premise.
+        wrong_legacy_verdict = {
+            **self.verdict,
+            "premise": "invalid",
+            "option_assessments": {
+                k: {"status": "no", "rationale": "Not the ONLY UK #1 single."}
+                for k in "ABCD"
+            },
+        }
+        with patch("tagging.review.event") as event_mock:
+            audit = self.check(wrong_legacy_verdict, QualityMode.AUDIT)
+        details = audit._review_report["details"]
+        self.assertEqual(details["option_diagnostics"]["outcome"], "invalid_premise")
+        self.assertIn("invalid_premise_but_facts_pass",
+                      details["option_diagnostics"]["consistency_flags"])
+        self.assertEqual(details["assessment"]["critical"], "none")
+        self.assertEqual(audit._review_report["decision"], "audit")
+        [event_call] = [call for call in event_mock.call_args_list
+                        if call.args[0] == "tagged_option_audit"]
+        self.assertEqual(event_call.kwargs["statuses"], dict.fromkeys("ABCD", "no"))
+        self.assertEqual(event_call.kwargs["outcome"], "invalid_premise")
+        self.assertNotIn("rationale", event_call.kwargs)
+        self.assertNotIn("Not the ONLY", json.dumps(event_call.kwargs))
+
+        # Not a stealth new gate: same legacy verdict still decides enforce.
+        enforce = self.check(wrong_legacy_verdict, QualityMode.ENFORCE)
+        self.assertEqual(enforce._review_report["decision"], "accept")
+
+    def test_four_yes_options_disagree_with_legacy_pass_without_blocking(self):
+        four = {
+            **self.verdict,
+            "option_assessments": {
+                k: {"status": "yes", "rationale": "Reached #1 in UK."}
+                for k in "ABCD"
+            },
+        }
+        assessed = option_evidence_diagnostics(TaggedReview.model_validate(four), "B")
+        self.assertEqual(assessed["outcome"], "multiple_correct")
+        self.assertEqual(assessed["supported_choices"], list("ABCD"))
+        self.assertIn("nonunique_options_but_options_pass",
+                      assessed["consistency_flags"])
+        self.assertEqual(self.check(four, QualityMode.AUDIT)._review_report["decision"],
+                         "audit")
+        self.assertEqual(self.check(four, QualityMode.ENFORCE)._review_report["decision"],
+                         "accept")
+
+    def test_uncertain_option_and_key_mismatch_are_diagnostic_only(self):
+        uncertain = {
+            **self.verdict,
+            "option_assessments": {
+                **self.verdict["option_assessments"],
+                "D": {"status": "uncertain", "rationale": "Unverified"},
+            },
+        }
+        checked = self.check(uncertain, QualityMode.AUDIT)
+        diagnostic = checked._review_report["details"]["option_diagnostics"]
+        self.assertEqual(diagnostic["outcome"], "uncertain")
+        self.assertEqual(diagnostic["uncertain_choices"], ["D"])
+        self.assertIn("uncertain_choices_but_options_pass",
+                      diagnostic["consistency_flags"])
+        mismatch = {
+            **self.verdict,
+            "option_assessments": {
+                k: {"status": "yes" if k == "C" else "no",
+                    "rationale": "Independently assessed"}
+                for k in "ABCD"
+            },
+        }
+        result = self.check(mismatch, QualityMode.AUDIT)
+        flags = result._review_report["details"]["option_diagnostics"]["consistency_flags"]
+        self.assertIn("generator_key_disagrees_with_options", flags)
+        self.assertIn("independent_answer_disagrees_with_options", flags)
+
+    def test_factual_failure_still_rejects_enforce_and_audits_without_new_gate(self):
+        finding = {
+            **self.verdict, "facts": "fail", "options": "fail",
+            "premise": "invalid",
+            "option_assessments": {
+                k: {"status": "no", "rationale": "Does not satisfy the stem."}
+                for k in "ABCD"
+            },
+        }
+        audited = self.check(finding, QualityMode.AUDIT)
+        self.assertEqual(audited._review_report["decision"], "audit")
+        self.assertEqual(
+            audited._review_report["details"]["option_diagnostics"]["outcome"],
+            "invalid_premise",
+        )
+        with self.assertRaises(QualityRegenerationError):
+            self.check(finding, QualityMode.ENFORCE)
+
     def test_question_review_prompt_explicitly_checks_all_four_and_quantifiers(self):
         from tagging.review import TAGGED_REVIEW_PROMPT
         self.assertIn("A, B, C and D SEPARATELY", TAGGED_REVIEW_PROMPT)
@@ -582,6 +740,9 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIn("One counterexample", TAGGED_REVIEW_PROMPT)
         self.assertIn("единственный", TAGGED_REVIEW_PROMPT)
         self.assertIn("facts=pass and options=pass", TAGGED_REVIEW_PROMPT)
+        self.assertIn("option_assessments", TAGGED_REVIEW_PROMPT)
+        self.assertIn("premise", TAGGED_REVIEW_PROMPT)
+        self.assertIn("EVIDENCE ONLY", TAGGED_REVIEW_PROMPT)
 
     def test_gta_vice_city_leak_is_logged_in_audit_and_rejected_in_enforce(self):
         # Real level-4 regression: the critic correctly catches the giveaway.
