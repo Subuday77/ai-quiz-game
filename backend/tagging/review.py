@@ -106,6 +106,12 @@ MANDATORY INDEPENDENT FOUR-OPTION FACT CHECK (before any scoring or tagging):
   even if the first movie is the correct answer. If unsure, mark uncertain.
 - Fact-check the whole clause before reasoning "only one option fits".
   A memorized correct answer cannot override a false premise.
+- For awards/prizes with an explicit YEAR and a claimed REASON, verify the
+  RECIPIENT, AWARD, YEAR and REASON as independent assertions. Familiarity
+  with the recipient's work does NOT prove they won that particular prize.
+  In particular, knowing someone's link to COBOL does not validate an
+  independently claimed Turing Award year. If award chronology cannot be
+  established reliably, premise=uncertain and facts=uncertain, not pass.
 - Difficulty and distractor quality are SEPARATE: perceived familiarity
   cannot turn an objectively correct option into an invalid distractor.
 
