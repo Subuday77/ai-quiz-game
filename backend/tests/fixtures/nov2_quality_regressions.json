@@ -1,0 +1,126 @@
+{
+  "source": "User-provided complete 2026-11-02 game DEBUG log; exact candidate fields",
+  "cases": [
+    {
+      "id": "cannes_1976_false_shared_winner",
+      "category": "Cinema",
+      "expected": {
+        "premise": "invalid",
+        "quality_fault": "false_historical_side_clause"
+      },
+      "question": {
+        "difficulty": 11,
+        "question": "Какой фильм получил «Золотую пальмовую ветвь» Каннского кинофестиваля в 1976 году, разделив награду с фильмом «Хроника лет огня»?",
+        "answers": {
+          "A": "«Таксист»",
+          "B": "«Сетевой эфир»",
+          "C": "«Вся президентская рать»",
+          "D": "«Последний магнат»"
+        },
+        "correct_answer": "A",
+        "tags": {
+          "entity": [
+            "taxi-driver-1976",
+            "cannes-film-festival"
+          ],
+          "concept": [
+            "palme-dor",
+            "film-awards",
+            "1970s-cinema"
+          ],
+          "keyword": [
+            "cannes",
+            "1976",
+            "palme-dor"
+          ]
+        },
+        "fact": {
+          "subject": "taxi-driver-1976",
+          "relation": "won-palme-dor-in-year",
+          "object": "1976"
+        }
+      }
+    },
+    {
+      "id": "transsib_obvious_western_terminus",
+      "category": "Geography",
+      "expected": {
+        "premise": "valid",
+        "minimum_distractor_penalty": 2,
+        "quality_fault": "weak_directional_distractors"
+      },
+      "question": {
+        "difficulty": 6,
+        "question": "Какой город является западной конечной точкой Транссибирской магистрали?",
+        "answers": {
+          "A": "Владивосток",
+          "B": "Новосибирск",
+          "C": "Москва",
+          "D": "Екатеринбург"
+        },
+        "correct_answer": "C",
+        "tags": {
+          "entity": [
+            "trans-siberian-railway",
+            "moscow"
+          ],
+          "concept": [
+            "transportation",
+            "rail-transport",
+            "railway-terminals"
+          ],
+          "keyword": [
+            "russia",
+            "western-terminus",
+            "transsib"
+          ]
+        },
+        "fact": {
+          "subject": "trans-siberian-railway",
+          "relation": "western-terminus",
+          "object": "moscow"
+        }
+      }
+    },
+    {
+      "id": "xerox_alto_brand_leak",
+      "category": "Technology",
+      "expected": {
+        "premise": "valid",
+        "leakage": "fail",
+        "quality_fault": "branded_organization_shortcut"
+      },
+      "question": {
+        "difficulty": 15,
+        "question": "Какой исследовательский центр разработал компьютер Xerox Alto, часто называемый одним из первых компьютеров с графическим пользовательским интерфейсом и мышью?",
+        "answers": {
+          "A": "Bell Labs",
+          "B": "MIT Media Lab",
+          "C": "Xerox PARC",
+          "D": "IBM Research"
+        },
+        "correct_answer": "C",
+        "tags": {
+          "entity": [
+            "xerox-parc",
+            "xerox-alto"
+          ],
+          "concept": [
+            "computer-history",
+            "graphical-user-interface",
+            "research-laboratories"
+          ],
+          "keyword": [
+            "mouse",
+            "personal-computing"
+          ]
+        },
+        "fact": {
+          "subject": "xerox-alto",
+          "relation": "developed-by",
+          "object": "xerox-parc"
+        }
+      }
+    }
+  ]
+}
