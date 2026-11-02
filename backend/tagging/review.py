@@ -224,29 +224,14 @@ def reconcile_tagged_review(verdict: TaggedReview, question: TaggedQuestion,
         if code.value not in issues and len(issues) < 8:
             issues.append(code.value)
 
-    evidence = option_evidence_diagnostics(verdict, question.correct_answer)
-    if data["premise"] == PremiseStatus.INVALID.value or findings.false_premise:
+    # Self-contradictory *model* evidence remains diagnostic: it is not an
+    # independently established fact and must not silently change audit/enforce
+    # policy. Only authoritative local findings override an optimistic verdict.
+    if findings.false_premise:
         data["premise"] = PremiseStatus.INVALID.value
         data["facts"] = CheckStatus.FAIL.value
         data["fact_valid"] = CheckStatus.FAIL.value
         issue(IssueCode.FACTUAL_ERROR)
-    elif data["premise"] == PremiseStatus.UNCERTAIN.value:
-        if data["facts"] == CheckStatus.PASS.value:
-            data["facts"] = CheckStatus.UNCERTAIN.value
-        issue(IssueCode.NEEDS_VERIFICATION)
-
-    if evidence["outcome"] == "multiple_correct":
-        data["options"] = CheckStatus.FAIL.value
-        issue(IssueCode.MULTIPLE_CORRECT)
-    elif evidence["outcome"] in ("no_correct", "uncertain"):
-        if data["options"] == CheckStatus.PASS.value:
-            data["options"] = CheckStatus.UNCERTAIN.value
-        issue(IssueCode.NEEDS_VERIFICATION)
-    elif evidence["outcome"] == "single_correct":
-        supported = evidence["supported_choices"]
-        if supported and supported[0] != question.correct_answer:
-            data["options"] = CheckStatus.FAIL.value
-            issue(IssueCode.FACTUAL_ERROR)
 
     if findings.literal_answer_leak:
         data["leakage"] = CheckStatus.FAIL.value
