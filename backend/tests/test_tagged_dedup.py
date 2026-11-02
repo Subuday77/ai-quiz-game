@@ -478,8 +478,10 @@ class TaggedPersistenceTests(unittest.TestCase):
         from tagging.contract import Fact
 
         def poem(slug, title):
+            # Each new test game begins at difficulty zero; the candidate
+            # text/fact still reproduces the level-2 production collision.
             return TaggedQuestion.model_validate({
-                "difficulty": 2,
+                "difficulty": 0,
                 "question": f'Кто написал стихотворение «{title}»?',
                 "answers": {"A": "Александр Пушкин",
                             "B": "Михаил Лермонтов",
