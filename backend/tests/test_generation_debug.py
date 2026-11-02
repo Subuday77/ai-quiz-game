@@ -99,6 +99,11 @@ class DebugGenerationTests(unittest.TestCase):
             "rationale": "The answer is inaccurate; another option may also fit.",
             "tags_valid": "fail", "fact_valid": "fail",
             "semantic_duplicate": False, "duplicate_match": "",
+            "premise": "invalid",
+            "option_assessments": {
+                k: {"status": "no", "rationale": "Cannot satisfy false premise"}
+                for k in "ABCD"
+            },
         }
         with self.settings(), \
              patch("api.create_question", return_value=candidate().model_dump()), \
@@ -122,6 +127,10 @@ class DebugGenerationTests(unittest.TestCase):
         self.assertIsNotNone(row["tags"])
         self.assertIsNotNone(row["fact"])
         self.assertEqual(row["critic"]["decision"], "reject")
+        self.assertEqual(row["critic"]["contract_version"], "tagged_review_v5")
+        self.assertEqual(row["critic"]["verdict"]["premise"], "invalid")
+        self.assertEqual(set(row["critic"]["verdict"]["option_assessments"]), set("ABCD"))
+        self.assertEqual(row["critic"]["option_diagnostics"]["outcome"], "invalid_premise")
 
     def test_off_mode_never_logs_rejected_candidate_bodies(self):
         from api import generate_valid_question
@@ -209,6 +218,12 @@ class DebugGenerationTests(unittest.TestCase):
             "rationale": "Question is valid but too easy and awkwardly phrased.",
             "tags_valid": "pass", "fact_valid": "pass",
             "semantic_duplicate": False, "duplicate_match": "",
+            "premise": "valid",
+            "option_assessments": {
+                k: {"status": "yes" if k == "B" else "no",
+                    "rationale": "Checks the literal question"}
+                for k in "ABCD"
+            },
         }
         with self.settings(), \
              patch("api.create_question", return_value=candidate().model_dump()), \
@@ -238,6 +253,10 @@ class DebugGenerationTests(unittest.TestCase):
         self.assertEqual(row["critic"]["assessment"]["score_threshold"], 3.25)
         # With AI_QUALITY_MODE=audit the editor's criticism does not block.
         self.assertEqual(row["critic"]["decision"], "audit")
+        self.assertEqual(row["critic"]["contract_version"], "tagged_review_v5")
+        self.assertEqual(row["critic"]["verdict"]["option_assessments"]["B"]["status"],
+                         "yes")
+        self.assertEqual(row["critic"]["option_diagnostics"]["outcome"], "single_correct")
 
     def test_accepted_candidate_never_leaks_to_logs_when_debug_off(self):
         from api import generate_valid_question
