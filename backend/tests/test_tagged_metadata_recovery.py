@@ -251,7 +251,7 @@ class ControlCharacterRegressions(unittest.TestCase):
 
     def test_reject_control_characters_in_question_and_each_answer(self):
         from question_schema import QuizQuestion
-        for forbidden in ("\\u0000", "\\u0001", "\\u001f", "\\u007f", "\\u0085"):
+        for forbidden in ("\u0000", "\u0001", "\u001f", "\u007f", "\u0085"):
             for field in ("question", "A", "B", "C", "D"):
                 with self.subTest(character=repr(forbidden), field=field):
                     raw = candidate().model_dump()
@@ -265,7 +265,7 @@ class ControlCharacterRegressions(unittest.TestCase):
 
     def test_escaped_json_nul_is_rejected_but_real_times_sign_is_allowed(self):
         raw = candidate().model_dump()
-        raw["question"] = "Какой математик ввёл символ \\u0000d7 для умножения?"
+        raw["question"] = "Какой математик ввёл символ \u0000d7 для умножения?"
         parsed = json.loads(json.dumps(raw, ensure_ascii=True))
         with self.assertRaises(ValidationError):
             TaggedQuestion.model_validate(parsed)
@@ -275,26 +275,26 @@ class ControlCharacterRegressions(unittest.TestCase):
     def test_tag_and_fact_metadata_reject_controls_as_before(self):
         for field in ("entity", "concept", "keyword"):
             raw = candidate().model_dump()
-            raw["tags"][field] = ["valid-tag", "bad\\u0000tag"]
+            raw["tags"][field] = ["valid-tag", "bad\u0000tag"]
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 TaggedQuestion.model_validate(raw)
         for field in ("subject", "relation", "object"):
             raw = candidate().model_dump()
-            raw["fact"][field] += "\\u0000"
+            raw["fact"][field] += "\u0000"
             with self.subTest(field=field), self.assertRaises(ValidationError):
                 TaggedQuestion.model_validate(raw)
 
     def test_bad_question_retries_before_any_paid_critic_and_keeps_key(self):
         invalid = candidate().model_dump()
-        invalid["question"] = "Какой математик ввёл символ \\u0000d7 для умножения?"
+        invalid["question"] = "Какой математик ввёл символ \u0000d7 для умножения?"
         good = candidate().model_dump()
         with patch.dict(os.environ, {
             "AI_QUALITY_MODE": "off", "AI_LOCAL_LEAK_MODE": "off",
             "AI_GENERATION_MAX_ATTEMPTS": "3",
             "AI_GENERATION_BUDGET_SECONDS": "30",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12",
-        }), patch("api.create_question", side_effect=[invalid, good]) as generate, \\
-             patch("tagging.review.check_tagged_quality") as critic, \\
+        }), patch("api.create_question", side_effect=[invalid, good]) as generate, \
+             patch("tagging.review.check_tagged_quality") as critic, \
              patch("api.sleep"), patch("api.event") as events:
             result = generate_valid_question(
                 0, "English", "History", tag_history=[], tag_context=[],
@@ -309,14 +309,14 @@ class ControlCharacterRegressions(unittest.TestCase):
 
     def test_identical_invalid_nul_stops_before_third_paid_call(self):
         invalid = candidate().model_dump()
-        invalid["question"] = "Какой математик ввёл символ \\u0000d7 для умножения?"
+        invalid["question"] = "Какой математик ввёл символ \u0000d7 для умножения?"
         with patch.dict(os.environ, {
             "AI_QUALITY_MODE": "off", "AI_LOCAL_LEAK_MODE": "off",
             "AI_GENERATION_MAX_ATTEMPTS": "3",
             "AI_GENERATION_BUDGET_SECONDS": "30",
             "AI_PROVIDER_TIMEOUT_SECONDS": "12",
-        }), patch("api.create_question", return_value=invalid) as generate, \\
-             patch("tagging.review.check_tagged_quality") as critic, \\
+        }), patch("api.create_question", return_value=invalid) as generate, \
+             patch("tagging.review.check_tagged_quality") as critic, \
              patch("api.sleep"), patch("api.event") as events:
             with self.assertRaises(HTTPException) as captured:
                 generate_valid_question(
