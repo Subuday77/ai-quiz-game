@@ -256,7 +256,7 @@ class GlobalPoolTests(unittest.TestCase):
         from tagging.contract import TaggedQuestion
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
             bob_run = create_game(db, user_id=self.bob, language="English")
-            wrong = TaggedQuestion.model_validate(WRONG)
+            wrong = TaggedQuestion.model_validate({**WRONG, "difficulty": 0})
             wrong._review_report = review_report()
             _, stored = offer_question(
                 db, run_id=bob_run.id, user_id=self.bob,
