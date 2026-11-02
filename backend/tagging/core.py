@@ -79,6 +79,12 @@ def _exact_question(value: str) -> str:
 
 
 def similarity(candidate: TaggedQuestion, previous: HistoryItem) -> Similarity:
+    # Preserve historical diagnostic priority for a matching canonical key,
+    # but never trust an old one-to-many author hash if it names OTHER work.
+    if candidate.fact.key == previous.fact_key and creator_work_anchor(
+        candidate.fact.subject, candidate.fact.relation, candidate.fact.object
+    ) == creator_work_anchor(previous.subject, previous.relation, previous.object):
+        return Similarity(100, "same_fact", previous.question_id)
     # Verbatim knowledge remains a duplicate regardless of old or new tags.
     if _exact_question(candidate.question) == _exact_question(previous.question_text):
         return Similarity(100, "same_question_text", previous.question_id)
