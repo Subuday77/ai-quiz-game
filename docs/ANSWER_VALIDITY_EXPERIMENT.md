@@ -47,7 +47,7 @@ seemingly unique key cannot be confirmed. An LLM determination is still
 **unverified**; it is not automatic publication approval or rejection.
 
 The offline tests use mocked or synthetic review reports. The live script
-`test_openai_answer_check.py` tests 14 editor-labeled (provisional) cases:
+`test_openai_answer_check.py` now tests 22 editor-labeled (provisional) cases:
 healthy questions, deliberate incorrect keys, questions with multiple
 correct options, no correct option, direct textual leaks, and high-level
 historical or cultural ambiguities. The borderline *Хованщина* case is
@@ -80,6 +80,56 @@ automatic retries. Logs/outputs are not persisted to the application's
 database. Share the JSONL to evaluate **missed severe defects** and
 **false rejection of sound questions** before any runtime integration.
 The model cannot consult external sources through this experiment.
+
+### 2 Nov 2026 — replay actual game incidents
+
+Eight additional frozen cases from the 31 Oct–1 Nov playtest cover:
+
+- `jam_only_number_one`: "the ONLY #1" false premise; all four offered songs
+  topped the UK singles chart. Expected `invalid_premise` (or flag as
+  `multiple_correct` if the model interprets the options before the premise).
+- `jam_four_number_ones`: same four songs in a deliberately plural question,
+  expected `multiple_correct`, all A–D supported.
+- `beatles_1967_drums` and `kate_bush_2022_debut`: incorrect chronology /
+  "first" premises. Expected `invalid_premise`.
+- `ginkgo_motile_sperm`, `fenrir_odin`, `riemann_trivial_zeros`:
+  factually sound high-level questions, expected exactly one correct answer.
+- `vice_city_title_leak`: a factual single-correct question but an obvious
+  shortcut from the English game title to the Russian answer. This
+  independent factual examiner does NOT check leakage. The conservative
+  literal filter may also miss this cross-script translation: a
+  `MISSED KNOWN DEFECT` for it does not mean the four-option factual
+  checker made a factual error. The tagged v4 critic previously caught
+  this as `answer_leak`; in `enforce` it would reject it.
+
+The source labels are **editorial expectations**, not facts secretly sent to
+the model or automated claims of current model accuracy. The script can now
+select a small, inexpensive subset:
+
+~~~powershell
+# In PyCharm terminal / PowerShell from the repository ROOT.
+python -m unittest discover -s tests -v
+cd backend
+python -m unittest discover -s tests -v
+cd ..
+
+# No API calls; inspect case names:
+python test_openai_answer_check.py --list
+
+# FOUR real AI calls; pay attention to A-D yes/no/uncertain and premise:
+python test_openai_answer_check.py --case jam_only_number_one --case jam_four_number_ones --case ginkgo_motile_sperm --case vice_city_title_leak
+
+# Optional: repeat the hardest case three times (3 billable calls):
+python test_openai_answer_check.py --case jam_only_number_one --repeats 3
+~~~
+
+`--case` can be repeated to choose multiple IDs; `--repeats` is bounded
+to 1..5. No case labels, generator keys, difficulty or expected answer counts
+are passed to the model. The per-option statuses and explanations are written
+to the output JSONL/CSV (plus concise status summaries to the terminal).
+The preview is **experimental only**: it changes neither the actual
+tagged critic nor `AI_QUALITY_MODE=audit/enforce`, and costs no AI calls
+during ordinary gameplay.
 
 ### First live result (24 Oct 2026)
 
