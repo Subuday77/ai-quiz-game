@@ -42,6 +42,12 @@ class GameState:
     def current_difficulty(self) -> int:
         """Return the next question's difficulty, or reject a finished game."""
         if self.phase == "main":
+            # Compatibility with legacy in-memory tests/callers that assign
+            # correct_main_answers directly after constructing GameState.
+            # A real paid skip has main_question_index > correct_main_answers,
+            # and is never altered by this normalization.
+            if self.main_question_index < self.correct_main_answers:
+                self.main_question_index = self.correct_main_answers
             return self.main_question_index
         if self.phase == "bonus":
             return BONUS_DIFFICULTY
@@ -72,6 +78,8 @@ class GameState:
         if self.phase not in ("main", "bonus"):
             raise RuntimeError("Cannot answer after the game has ended")
 
+        if self.phase == "main":
+            _ = self.current_difficulty  # Normalize legacy restored state.
         if self.phase == "bonus":
             self.bonus_correct = is_correct
             self.phase = "completed"
