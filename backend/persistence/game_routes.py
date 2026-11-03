@@ -20,10 +20,12 @@ from persistence.database import get_db
 from persistence.gameplay import (
     GameConflict, GameNotFound, TopicsNotSeeded, create_game, game_state,
     offer_question, owned_game, pending_question, record_answer,
+    skip_main_question,
 )
 from persistence.models import Topic, User
 from persistence.seed_topics import category_slug
 from question_schema import Choice, PublicQuestion
+from star_perks import PerkUnavailable
 
 router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"])
 
@@ -35,6 +37,11 @@ class NewGame(BaseModel):
 class AnswerInput(BaseModel):
     question_id: UUID
     answer: Choice
+
+
+class SkipInput(BaseModel):
+    question_id: UUID
+    request_id: UUID
 
 
 class GameInfo(BaseModel):
@@ -334,4 +341,25 @@ def answer(run_id: UUID, payload: AnswerInput, request: Request,
         correct=result.correct, correct_answer=correct_key,
         phase=result.phase, correct_main_answers=run.correct_main_answers,
         achievement=result.achievement,
+    )
+
+
+@router.post("/{run_id}/skip", response_model=GameInfo)
+def skip_question(run_id: UUID, payload: SkipInput, request: Request,
+                  user: User = Depends(authenticated_user),
+                  db: Session = Depends(get_db)):
+    """Paid gold skip; does not count as a correct answer or expose the key."""
+    validate_origin(request)
+    try:
+        skip_main_question(db, run_id=run_id, user_id=user.id,
+                           question_id=payload.question_id,
+                           request_id=payload.request_id)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except (GameConflict, PerkUnavailable) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    run = _lookup(db, run_id, user.id)
+    return GameInfo(
+        game_id=run.id, language=run.language, phase=run.status,
+        correct_main_answers=run.correct_main_answers,
     )
