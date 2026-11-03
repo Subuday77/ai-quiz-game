@@ -179,6 +179,22 @@ def offer_question(
         if dedup_enforce:
             from tagging.repository import save_metadata
             save_metadata(db, stored, question)
+            # Generator estimates are recorded once, separately from quality
+            # verdicts. Never ask Terra/the critic to approve these numbers.
+            if question.plausibility is not None:
+                score_record = db.scalar(select(QuestionReview.id).where(
+                    QuestionReview.question_id == stored.id,
+                    QuestionReview.checker_type == "generator_plausibility",
+                ))
+                if score_record is None:
+                    db.add(QuestionReview(
+                        question_id=stored.id,
+                        checker_type="generator_plausibility",
+                        provider=provider, model=model,
+                        contract_version="generator_plausibility_v1",
+                        decision="unverified_estimate",
+                        issues=[], details={"scores": question.plausibility},
+                    ))
             # The reviewer runs BEFORE the DB transaction; persist its full
             # accepted verdict alongside the question, tags and attempt.
             # PrivateAttr remains absent from all player-facing JSON.
