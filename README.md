@@ -137,6 +137,72 @@ results for false positives and missed multiple/no-correct-answer cases
 before allowing AI-based rejection. Persistent storage, player reports,
 tags and game telemetry will be implemented with the PostgreSQL phase.
 
+## Bonus quality & Terra arbitration (3 Nov 2026)
+
+**This feature is implemented on `feature/quiz-fact-dedup-tags`, not yet merged
+into `main`.** It requires the fourth Alembic migration for bonus topic
+recovery; run from `backend/` BEFORE restarting the server:
+
+```powershell
+git pull origin feature/quiz-fact-dedup-tags
+python -m alembic upgrade head
+python -m unittest discover -s tests -v
+```
+
+The model configuration is **not** part of source control. Configure these in
+the existing project-root `.env` before running the backend:
+
+```dotenv
+AI_TAG_DEDUP_ENABLED=true
+AI_QUALITY_MODE=enforce
+AI_GENERATION_DEBUG=true
+QUIZ_QUALITY_ARBITER_MODE=on
+QUIZ_QUALITY_ARBITER_MODEL_ID=gpt-6.1-terra
+QUIZ_QUALITY_ARBITER_TIMEOUT_SECONDS=10
+```
+
+The existing `OPENAI_API_KEY` is used; no second API key is needed. **Terra
+requests are billed separately.** Model availability must be confirmed on the
+actual OpenAI account; offline tests mock the provider and do not establish
+real API access. In active mode, Terra independently reviews **every bonus
+candidate** and any normal candidate that triggers a shadow `would_arbitrate`
+signal. It may veto but never override a failing primary critic.
+The strict output captures separate A/B/C/D judgments and an array of
+independent assertions from the FULL stem (including secondary river names,
+years, and claims not represented in the fact triple).
+
+**This is LLM arbitration, not independent web/source verification.** The
+arbiter has no search access. If it cannot substantiate an assertion, its
+contract explicitly requires `uncertain` and the question is not accepted.
+Arbitration failures also fail closed for the candidate. Routine INFO logs
+contain model ID, decision, elapsed duration and reason; the **full verdict,
+claims and options** are present only in the existing opt-in `DEBUG:`
+`quality_arbitration_debug` event. DEBUG logs include candidate content and
+correct answers: never expose these logs to public clients.
+
+At difficulty **15 (bonus)** a primary-critic `too_easy` verdict rejects the
+question regardless of its total weighted score. The `too_easy_only` emergency
+reserve is disabled for the bonus. Approved global-pool fallback still requires
+matching language, difficulty, category, a previously accepted v5 review, and
+user-specific fact dedup. If no valid question is available, the game preserves
+the 15/15 progress and offers **Retry**.
+
+After a bonus generation failure, the UI also offers **Change bonus topic**.
+The authenticated `POST /api/v2/games/{id}/bonus/change-topic` is valid
+only during the unresolved bonus phase, after a failed generation and before
+a question was issued. Topic selection is persisted in `GameRun`, moves through
+a stable per-game shuffle of all categories, cycles back to the first topic on
+the next click after the last, and has **no usage limit**. It never consumes
+bonus eligibility or overwrites an offered question, and survives logout and
+backend restart. A stale generation for the previous topic is rejected by
+the commit-side row-lock guard. The frontend hides **Next question** when
+Retry is shown, preventing two visually competing actions.
+
+Run offline tests from `backend/` using
+`python -m unittest discover -s tests -v`; Angular in `frontend/`:
+`npm test` and `npm run build`. GitHub Actions now includes both suites
+and an Angular build. A browser/PgSQL smoke run is still needed before merging.
+
 ## P1: bounded tagged metadata recovery (2 Nov 2026)
 
 The tagged generator uses provider-native strict JSON Schema plus a stricter
@@ -166,7 +232,7 @@ and the usual `generation_retries_exhausted`. Legacy untagged generation
 remains unchanged. No extra LLM model or paid validation call is introduced.
 
 Offline regression:
-`cd backend; python -m unittest test_tagged_metadata_recovery -v`.
+`cd backend; python -m unittest discover -s tests -p "test_tagged_metadata_recovery.py" -v`.
 
 ## PostgreSQL accounts + question history foundation (24 Oct 2026)
 
