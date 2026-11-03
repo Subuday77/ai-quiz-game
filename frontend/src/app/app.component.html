@@ -145,7 +145,7 @@
             <input type="checkbox" [checked]="categoriesToExclude.includes(category)"
                    [disabled]="loading || perksBusy"
                    (change)="toggleExcludedCategory(category, $any($event.target).checked)" />
-            <span>{{ category }}</span>
+            <span>{{ locale.t('category.' + category) }}</span>
           </label>
         </div>
         <div class="perk-counter">
@@ -211,7 +211,7 @@
           {{ locale.t('perks.manualCategory') }}: {{ categoryInfo?.manual_used ?? 0 }}/1
         </div>
         <div class="perk-current-category" *ngIf="categoryInfo?.current">
-          {{ locale.t('perks.currentCategory') }}: {{ categoryInfo?.current }}
+          {{ locale.t('perks.currentCategory') }}: {{ locale.t('category.' + categoryInfo?.current) }}
         </div>
         <div class="perk-actions">
           <button class="outline-button" type="button" (click)="changeCategory('random')"
@@ -222,7 +222,7 @@
           <select [(ngModel)]="chosenCategory" [disabled]="loading || perksBusy || !categoryInfo?.can_choose"
                   aria-label="Select category">
             <option *ngFor="let category of categoryInfo?.alternatives" [value]="category">
-              {{ category }}
+              {{ locale.t('category.' + category) }}
             </option>
           </select>
           <button class="outline-button" type="button" (click)="changeCategory('manual')"
