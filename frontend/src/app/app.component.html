@@ -171,6 +171,11 @@
       </div>
     </div>
 
+    <div class="question-actions" *ngIf="screen === 'question' && questionLoading && !current">
+      <span class="gear-loader" aria-hidden="true"></span>
+      <span class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
+    </div>
+
     <div *ngIf="screen === 'question' && current as question" class="question"
          [attr.dir]="questionRtl ? 'rtl' : 'ltr'">
       <div class="question-label">
