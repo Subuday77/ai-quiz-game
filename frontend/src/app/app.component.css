@@ -332,3 +332,50 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .outline-button:hover:not(:disabled) { background: rgba(255, 255, 255, .09); }
 .outline-button:focus-visible { outline: 2px solid #c4b2ff; outline-offset: 3px; }
 .outline-button:disabled { opacity: .55; cursor: not-allowed; }
+
+
+/* First star-shop iteration. Colors intentionally reuse the existing app palette. */
+.spendable-star-panel {
+  border: 1px solid #ffffff20;
+  border-radius: 15px;
+  background: #181a37d9;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+}
+.spendable-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.spendable-grid div { display: flex; gap: 8px; align-items: center; }
+.spendable-grid strong { color: #f6dfa0; }
+.exchange-controls { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.exchange-controls label { display: grid; gap: 5px; font-size: 12px; color: #b7c0e1; }
+.exchange-controls select, .exchange-controls input {
+  min-width: 90px;
+  max-width: 160px;
+  padding: 9px;
+  border: 1px solid #626988;
+  border-radius: 8px;
+  color: #f4f5ff;
+  background: #292c4c;
+}
+.exchange-controls input { width: 84px; }
+.perk-subtitle { margin-bottom: 0; font-size: 12px; color: #aab4d6; }
+.perk-shop { border-top: 1px solid #ffffff22; margin-top: 22px; padding-top: 18px; }
+.perk-shop h3 { margin: 0 0 10px; font-size: 16px; }
+.perk-counter { font-size: 12px; color: #aeb5d4; margin: 8px 0; }
+.perk-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.perk-actions button, .exchange-controls button {
+  border-radius: 9px;
+  padding: 9px 12px;
+  border: 1px solid #69749e;
+  color: #ecf3ff;
+  background: #292d50;
+}
+.perk-actions button:disabled, .exchange-controls button:disabled {
+  opacity: .46;
+  cursor: not-allowed;
+}
