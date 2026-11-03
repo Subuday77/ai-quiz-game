@@ -464,6 +464,31 @@ test('results button keeps results label and does not generate a new question', 
   assert.equal(requests.length, 0);
 });
 
+test('current question uses the active slot, including failed Q8 and bonus Q16', () => {
+  const { app } = setup();
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.equal(english['game.progress'], 'CURRENT QUESTION');
+  assert.match(template, /currentQuestionNumber/);
+  assert.match(template, /currentQuestionTotal/);
+  app.screen = 'question';
+  app.current = null;
+  app.progress = 0;
+  assert.equal(app.currentQuestionNumber, 1); // First question, not 0.
+  app.progress = 7;
+  assert.equal(app.currentQuestionNumber, 8); // Next question is being generated.
+  app.current = { ...question, number: 8 };
+  assert.equal(app.currentQuestionNumber, 8);
+  app.screen = 'done';
+  app.progress = 8; // Six correct, one skipped, one incorrect.
+  assert.equal(app.currentQuestionNumber, 8);
+  assert.equal(app.currentQuestionTotal, 15);
+  app.current = { ...question, number: 16, bonus: true };
+  assert.equal(app.currentQuestionNumber, 16);
+  assert.equal(app.currentQuestionTotal, 16);
+  app.current = null; // Recovered terminal state.
+  assert.equal(app.currentQuestionNumber, 8);
+});
+
 test('normal Start game immediately requests Q1 without requiring a second click', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
