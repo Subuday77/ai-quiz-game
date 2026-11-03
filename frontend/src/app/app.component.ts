@@ -820,26 +820,56 @@ export class AppComponent implements OnInit, OnDestroy {
     if (mode === 'manual' && !state.alternatives.includes(this.chosenCategory)) return;
     const cost = mode === 'manual' ? 2 : 1;
     if (this.spendableStars.silver < cost) return;
-    this.perksBusy = true;
-    this.perksError = '';
     const gameId = this.gameId;
+    const accountId = this.account.id;
+    const shopWasOpen = this.shopOpen;
+    // The confirmed category change can take as long as question generation.
+    // Hide the previous question immediately rather than leaving it actionable
+    // behind the closed SweetAlert dialog.
+    this.perksBusy = true;
+    this.loading = true;
+    this.questionLoading = true;
+    this.generatingNextQuestion = true;
+    this.current = null;
+    this.feedback = null;
+    this.shopOpen = false;
+    this.perksError = '';
+    this.longWait = false;
+    const warning = timer(this.warningMs).subscribe(() => {
+      if (this.gameId === gameId && this.questionLoading) this.longWait = true;
+    });
     this.subscriptions.add(this.http.post<PublicQuestion>(
       GAME_API + '/' + gameId + '/categories/change',
       { question_id: current.question_id, mode,
         category: mode === 'manual' ? this.chosenCategory : null,
         request_id: crypto.randomUUID() },
     ).pipe(timeout(this.requestTimeoutMs),
-           finalize(() => { this.perksBusy = false; }))
+           finalize(() => {
+             warning.unsubscribe();
+             if (this.gameId !== gameId || this.account?.id !== accountId) return;
+             this.perksBusy = false;
+             this.loading = false;
+             this.questionLoading = false;
+             this.generatingNextQuestion = false;
+             this.longWait = false;
+           }))
       .subscribe({
         next: (question) => {
-          if (this.gameId !== gameId || this.current?.question_id !== current.question_id) return;
+          if (this.gameId !== gameId || this.account?.id !== accountId) return;
           this.current = question;
           this.loadCategoryInfo();
           this.refreshSpendableStars();
         },
         error: (err: unknown) => {
-          if (this.isUnauthorized(err)) this.sessionExpired();
-          else this.perksError = 'perks.categoryFailed';
+          if (this.gameId !== gameId || this.account?.id !== accountId) return;
+          if (this.isUnauthorized(err)) {
+            this.sessionExpired();
+            return;
+          }
+          // A failed request must not strand the player on an empty question.
+          this.current = current;
+          this.shopOpen = shopWasOpen;
+          this.perksError = 'perks.categoryFailed';
         },
       }));
   }
