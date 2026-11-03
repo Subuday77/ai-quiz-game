@@ -75,3 +75,44 @@ def tagged_review_schema() -> dict:
         "premise", "option_assessments",
     ]
     return schema
+
+# Terra's separate, independent arbitration contract. Every option and each
+# material clause in the stem must be examined independently of the generator
+# and primary critic. Provider-native strict JSON Schema supports this shape.
+ARBITRATION_SCHEMA_NAME = "quiz_quality_arbitration_v1"
+
+def arbitration_schema() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "premise": {"type": "string", "enum": ["valid", "invalid", "uncertain"]},
+            "choices": {
+                "type": "object",
+                "properties": {letter: {"type": "string", "enum": [
+                    "yes", "no", "uncertain"]} for letter in "ABCD"},
+                "required": list("ABCD"),
+                "additionalProperties": False,
+            },
+            "difficulty": {"type": "string", "enum": [
+                "appropriate", "too_easy", "too_hard"]},
+            "answer_leak": {"type": "boolean"},
+            "claims": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "claim": {"type": "string"},
+                        "verdict": {"type": "string", "enum": [
+                            "supported", "false", "uncertain"]},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["claim", "verdict", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+            "rationale": {"type": "string"},
+        },
+        "required": ["premise", "choices", "difficulty", "answer_leak",
+                     "claims", "rationale"],
+        "additionalProperties": False,
+    }
