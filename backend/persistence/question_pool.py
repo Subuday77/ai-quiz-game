@@ -182,7 +182,8 @@ def offer_approved_pool_question(
             event("question_pool_fallback", outcome="cached_pending")
             return cached
 
-        difficulty = game_state(run).current_difficulty
+        game_progress = game_state(run, db)
+        difficulty = game_progress.current_difficulty
         category_key = category_slug(category)
         review_exists = exists(
             select(QuestionReview.id).where(
@@ -249,7 +250,7 @@ def offer_approved_pool_question(
                 continue
             attempt = QuestionAttempt(
                 run_id=run.id, question_id=saved.id,
-                number=run.correct_main_answers + 1,
+                number=16 if run.status == "bonus" else game_progress.main_question_index + 1,
                 requested_difficulty=difficulty,
             )
             db.add(attempt)
