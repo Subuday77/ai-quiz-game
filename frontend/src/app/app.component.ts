@@ -493,6 +493,14 @@ export class AppComponent implements OnInit, OnDestroy {
 
   loadQuestion(): void {
     if (!this.gameId || this.loading || !this.account) return;
+    // An allocated run is already in progress, even if its very first AI
+    // question fails. Never leave the pregame controls visible on GET failure.
+    // Also discard stale feedback / answer buttons when loading a new slot.
+    this.screen = 'question';
+    this.current = null;
+    this.feedback = null;
+    this.showCategoryExclusions = false;
+    this.resumeAvailable = false;
     this.loading = true;
     this.questionLoading = true;
     this.longWait = false;
