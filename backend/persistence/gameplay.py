@@ -93,8 +93,9 @@ def pending_question(db: Session, *, run_id: UUID) -> tuple[QuestionAttempt, Que
     attempt = db.scalar(
         select(QuestionAttempt)
         .where(QuestionAttempt.run_id == run_id,
-               QuestionAttempt.answered_at.is_(None))
-        .order_by(QuestionAttempt.number.desc())
+               QuestionAttempt.answered_at.is_(None),
+               QuestionAttempt.superseded_at.is_(None))
+        .order_by(QuestionAttempt.number.desc(), QuestionAttempt.revision.desc())
     )
     if attempt is None:
         return None
@@ -119,6 +120,10 @@ def offer_question(
     prompt_version: str = "v1", schema_version: str = "question_v1",
     dedup_enforce: bool = False,
     expected_bonus_topic_index: int | None = None,
+    replace_question_id: UUID | None = None,
+    replace_attempt_id: UUID | None = None,
+    replace_manual: bool = False,
+    category_operation_key: str | None = None,
 ) -> tuple[QuestionAttempt, Question]:
     """Store one already-validated candidate, or return the cached pending one.
 
@@ -127,14 +132,15 @@ def offer_question(
     function, so slow generation does not hold the game row lock.
     """
     try:
+        if dedup_enforce or replace_question_id is not None:
+            # Global lock order: player before run for all debits and tagged dedup.
+            db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         if dedup_enforce:
             from tagging.contract import TaggedQuestion
             from tagging.core import require_unique
             from tagging.repository import history_for_user
             if not isinstance(question, TaggedQuestion):
                 raise GameConflict("Tagged workflow requires verified fact metadata")
-            # Serialize ALL question commits for this player across game runs.
-            db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
@@ -144,9 +150,52 @@ def offer_question(
                 and run.bonus_topic_index != expected_bonus_topic_index):
             raise GameConflict("Bonus topic changed during generation")
         cached = pending_question(db, run_id=run.id)
-        if cached:
+        replacing = replace_question_id is not None
+        old_attempt = None
+        switch_price = None
+        if replacing:
+            from persistence.models import WalletTransaction
+            from star_perks import PerkUnavailable, category_change_price
+            if not category_operation_key or replace_attempt_id is None:
+                raise GameConflict("Missing category operation identity")
+            if cached is None or cached[0].id != replace_attempt_id or cached[0].question_id != replace_question_id:
+                # A correctly replayed request may arrive after its replacement
+                # committed; it must not deduct again.
+                prior = db.scalar(select(WalletTransaction).where(
+                    WalletTransaction.idempotency_key == category_operation_key))
+                if (prior is not None and cached is not None
+                        and prior.user_id == user_id and prior.run_id == run_id
+                        and prior.reason == ("star/silver/choose-category" if replace_manual
+                                             else "star/silver/random-category")):
+                    db.commit()
+                    return cached
+                raise GameConflict("Question changed during category generation")
+            old_attempt, old_question = cached
+            if run.status != "main":
+                raise GameConflict("Category perks are limited to the main game")
+            if category == db.get(Topic, old_question.topic_id).labels.get("en"):
+                raise GameConflict("New category matches current category")
+            allowed = run.allowed_categories if run.allowed_categories is not None else __import__("consts").QUESTION_CATEGORIES
+            switch_price = category_change_price(
+                allowed_count=len(allowed),
+                changes_used=old_attempt.category_change_count,
+                manual_used=old_attempt.manual_category_used,
+                manual=replace_manual,
+            )
+            if category not in allowed:
+                raise GameConflict("Category excluded from this game")
+            previous_topics = set(db.scalars(select(Topic.slug)
+                .join(Question, Question.topic_id == Topic.id)
+                .join(QuestionAttempt, QuestionAttempt.question_id == Question.id)
+                .where(QuestionAttempt.run_id == run_id,
+                       QuestionAttempt.number == old_attempt.number)))
+            if category_slug(category) in previous_topics:
+                raise GameConflict("Category already used in the current slot")
+        elif cached:
             db.commit()
             return cached
+        if run.allowed_categories is not None and category not in run.allowed_categories:
+            raise GameConflict("Category excluded from this game")
         if dedup_enforce:
             # Atomic recheck after another parallel request may have committed.
             require_unique(question, history_for_user(db, user_id))
@@ -216,10 +265,25 @@ def offer_question(
             if review is not None:
                 db.add(QuestionReview(question_id=stored.id, **review))
         next_number = 16 if run.status == "bonus" else state.main_question_index + 1
+        if replacing:
+            from persistence.star_economy import spend_star
+            # All expensive provider work is finished; spend and replace as a
+            # single PostgreSQL transaction, with both player/run row locks.
+            spend_star(
+                db, user_id=user_id, run_id=run.id, tier="silver",
+                amount=switch_price,
+                action="choose-category" if replace_manual else "random-category",
+                operation_key=category_operation_key,
+            )
+            old_attempt.superseded_at = _now()
+            run.hints_used += 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
             number=next_number,
             requested_difficulty=expected_difficulty,
+            revision=old_attempt.revision + 1 if replacing else 0,
+            category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
+            manual_category_used=old_attempt.manual_category_used + (1 if replace_manual else 0) if replacing else 0,
         )
         db.add(attempt)
         if run.status == "bonus":
