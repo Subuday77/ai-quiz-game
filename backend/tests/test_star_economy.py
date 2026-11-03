@@ -117,6 +117,14 @@ class StarEconomyTests(unittest.TestCase):
         )
         self.assertEqual(retry.main_question_index, 1)
         self.assertEqual(star_balance(self.db, self.user_id, "gold"), 0)
+        # The API-visible counters are reconstructed from persisted attempts,
+        # not inferred from correct answers (which stay at zero after a skip).
+        from persistence.game_routes import _game_info
+        self.db.expire_all()
+        summary = _game_info(self.db, self.db.get(GameRun, run_id))
+        self.assertEqual(summary.main_question_index, 1)
+        self.assertEqual(summary.skipped_questions, 1)
+        self.assertEqual(summary.correct_main_answers, 0)
 
     def test_bronze_hint_removes_only_false_answers_and_survives_reload(self):
         self.credit("bronze", 3)
