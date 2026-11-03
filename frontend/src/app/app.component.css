@@ -336,6 +336,8 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 
 /* Spendable stars are exchanged in-place between adjacent tiers. */
 .star-items-exchange {
+  /* Bronze → silver → gold remains left-to-right even in RTL UI. */
+  direction: ltr;
   grid-template-columns: minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr) minmax(0,1fr);
   gap: 4px;
   align-items: stretch;
