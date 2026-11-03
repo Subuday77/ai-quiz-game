@@ -510,6 +510,66 @@ test('normal Start game immediately requests Q1 without requiring a second click
   assert.equal(app.screen, 'question');
 });
 
+test('after paying for category exclusions the question language remains editable', () => {
+  const { app, requests, posts, patches, scheduler } = setup();
+  app.gameId = '';
+  scheduler.run(() => {
+    app.openCategoryExclusions();
+    succeed(posts[0], { game_id: 'paid-game', language: 'English',
+      phase: 'main', correct_main_answers: 0 });
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(app.canEditPregameLanguage, true);
+    // The server may also report no more exclusions possible (only 16 left).
+    app.categoryInfo = {
+      ...app.categoryInfo, allowed: ['Biology', 'Physics'],
+      can_exclude: false, current: null,
+    };
+    app.spendableStars.silver = 0;
+    app.showCategoryExclusions = false;
+    assert.equal(app.canEditPregameLanguage, true);
+    app.changeQuestionLanguage('Russian');
+    assert.equal(patches.length, 1);
+    assert.equal(patches[0].url, '/api/v2/games/paid-game/language');
+    assert.deepEqual(patches[0].body, { language: 'Russian' });
+    assert.equal(app.languageSaving, true);
+    app.startGame(); // Must wait for PostgreSQL to confirm the language.
+    assert.equal(requests.length, 0);
+    succeed(patches[0], { game_id: 'paid-game', language: 'Russian',
+      phase: 'main', correct_main_answers: 0 });
+    assert.equal(app.languageSaving, false);
+    assert.equal(app.gameId, 'paid-game');
+    assert.equal(app.selectedLanguage, 'Russian');
+    assert.equal(app.categoryInfo.allowed.length, 2);
+    assert.equal(app.spendableStars.silver, 0);
+    app.startGame();
+    assert.equal(requests[0].url, '/api/v2/games/paid-game/question');
+    succeed(requests[0]);
+  });
+  assert.equal(app.screen, 'question');
+  assert.equal(posts.length, 1); // No new game and no second payment.
+});
+
+test('failed pregame language save retains purchased exclusions and original language', () => {
+  const { app, posts, patches, scheduler } = setup();
+  app.gameId = '';
+  scheduler.run(() => {
+    app.openCategoryExclusions();
+    succeed(posts[0], { game_id: 'paid-game', language: 'English',
+      phase: 'main', correct_main_answers: 0 });
+    app.categoryInfo = { ...app.categoryInfo,
+      allowed: ['Biology', 'Physics'], current: null, can_exclude: false,
+    };
+    app.changeQuestionLanguage('Russian');
+    patches[0].subject.error(new HttpErrorResponse({ status: 503 }));
+  });
+  assert.equal(app.languageSaving, false);
+  assert.equal(app.selectedLanguage, 'English');
+  assert.equal(app.gameId, 'paid-game');
+  assert.deepEqual(app.categoryInfo.allowed, ['Biology', 'Physics']);
+  assert.equal(app.error, 'game.languageUpdateFailed');
+  assert.equal(app.canEditPregameLanguage, true);
+});
+
 test('visible pregame exclusion button creates empty round and defers Q1 until Start questions', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
@@ -743,7 +803,8 @@ test('template exposes both choices and does not disable language for a saved ca
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startFreshGame\(\)"/);
   assert.match(html, /\*ngIf="resumeAvailable" class="outline-button"[^>]*\(click\)="startGame\(\)"/);
-  assert.match(html, /\[disabled\]="loading \|\| \(!!gameId && !resumeAvailable\) \|\| authLoading \|\| restoringGame"/);
+  assert.match(html, /\(ngModelChange\)="changeQuestionLanguage\(\$event\)"/);
+  assert.match(html, /\[disabled\]="loading \|\| languageSaving \|\| perksBusy \|\| categoryLoading \|\| !canEditPregameLanguage/);
   assert.match(html, /locale\.t\('game\.startNew'\)/);
   assert.equal(english['game.startNew'], 'Start a new game →');
   assert.match(english['hero.resumed'], /continue it or start a new game/i);
