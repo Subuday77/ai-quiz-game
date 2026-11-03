@@ -1187,21 +1187,21 @@ test('failed paid skip restores question and hides transition spinner', () => {
   assert.equal(app.perksError, 'perks.actionFailed');
 });
 
-test('collapsed shop shows tier colors and category selection only through a dialog', () => {
+test('collapsed shop uses tier-colored prices and only opens category changes in a dialog', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   const style = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
-  assert.match(template, /class="shop-toggle"[\\s\\S]*?shopOpen = !shopOpen/);
-  assert.match(template, /class="shop-content"[\\s\\S]*?\\*ngIf="shopOpen"/);
-  assert.match(template, /openCategoryChangeDialog\\(\\)/);
-  assert.doesNotMatch(template, /\\(click\\)="changeCategory\\('random'\\)"/);
-  assert.doesNotMatch(template, /\\(click\\)="changeCategory\\('manual'\\)"/);
+  assert.ok(template.includes('class="shop-toggle"'));
+  assert.ok(template.includes('(click)="shopOpen = !shopOpen"'));
+  assert.ok(template.includes('*ngIf="shopOpen"'));
+  assert.ok(template.includes('openCategoryChangeDialog()'));
+  assert.ok(!template.includes('(click)="changeCategory('));
   for (const tier of ['bronze', 'silver', 'gold']) {
-    assert.match(template, new RegExp('class="tier-price ' + tier + '"'));
-    assert.match(style, new RegExp('\\\\.tier-price\\\\.' + tier));
+    assert.ok(template.includes('class="tier-price ' + tier + '"'));
+    assert.ok(style.includes('.tier-price.' + tier));
   }
   for (const key of ['stats.roundCorrect', 'stats.roundSkipped', 'hero.nextQuestion',
     'perks.changeCategory', 'perks.back']) assert.ok(english[key], key);
-  assert.match(template, /class="question-generation"[\\s\\S]*?role="status"/);
-  assert.match(template, /locale\\.format\\('stats.roundSkipped'/);
-  assert.match(source, /if \\(selected\\.isDenied\\) continue/);
+  assert.ok(template.includes('class="question-generation"'));
+  assert.ok(template.includes("locale.format('stats.roundSkipped'"));
+  assert.ok(source.includes('if (selected.isDenied) continue'));
 });

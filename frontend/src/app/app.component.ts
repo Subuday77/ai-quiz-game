@@ -763,7 +763,7 @@ export class AppComponent implements OnInit, OnDestroy {
     while (this.current && !this.loading && !this.perksBusy) {
       const choice = await Swal.fire({
         titleText: this.locale.t('perks.changeCategory'),
-        text: this.locale.format('perks.currentCategory') + ': ' +
+        text: this.locale.t('perks.currentCategory') + ': ' +
               this.locale.t('category.' + (this.categoryInfo?.current ?? '')),
         showCancelButton: true,
         showDenyButton: !!this.categoryInfo?.can_choose && this.spendableStars.silver >= 2,
