@@ -75,11 +75,11 @@ def game_state(run: GameRun, db: Session | None = None) -> GameState:
     """
     slot_index = run.correct_main_answers
     if db is not None:
-        slot_index = int(db.scalar(select(func.count(QuestionAttempt.id)).where(
+        slot_index = max(run.correct_main_answers, int(db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run.id,
             QuestionAttempt.number <= 15,
             QuestionAttempt.answered_at.is_not(None),
-        )) or 0)
+        )) or 0))
     return GameState(
         correct_main_answers=run.correct_main_answers,
         main_question_index=slot_index,
