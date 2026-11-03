@@ -50,19 +50,59 @@
           <strong class="star-number">{{ currentStars[tier.key] }}</strong>
         </div>
       </div>
+      <div class="round-summary">
+        <span>{{ locale.format('stats.roundCorrect', { count: gameCorrectAnswers }) }}</span>
+        <span>{{ locale.format('stats.roundSkipped', { count: skippedQuestions }) }}</span>
+      </div>
     </div>
     <div class="star-panel">
       <div class="star-panel-title">
-        {{ locale.t('stars.allTime') }}
+        {{ locale.t('perks.balance') }}
         <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
       </div>
-      <div class="star-items">
-        <div class="star-item" *ngFor="let tier of starTiers" [ngClass]="tier.key"
-             [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + totalStars[tier.key]">
-          <span class="star-icon" aria-hidden="true">★</span>
-          <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
-          <strong class="star-number">{{ totalStars[tier.key] }}</strong>
-        </div>
+      <div class="star-items star-items-exchange">
+        <ng-container *ngFor="let tier of starTiers">
+          <div class="star-item" [ngClass]="tier.key"
+               [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + spendableStars[tier.key]">
+            <span class="star-icon" aria-hidden="true">★</span>
+            <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
+            <strong class="star-number">{{ spendableStars[tier.key] }}</strong>
+          </div>
+          <div class="exchange-pair" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
+            <ng-container *ngIf="tier.key === 'bronze'">
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('bronze', 'silver')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.bronze < 10"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })">
+                <span aria-hidden="true">→</span><small>10:1</small>
+              </button>
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('silver', 'bronze')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.silver < 1"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })">
+                <span aria-hidden="true">←</span><small>1:10</small>
+              </button>
+            </ng-container>
+            <ng-container *ngIf="tier.key === 'silver'">
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('silver', 'gold')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.silver < 10"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })">
+                <span aria-hidden="true">→</span><small>10:1</small>
+              </button>
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('gold', 'silver')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.gold < 1"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })">
+                <span aria-hidden="true">←</span><small>1:10</small>
+              </button>
+            </ng-container>
+          </div>
+        </ng-container>
       </div>
       <div class="stats-caption" *ngIf="account">
         <span *ngIf="statsLoading">{{ locale.t('stats.loading') }}</span>
@@ -75,7 +115,8 @@
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
-    <h1 *ngIf="screen === 'question'">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
+    <h1 *ngIf="screen === 'question' && questionLoading && generatingNextQuestion">{{ locale.t('hero.nextQuestion') }}</h1>
+    <h1 *ngIf="screen === 'question' && !(questionLoading && generatingNextQuestion) && (current || questionLoading || canRetryQuestion)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
     <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
@@ -85,23 +126,71 @@
     <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
 
     <div class="status" *ngIf="screen !== 'setup'">
-      <div><span>{{ locale.t('game.progress') }}</span><strong>{{ progress }} / 15</strong></div>
+      <div><span>{{ locale.t('game.progress') }}</span><strong>{{ currentQuestionNumber }} / {{ currentQuestionTotal }}</strong></div>
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
-      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
+      <select id="language" [(ngModel)]="selectedLanguage"
+              (ngModelChange)="changeQuestionLanguage($event)"
+              [disabled]="loading || languageSaving || perksBusy || categoryLoading || !canEditPregameLanguage || authLoading || restoringGame">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
+      <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
+      <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
+      <div class="category-pregame-action" *ngIf="account && (!gameId || resumeAvailable || categoryInfo?.can_exclude)">
+        <button class="outline-button" type="button" (click)="openCategoryExclusions()"
+                [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
+          {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
+        </button>
+        <span class="perk-counter">{{ locale.t('perks.exclusionPriceShort') }}</span>
+      </div>
+      <div class="category-preferences" *ngIf="showCategoryExclusions && gameId && categoryInfo?.can_exclude">
+        <h3>{{ locale.t('perks.excludeTitle') }}</h3>
+        <p>{{ locale.t('perks.excludeHelp') }}</p>
+        <div class="category-exclusion-list" role="group" aria-label="Excluded categories">
+          <label *ngFor="let category of sortedAllowedCategories">
+            <input type="checkbox" [checked]="categoriesToExclude.includes(category)"
+                   [disabled]="loading || perksBusy"
+                   (change)="toggleExcludedCategory(category, $any($event.target).checked)" />
+            <span>{{ locale.t('category.' + category) }}</span>
+          </label>
+        </div>
+        <div class="perk-counter">
+          {{ locale.t('perks.excludeSelected') }}: {{ categoriesToExclude.length }}
+          · {{ locale.t('perks.price') }}: {{ exclusionCost }} {{ locale.t('stars.silver') }} ★
+          · {{ locale.t('perks.remaining') }}:
+          {{ categoryInfo!.allowed.length - categoriesToExclude.length }}
+        </div>
+        <button class="outline-button" type="button" (click)="excludeCategories()"
+                [disabled]="loading || perksBusy || !categoriesToExclude.length ||
+                            categoryInfo!.allowed.length - categoriesToExclude.length < 16 ||
+                            exclusionCost > spendableStars.silver">
+          {{ locale.t('perks.confirmExclusions') }}
+        </button>
+      </div>
       <div class="question-actions">
-        <button class="primary" type="button" (click)="startGame()"
-                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame">
+        <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+          {{ locale.t(setupButtonLabelKey) }}
+        </button>
+        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startFreshGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
+          {{ locale.t('game.startNew') }}
+        </button>
+        <button *ngIf="resumeAvailable" class="outline-button" type="button" (click)="startGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
       </div>
+    </div>
+
+    <div class="question-generation" *ngIf="screen === 'question' && questionLoading && !current" role="status" aria-live="polite">
+      <span class="gear-loader" aria-hidden="true"></span>
+      <span>{{ locale.t('game.loading') }}</span>
     </div>
 
     <div *ngIf="screen === 'question' && current as question" class="question"
@@ -112,9 +201,59 @@
       </div>
       <h2>{{ question.question }}</h2>
       <div class="answers">
-        <button *ngFor="let choice of choices" type="button" (click)="answer(choice)" [disabled]="loading">
-          <span class="letter">{{ choice }}</span><span>{{ question.answers[choice] }}</span>
+        <ng-container *ngFor="let choice of choices">
+          <button *ngIf="question.answers[choice] as answerText"
+                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy">
+            <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
+          </button>
+          <!-- Keep the original A/B/C/D cell occupied; otherwise CSS grid
+               slides C into B's old position when a bronze hint removes B. -->
+          <span *ngIf="!question.answers[choice]" class="hidden-answer-slot" aria-hidden="true"></span>
+        </ng-container>
+      </div>
+      <div class="perk-shop" *ngIf="!question.bonus">
+        <button type="button" class="shop-toggle" (click)="shopOpen = !shopOpen"
+                [attr.aria-expanded]="shopOpen" aria-controls="quiz-perk-options">
+          <span>{{ locale.t('perks.title') }}</span>
+          <span aria-hidden="true">{{ shopOpen ? '▴' : '▾' }}</span>
         </button>
+        <div class="shop-content" id="quiz-perk-options" *ngIf="shopOpen">
+          <div class="perk-counter">{{ locale.t('perks.removed') }}: {{ question.hidden_count || 0 }}/2</div>
+          <div class="perk-actions">
+            <button class="outline-button" type="button" (click)="removeOptions(1)"
+                    [disabled]="loading || perksBusy || (question.hidden_count || 0) >= 2 ||
+                                spendableStars.bronze < 2">
+              {{ locale.t('perks.removeOne') }} — 2
+              <span class="tier-price bronze">★ {{ locale.t('stars.bronze') }}</span>
+            </button>
+            <button class="outline-button" type="button" (click)="removeOptions(2)"
+                    [disabled]="loading || perksBusy || (question.hidden_count || 0) !== 0 ||
+                                spendableStars.bronze < 3">
+              {{ locale.t('perks.removeTwo') }} — 3
+              <span class="tier-price bronze">★ {{ locale.t('stars.bronze') }}</span>
+            </button>
+            <button class="outline-button" type="button" (click)="skipCurrentQuestion()"
+                    [disabled]="loading || perksBusy || spendableStars.gold < 1">
+              {{ locale.t('perks.skip') }} — 1
+              <span class="tier-price gold">★ {{ locale.t('stars.gold') }}</span>
+            </button>
+          </div>
+          <div class="perk-current-category" *ngIf="categoryInfo?.current">
+            {{ locale.t('perks.currentCategory') }}: {{ locale.t('category.' + categoryInfo?.current) }}
+          </div>
+          <div class="perk-actions">
+            <button class="outline-button" type="button" (click)="openCategoryChangeDialog()"
+                    [disabled]="loading || perksBusy || !categoryInfo?.can_change || spendableStars.silver < 1">
+              {{ locale.t('perks.changeCategory') }}
+              <span class="tier-price silver">★ {{ locale.t('stars.silver') }}</span>
+            </button>
+            <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
+          </div>
+          <div class="perk-counter">
+            {{ locale.t('perks.categoryChanges') }}: {{ categoryInfo?.changes_used ?? 0 }}/2 ·
+            {{ locale.t('perks.manualCategory') }}: {{ categoryInfo?.manual_used ?? 0 }}/1
+          </div>
+        </div>
       </div>
     </div>
 
@@ -136,7 +275,7 @@
 
     <div *ngIf="screen === 'done'" class="results">
       <p>{{ locale.t(finishedPhase === 'lost' ? 'game.resultsLost' : 'game.resultsCompleted') }}</p>
-      <p>{{ locale.format('game.roundScore', { count: progress }) }}</p>
+      <p>{{ locale.format('game.roundScore', { count: gameCorrectAnswers }) }}</p>
       <div class="star-list" *ngIf="stars.length">★ {{ starNames }}</div>
       <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
     </div>
@@ -155,6 +294,7 @@
     </div>
     <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
+    <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
     <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
       <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
         {{ locale.t('game.retry') }}

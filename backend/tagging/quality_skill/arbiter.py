@@ -168,7 +168,7 @@ def arbitrate(question, *, language: str, category: str,
                 input=json.dumps({
                     "requested_difficulty": requested_difficulty,
                     "language": language, "category": category,
-                    "question": question.model_dump(),
+                    "question": question.model_dump(exclude={"plausibility"}),
                     "local_findings": (shadow or {}).get("findings", []),
                 }, ensure_ascii=False),
                 max_output_tokens=2400,

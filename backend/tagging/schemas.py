@@ -3,7 +3,7 @@ from copy import deepcopy
 from question_transport_schema import quiz_question_schema
 from quality_schema_v3 import quality_review_v3_schema
 
-TAGGED_QUESTION_SCHEMA_NAME = "quiz_question_tagged_v2"
+TAGGED_QUESTION_SCHEMA_NAME = "quiz_question_tagged_v3"
 TAGGED_REVIEW_SCHEMA_NAME = "quiz_tagged_review_v5"
 TAG_EXTRACTION_SCHEMA_NAME = "quiz_fact_extraction_v1"
 
@@ -47,7 +47,13 @@ def tagged_question_schema() -> dict:
     schema = quiz_question_schema()
     schema["properties"]["tags"] = deepcopy(_TAG_CLOUD)
     schema["properties"]["fact"] = deepcopy(_FACT)
-    schema["required"] += ["tags", "fact"]
+    schema["properties"]["plausibility"] = {
+        "type": "object",
+        "properties": {key: {"type": "integer"} for key in "ABCD"},
+        "required": list("ABCD"),
+        "additionalProperties": False,
+    }
+    schema["required"] += ["tags", "fact", "plausibility"]
     return schema
 
 

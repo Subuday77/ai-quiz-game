@@ -64,6 +64,7 @@ class SkillSettings:
 class EditorialSettings:
     score_threshold: float
     distractors_weight: float
+    early_distractors_weight: float
     suitability_weight: float
     wording_weight: float
     ordinary_knowledge_unit: float
@@ -82,6 +83,7 @@ class EditorialSettings:
             score_threshold=_number("QUIZ_QUALITY_SCORE_THRESHOLD", 3.25,
                                     low=0.01, strictly_positive=True),
             distractors_weight=_number("QUIZ_QUALITY_DISTRACTORS_WEIGHT", 1.0),
+            early_distractors_weight=_number("QUIZ_QUALITY_EARLY_DISTRACTORS_WEIGHT", 0.5),
             suitability_weight=_number("QUIZ_QUALITY_SUITABILITY_WEIGHT", 1.0),
             wording_weight=_number("QUIZ_QUALITY_WORDING_WEIGHT", 1.0),
             ordinary_knowledge_unit=_number("QUIZ_QUALITY_KNOWLEDGE_UNIT", 0.25),

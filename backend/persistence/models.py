@@ -170,6 +170,8 @@ class GameRun(Base):
     bonus_topic_change_unlocked: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # None means the unmodified global catalog; otherwise a per-game allowlist.
+    allowed_categories: Mapped[list | None] = mapped_column(JsonData, nullable=True)
     started_at = datetime_column()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active_duration_ms: Mapped[int | None] = mapped_column(Integer)
@@ -194,10 +196,16 @@ class QuestionAttempt(Base):
     selected_key: Mapped[str | None] = mapped_column(String(1))
     is_correct: Mapped[bool | None] = mapped_column(Boolean)
     hints_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    revision: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    category_change_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    manual_category_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     answer_duration_ms: Mapped[int | None] = mapped_column(Integer)
     client_active_duration_ms: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (
-        UniqueConstraint("run_id", "number", name="uq_run_question_number"),
+        UniqueConstraint("run_id", "number", "revision", name="uq_run_question_revision"),
+        CheckConstraint("revision >= 0 AND category_change_count BETWEEN 0 AND 2", name="ck_attempt_category_changes"),
+        CheckConstraint("manual_category_used BETWEEN 0 AND 1", name="ck_attempt_manual_changes"),
         CheckConstraint("number BETWEEN 1 AND 16", name="ck_attempt_number"),
         CheckConstraint("requested_difficulty BETWEEN 0 AND 15", name="ck_attempt_difficulty"),
         CheckConstraint("selected_key IS NULL OR selected_key IN ('A','B','C','D')", name="ck_attempt_selection"),

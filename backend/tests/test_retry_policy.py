@@ -1,5 +1,6 @@
 """Offline retry, budget, concurrency and browser-abandonment recovery tests."""
 
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -215,6 +216,13 @@ class RetryTests(unittest.TestCase):
             }):
                 self.assertEqual(self.client.get("/api/client-config").status_code, 503)
 
+    def test_default_long_wait_warning_is_fifteen_seconds(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("QUIZ_LONG_WAIT_WARNING_SECONDS", None)
+            from generation_policy import client_settings
+            result = client_settings()
+        self.assertEqual(result["long_wait_warning_ms"], 15000)
+
     def test_public_config_exposes_only_validated_timing_settings(self):
         with patch.dict("os.environ", {"QUIZ_LONG_WAIT_WARNING_SECONDS": "4",
                                        "QUIZ_HTTP_TIMEOUT_SECONDS": "20"}):
@@ -249,6 +257,108 @@ class PolicyTests(unittest.TestCase):
                 exc = ClientError({"Error": {"Code": code},
                                    "ResponseMetadata": {"HTTPStatusCode": status}}, "Converse")
                 self.assertEqual(is_transient(exc), expected)
+
+
+class TaggedCriticBudgetTests(unittest.TestCase):
+    """No API calls: replays the Q1 quality-rejection/timeout failure."""
+
+    def config(self):
+        return patch.dict("os.environ", {
+            "AI_QUALITY_MODE": "enforce",
+            "AI_LOCAL_LEAK_MODE": "off",
+            "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_PROVIDER_TIMEOUT_SECONDS": "12",
+            "AI_CRITIC_MIN_REMAINING_SECONDS": "8",
+            "AI_RETRY_BACKOFF_BASE_SECONDS": "0.5",
+            "AI_RETRY_BACKOFF_MAX_SECONDS": "2",
+        })
+
+    def test_two_quality_rejections_then_critic_timeout_empty_reserve_returns_503(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        from quality_errors import QualityRegenerationError, QualityReviewFailure
+        from test_tagged_dedup import candidate
+
+        reserve = []
+        with self.config(), patch(
+            "api.create_question", return_value=candidate().model_dump()
+        ) as generator, patch(
+            "tagging.review.check_tagged_quality",
+            side_effect=[QualityRegenerationError(),
+                         QualityRegenerationError(),
+                         QualityReviewFailure("tag_review_unavailable", retryable=True)],
+        ) as critic, patch("api.sleep") as sleep:
+            with self.assertRaises(HTTPException) as raised:
+                generate_valid_question(0, "English", "History",
+                                        tag_history=[], tag_context=[],
+                                        too_easy_reserve=reserve)
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(generator.call_count, 3)
+        self.assertEqual(critic.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(reserve, [])
+
+    def test_generator_timeout_reserves_critic_time_on_later_attempt(self):
+        from api import generate_valid_question
+        from fastapi import HTTPException
+        from quality_errors import QualityRegenerationError, QualityReviewFailure
+        from test_tagged_dedup import candidate
+
+        clock = [100.0]
+        timeouts = []
+        def generate(*args, **kwargs):
+            timeouts.append(provider_timeout.get())
+            if len(timeouts) <= 2:
+                clock[0] += 8
+            return candidate().model_dump()
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        with self.config(), patch("api.perf_counter", side_effect=lambda: clock[0]), \
+             patch("api.create_question", side_effect=generate), \
+             patch("api.sleep", side_effect=sleep), \
+             patch("generation_policy.random.uniform", side_effect=lambda low, high: high), \
+             patch("tagging.review.check_tagged_quality", side_effect=[
+                 QualityRegenerationError(), QualityRegenerationError(),
+                 QualityReviewFailure("tag_review_unavailable", retryable=True),
+             ]):
+            with self.assertRaises(HTTPException) as raised:
+                generate_valid_question(0, "English", "History",
+                                        tag_history=[], tag_context=[])
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(timeouts, [12, 12, 4.5])
+        self.assertIsNone(provider_timeout.get())
+
+    def test_below_minimum_time_never_starts_critic(self):
+        from tagging.review import check_tagged_quality
+        from quality_schema import QualityMode
+        from quality_errors import QualityReviewFailure
+        from test_tagged_dedup import candidate
+
+        with self.config(), patch("tagging.review.LLMClient") as client:
+            with self.assertRaises(QualityReviewFailure) as raised:
+                check_tagged_quality(
+                    candidate(), language="English", requested_difficulty=0,
+                    category="History", neighbors=[], mode=QualityMode.ENFORCE,
+                    deadline=100.0, timeout_seconds=12,
+                    clock=lambda: 97.09, min_remaining_seconds=8,
+                )
+        self.assertEqual(raised.exception.classification, "tag_review_insufficient_budget")
+        client.assert_not_called()
+
+    def test_critic_time_threshold_is_configurable_and_validated(self):
+        with self.config():
+            self.assertEqual(GenerationPolicy.from_env().critic_min_remaining_seconds, 8)
+            with patch.dict("os.environ", {"AI_CRITIC_MIN_REMAINING_SECONDS": "5.5"}):
+                self.assertEqual(GenerationPolicy.from_env().critic_min_remaining_seconds, 5.5)
+            for bad in ("0", "-1", "NaN", "inf", "abc"):
+                with self.subTest(bad=bad), patch.dict(
+                    "os.environ", {"AI_CRITIC_MIN_REMAINING_SECONDS": bad}
+                ):
+                    with self.assertRaises(ValueError):
+                        GenerationPolicy.from_env()
 
 
 if __name__ == "__main__":

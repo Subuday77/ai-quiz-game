@@ -33,6 +33,7 @@ class GenerationPolicy:
     budget_seconds: float = 30
     backoff_base_seconds: float = 0.5
     backoff_max_seconds: float = 2
+    critic_min_remaining_seconds: float = 8
 
     @classmethod
     def from_env(cls):
@@ -42,6 +43,7 @@ class GenerationPolicy:
             env_number("AI_GENERATION_BUDGET_SECONDS", 30),
             env_number("AI_RETRY_BACKOFF_BASE_SECONDS", 0.5),
             env_number("AI_RETRY_BACKOFF_MAX_SECONDS", 2),
+            env_number("AI_CRITIC_MIN_REMAINING_SECONDS", 8),
         )
 
     def backoff(self, failed_attempt: int) -> float:
@@ -101,7 +103,7 @@ def retry_after_seconds(exc: Exception) -> float | None:
 
 
 def client_settings() -> dict[str, int]:
-    warning = env_number("QUIZ_LONG_WAIT_WARNING_SECONDS", 8)
+    warning = env_number("QUIZ_LONG_WAIT_WARNING_SECONDS", 15)
     timeout = env_number("QUIZ_HTTP_TIMEOUT_SECONDS", 45)
     if not 0 < warning < timeout <= 2_147_483.647:
         raise ValueError("Invalid browser timing settings")

@@ -126,7 +126,7 @@ class DebugGenerationTests(unittest.TestCase):
         self.assertEqual(row["rejection_reason"], "quality_rejected")
         self.assertEqual(row["correct_answer"], "B")
         self.assertEqual(row["question"], candidate().question)
-        self.assertEqual(row["critic"]["assessment"]["total"], 3)
+        self.assertEqual(row["critic"]["assessment"]["total"], 2.5)
         self.assertEqual(row["critic"]["verdict"]["rationale"], verdict["rationale"])
         self.assertEqual(row["critic"]["verdict"]["fact_valid"], "fail")
         self.assertIsNotNone(row["tags"])
@@ -253,7 +253,7 @@ class DebugGenerationTests(unittest.TestCase):
         self.assertEqual(row["python_duplicate_check"]["score"], 0)
         self.assertEqual(row["critic"]["verdict"]["difficulty"], "too_easy")
         self.assertEqual(row["critic"]["verdict"]["rationale"], verdict["rationale"])
-        self.assertEqual(row["critic"]["assessment"]["total"], 3.25)
+        self.assertEqual(row["critic"]["assessment"]["total"], 2.75)
         self.assertEqual(row["critic"]["assessment"]["penalties"]["knowledge"], 0.25)
         self.assertEqual(row["critic"]["assessment"]["score_threshold"], 3.25)
         # With AI_QUALITY_MODE=audit the editor's criticism does not block.

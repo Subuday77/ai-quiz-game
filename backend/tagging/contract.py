@@ -4,7 +4,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from question_schema import QuizQuestion
+from question_schema import Choice, QuizQuestion
 
 SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -109,6 +109,9 @@ class Fact(BaseModel):
 class TaggedQuestion(QuizQuestion):
     tags: TagCloud
     fact: Fact
+    # Estimated once by the generator, never re-rated by a critic.
+    # Optional for approved questions saved under previous schemas.
+    plausibility: dict[Choice, int] | None = Field(default=None, exclude_if=lambda value: value is None)
     # Internal server-only audit payload; never part of model_dump/LLM JSON or Angular API.
     _review_report: dict | None = PrivateAttr(default=None)
     _duplicate_assessment: dict | None = PrivateAttr(default=None)
@@ -117,4 +120,12 @@ class TaggedQuestion(QuizQuestion):
     def fact_in_tags(self) -> "TaggedQuestion":
         if self.fact.subject not in self.tags.entity:
             raise ValueError("Fact subject must appear among entity tags")
+        if self.plausibility is not None:
+            if set(self.plausibility) != set("ABCD"):
+                raise ValueError("Exactly four plausibility scores are required")
+            if any(isinstance(score, bool) or not isinstance(score, int)
+                   or not 0 <= score <= 100 for score in self.plausibility.values()):
+                raise ValueError("Plausibility scores must be integers from 0 to 100")
+            # The verified correct answer must never be hidden by a hint.
+            self.plausibility = {**self.plausibility, self.correct_answer: 100}
         return self

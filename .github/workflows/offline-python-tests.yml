@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/quiz-fact-dedup-tags
+      - feature/star-perks-shop
   workflow_dispatch:
 
 jobs:

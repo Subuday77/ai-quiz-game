@@ -66,7 +66,8 @@ class TaggedContractTests(unittest.TestCase):
     def test_v2_transport_is_separate_from_legacy_question_contract(self):
         from question_transport_schema import quiz_question_schema
         self.assertNotIn("fact", quiz_question_schema()["properties"])
-        self.assertEqual(transport_contract(OutputContract.TAGGED_QUESTION)[0], "quiz_question_tagged_v2")
+        self.assertEqual(transport_contract(OutputContract.TAGGED_QUESTION)[0], "quiz_question_tagged_v3")
+        self.assertEqual(set(tagged_question_schema()["properties"]["plausibility"]["required"]), set("ABCD"))
         schema = tagged_question_schema()
         self.assertEqual(set(schema["properties"]), set(TaggedQuestion.model_fields))
         self.assertEqual(set(schema["required"]), set(TaggedQuestion.model_fields))
@@ -429,7 +430,7 @@ class TaggedPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(review.details["option_diagnostics"]["outcome"], "single_correct")
         self.assertEqual(review.details["option_diagnostics"]["consistency_flags"], [])
-        self.assertEqual(review.details["assessment"]["total"], 2.25)
+        self.assertEqual(review.details["assessment"]["total"], 1.75)
         self.assertEqual(review.details["python_duplicate_check"]["score"], 0)
         self.assertEqual(review.details["python_duplicate_check"]["threshold"], 70)
         self.assertEqual(review.details["verdict"]["difficulty"], "too_easy")
@@ -670,15 +671,15 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIsNotNone(checked._review_report)
         details = checked._review_report["details"]
         self.assertEqual(details["verdict"]["difficulty"], "too_easy")
-        self.assertEqual(details["assessment"]["total"], 4.25)
-        self.assertEqual(details["assessment"]["penalties"]["distractors"], 2)
+        self.assertEqual(details["assessment"]["total"], 3.25)
+        self.assertEqual(details["assessment"]["penalties"]["distractors"], 1)
         self.assertEqual(details["assessment"]["penalties"]["wording"], 1)
         self.assertEqual(checked._review_report["decision"], "audit")
         self.assertNotIn("_review_report", checked.model_dump())
         scores = [call.kwargs for call in log.call_args_list
                   if call.args[0] == "tagged_review_score"]
         self.assertEqual(len(scores), 1)
-        self.assertEqual(scores[0]["score"], 4.25)
+        self.assertEqual(scores[0]["score"], 3.25)
         self.assertEqual(scores[0]["penalties"]["knowledge"], 0.25)
         self.assertEqual(scores[0]["difficulty"], "too_easy")
         self.assertNotIn("rationale", scores[0])
@@ -721,25 +722,28 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertEqual(score["score_threshold"], 3.25)
         self.assertFalse(score["threshold_preview"]["3.25"])
 
-    def test_difficulty_quarter_tips_three_points_to_enforce_rejection(self):
+    def test_bronze_boundary_restores_full_distractor_weight(self):
         other_three = {**self.verdict, "distractor_penalty": 3}
-        # An otherwise marginal question with three points is NOT rejected.
-        accepted = self.check(other_three, QualityMode.ENFORCE)
-        self.assertEqual(accepted._review_report["details"]["assessment"]["total"], 3)
         critical_plus_quarter = {
             **other_three, "difficulty": "too_easy", "knowledge_penalty": 0,
         }
+        # Q1-4: discounted editorial distractor penalty does not block.
+        accepted_early = self.check(critical_plus_quarter, QualityMode.ENFORCE)
+        early_score = accepted_early._review_report["details"]["assessment"]
+        self.assertEqual(early_score["penalties"]["distractors"], 1.5)
+        self.assertEqual(accepted_early._review_report["decision"], "accept")
+
+        # Q5 (difficulty 4): bronze milestone restores the original weight.
+        fifth = candidate().model_copy(update={"difficulty": 4})
+        accepted = self.check(other_three, QualityMode.ENFORCE, item=fifth)
+        self.assertEqual(accepted._review_report["details"]["assessment"]["total"], 3)
         with self.assertRaises(QualityRegenerationError):
-            self.check(critical_plus_quarter, QualityMode.ENFORCE)
-        # Audit still records the exact same 3.25 without blocking.
-        approved_in_audit = self.check(critical_plus_quarter, QualityMode.AUDIT)
-        self.assertEqual(
-            approved_in_audit._review_report["details"]["assessment"]["total"], 3.25
-        )
-        self.assertTrue(
-            approved_in_audit._review_report["details"]["assessment"][
-                "threshold_preview"]["3.25"]
-        )
+            self.check(critical_plus_quarter, QualityMode.ENFORCE, item=fifth)
+        approved_in_audit = self.check(critical_plus_quarter, QualityMode.AUDIT, item=fifth)
+        assessment = approved_in_audit._review_report["details"]["assessment"]
+        self.assertEqual(assessment["penalties"]["distractors"], 3)
+        self.assertGreaterEqual(assessment["total"], 3.25)
+        self.assertTrue(assessment["threshold_preview"]["3.25"])
 
     def test_invalid_tags_are_rejected_even_if_general_quality_off(self):
         with self.assertRaises(QualityRegenerationError):
@@ -930,8 +934,10 @@ class TaggedCriticTests(unittest.TestCase):
                 "relation": "setting-city", "object": "vice-city",
             },
         })
-        assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer)
-        self.assertEqual(assessment["total"], 1.25)
+        assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer,
+                                       requested_difficulty=gta.difficulty)
+        self.assertEqual(assessment["penalties"]["distractors"], 1)
+        self.assertGreater(assessment["total"], 1.25)
         for mode in (QualityMode.OFF, QualityMode.AUDIT):
             with self.subTest(mode=mode):
                 reviewed = self.check(verdict, mode, item=gta)

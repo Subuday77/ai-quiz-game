@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -66,10 +66,23 @@ def owned_game(db: Session, *, run_id: UUID, user_id: UUID,
     return run
 
 
-def game_state(run: GameRun) -> GameState:
-    """Rebuild pure game progression from persisted columns."""
+def game_state(run: GameRun, db: Session | None = None) -> GameState:
+    """Rebuild progression; skipped slots differ from correct answer count.
+
+    A completed attempt with NULL selected_key / is_correct is a paid skip.
+    No new database column is required: count completed main question slots.
+    db=None preserves existing non-skip callers and tests.
+    """
+    slot_index = run.correct_main_answers
+    if db is not None:
+        slot_index = max(run.correct_main_answers, int(db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run.id,
+            QuestionAttempt.number <= 15,
+            QuestionAttempt.answered_at.is_not(None),
+        )) or 0))
     return GameState(
         correct_main_answers=run.correct_main_answers,
+        main_question_index=slot_index,
         hints_used=run.hints_used,
         phase=run.status,
         bonus_correct=run.bonus_correct,
@@ -80,8 +93,9 @@ def pending_question(db: Session, *, run_id: UUID) -> tuple[QuestionAttempt, Que
     attempt = db.scalar(
         select(QuestionAttempt)
         .where(QuestionAttempt.run_id == run_id,
-               QuestionAttempt.answered_at.is_(None))
-        .order_by(QuestionAttempt.number.desc())
+               QuestionAttempt.answered_at.is_(None),
+               QuestionAttempt.superseded_at.is_(None))
+        .order_by(QuestionAttempt.number.desc(), QuestionAttempt.revision.desc())
     )
     if attempt is None:
         return None
@@ -106,6 +120,10 @@ def offer_question(
     prompt_version: str = "v1", schema_version: str = "question_v1",
     dedup_enforce: bool = False,
     expected_bonus_topic_index: int | None = None,
+    replace_question_id: UUID | None = None,
+    replace_attempt_id: UUID | None = None,
+    replace_manual: bool = False,
+    category_operation_key: str | None = None,
 ) -> tuple[QuestionAttempt, Question]:
     """Store one already-validated candidate, or return the cached pending one.
 
@@ -114,14 +132,15 @@ def offer_question(
     function, so slow generation does not hold the game row lock.
     """
     try:
+        if dedup_enforce or replace_question_id is not None:
+            # Global lock order: player before run for all debits and tagged dedup.
+            db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         if dedup_enforce:
             from tagging.contract import TaggedQuestion
             from tagging.core import require_unique
             from tagging.repository import history_for_user
             if not isinstance(question, TaggedQuestion):
                 raise GameConflict("Tagged workflow requires verified fact metadata")
-            # Serialize ALL question commits for this player across game runs.
-            db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
@@ -131,13 +150,57 @@ def offer_question(
                 and run.bonus_topic_index != expected_bonus_topic_index):
             raise GameConflict("Bonus topic changed during generation")
         cached = pending_question(db, run_id=run.id)
-        if cached:
+        replacing = replace_question_id is not None
+        old_attempt = None
+        switch_price = None
+        if replacing:
+            from persistence.models import WalletTransaction
+            from star_perks import PerkUnavailable, category_change_price
+            if not category_operation_key or replace_attempt_id is None:
+                raise GameConflict("Missing category operation identity")
+            if cached is None or cached[0].id != replace_attempt_id or cached[0].question_id != replace_question_id:
+                # A correctly replayed request may arrive after its replacement
+                # committed; it must not deduct again.
+                prior = db.scalar(select(WalletTransaction).where(
+                    WalletTransaction.idempotency_key == category_operation_key))
+                if (prior is not None and cached is not None
+                        and prior.user_id == user_id and prior.run_id == run_id
+                        and prior.reason == ("star/silver/choose-category" if replace_manual
+                                             else "star/silver/random-category")):
+                    db.commit()
+                    return cached
+                raise GameConflict("Question changed during category generation")
+            old_attempt, old_question = cached
+            if run.status != "main":
+                raise GameConflict("Category perks are limited to the main game")
+            if category == db.get(Topic, old_question.topic_id).labels.get("en"):
+                raise GameConflict("New category matches current category")
+            allowed = run.allowed_categories if run.allowed_categories is not None else __import__("consts").QUESTION_CATEGORIES
+            switch_price = category_change_price(
+                allowed_count=len(allowed),
+                changes_used=old_attempt.category_change_count,
+                manual_used=old_attempt.manual_category_used,
+                manual=replace_manual,
+            )
+            if category not in allowed:
+                raise GameConflict("Category excluded from this game")
+            previous_topics = set(db.scalars(select(Topic.slug)
+                .join(Question, Question.topic_id == Topic.id)
+                .join(QuestionAttempt, QuestionAttempt.question_id == Question.id)
+                .where(QuestionAttempt.run_id == run_id,
+                       QuestionAttempt.number == old_attempt.number)))
+            if category_slug(category) in previous_topics:
+                raise GameConflict("Category already used in the current slot")
+        elif cached:
             db.commit()
             return cached
+        if run.allowed_categories is not None and category not in run.allowed_categories:
+            raise GameConflict("Category excluded from this game")
         if dedup_enforce:
             # Atomic recheck after another parallel request may have committed.
             require_unique(question, history_for_user(db, user_id))
-        expected_difficulty = game_state(run).current_difficulty
+        state = game_state(run, db)
+        expected_difficulty = state.current_difficulty
         if question.difficulty != expected_difficulty:
             raise GameConflict("Wrong question difficulty for current game state")
         topic = db.scalar(select(Topic).where(Topic.slug == category_slug(category)))
@@ -179,17 +242,48 @@ def offer_question(
         if dedup_enforce:
             from tagging.repository import save_metadata
             save_metadata(db, stored, question)
+            # Generator estimates are recorded once, separately from quality
+            # verdicts. Never ask Terra/the critic to approve these numbers.
+            if question.plausibility is not None:
+                score_record = db.scalar(select(QuestionReview.id).where(
+                    QuestionReview.question_id == stored.id,
+                    QuestionReview.checker_type == "generator_plausibility",
+                ))
+                if score_record is None:
+                    db.add(QuestionReview(
+                        question_id=stored.id,
+                        checker_type="generator_plausibility",
+                        provider=provider, model=model,
+                        contract_version="generator_plausibility_v1",
+                        decision="unverified_estimate",
+                        issues=[], details={"scores": question.plausibility},
+                    ))
             # The reviewer runs BEFORE the DB transaction; persist its full
             # accepted verdict alongside the question, tags and attempt.
             # PrivateAttr remains absent from all player-facing JSON.
             review = question._review_report
             if review is not None:
                 db.add(QuestionReview(question_id=stored.id, **review))
-        next_number = run.correct_main_answers + 1
+        next_number = 16 if run.status == "bonus" else state.main_question_index + 1
+        if replacing:
+            from persistence.star_economy import spend_star
+            # All expensive provider work is finished; spend and replace as a
+            # single PostgreSQL transaction, with both player/run row locks.
+            spend_star(
+                db, user_id=user_id, run_id=run.id, tier="silver",
+                amount=switch_price,
+                action="choose-category" if replace_manual else "random-category",
+                operation_key=category_operation_key,
+            )
+            old_attempt.superseded_at = _now()
+            run.hints_used += 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
             number=next_number,
             requested_difficulty=expected_difficulty,
+            revision=old_attempt.revision + 1 if replacing else 0,
+            category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
+            manual_category_used=old_attempt.manual_category_used + (1 if replace_manual else 0) if replacing else 0,
         )
         db.add(attempt)
         if run.status == "bonus":
@@ -224,7 +318,7 @@ def record_answer(
             raise GameConflict("No matching unanswered question")
 
         now = _now()
-        state = game_state(run)
+        state = game_state(run, db)
         is_correct = selected == question.correct_key
         result = state.submit_answer(is_correct)
 
@@ -246,6 +340,148 @@ def record_answer(
             ))
         db.commit()
         return result, question.correct_key
+    except Exception:
+        db.rollback()
+        raise
+
+
+def skip_main_question(
+    db: Session, *, run_id: UUID, user_id: UUID,
+    question_id: UUID, request_id: UUID,
+) -> GameState:
+    """Buy one gold skip; debit and question advancement commit together.
+
+    The attempt is marked completed with no selected key/correctness. A
+    deterministic idempotency key prevents a repeated HTTP request from
+    accidentally skipping the following question.
+    """
+    from persistence.models import WalletTransaction
+    from persistence.star_economy import lock_user_stars, spend_star
+    from star_perks import PerkUnavailable
+
+    operation_key = f"star:{user_id}:{request_id}:skip"
+    try:
+        # Consistent global lock order: user first, then game.
+        lock_user_stars(db, user_id)
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        existing = db.scalar(select(WalletTransaction).where(
+            WalletTransaction.idempotency_key == operation_key
+        ))
+        if existing is not None:
+            if (existing.user_id != user_id or existing.run_id != run_id
+                    or existing.reason != "star/gold/skip-question"
+                    or existing.amount != -1):
+                raise PerkUnavailable("Idempotency key reused")
+            result = game_state(run, db)
+            db.commit()
+            return result
+        if run.status != "main":
+            raise GameConflict("Question skip is not available outside main rounds")
+        cached = pending_question(db, run_id=run.id)
+        if cached is None:
+            raise GameConflict("No pending question to skip")
+        attempt, _ = cached
+        if attempt.question_id != question_id:
+            raise GameConflict("Question has changed")
+
+        spend_star(
+            db, user_id=user_id, run_id=run_id, tier="gold", amount=1,
+            action="skip-question", operation_key=operation_key,
+        )
+        state = game_state(run, db)
+        state.skip_main_question()
+        now = _now()
+        attempt.answered_at = now
+        attempt.selected_key = None
+        attempt.is_correct = None
+        run.hints_used = state.hints_used
+        run.status = state.phase
+        if state.phase == "completed":
+            run.finished_at = now
+        db.commit()
+        return state
+    except Exception:
+        db.rollback()
+        raise
+
+
+def question_plausibility(db: Session, question_id: UUID) -> dict | None:
+    """Read the original generator estimate; never request or infer a re-score."""
+    review = db.scalar(select(QuestionReview).where(
+        QuestionReview.question_id == question_id,
+        QuestionReview.checker_type == "generator_plausibility",
+    ).order_by(QuestionReview.created_at.asc(), QuestionReview.id.asc()))
+    if review is None or not isinstance(review.details, dict):
+        return None  # Old verified question: the pure helper uses neutral 50.
+    scores = review.details.get("scores")
+    return scores if isinstance(scores, dict) else None
+
+
+def hidden_choices(db: Session, attempt: QuestionAttempt,
+                   question: Question) -> tuple[str, ...]:
+    """Reconstruct stable ties from persisted attempt UUID and score record."""
+    import random
+    from star_perks import choose_to_hide
+
+    if not attempt.hints_used:
+        return ()
+    if attempt.hints_used not in (1, 2):
+        raise GameConflict("Invalid hidden answer count")
+    return choose_to_hide(
+        question.correct_key, question_plausibility(db, question.id),
+        count=attempt.hints_used, rng=random.Random(attempt.id.int),
+    )
+
+
+def hide_wrong_options(
+    db: Session, *, run_id: UUID, user_id: UUID, question_id: UUID,
+    count: int, request_id: UUID,
+) -> tuple[QuestionAttempt, Question]:
+    """Pay bronze and hide lowest-scored false choices, as one transaction.
+
+    The server persists 0/1/2 hidden count on QuestionAttempt. For a given
+    attempt UUID, generated scores and deterministic tie shuffle reproduce
+    exactly the same set after restart. One 2-option action costs 3 bronze;
+    two separate 1-option actions cost 2+2.
+    """
+    from persistence.models import WalletTransaction
+    from persistence.star_economy import lock_user_stars, spend_star
+    from star_perks import PerkUnavailable, remove_price
+
+    operation_key = f"star:{user_id}:{request_id}:hide"
+    try:
+        lock_user_stars(db, user_id)
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        previous = db.scalar(select(WalletTransaction).where(
+            WalletTransaction.idempotency_key == operation_key
+        ))
+        if previous is not None:
+            if (previous.user_id != user_id or previous.run_id != run_id
+                    or previous.reason != f"star/bronze/hide-{count}"
+                    or previous.amount not in (-2, -3)):
+                raise PerkUnavailable("Idempotency key reused")
+            cached = pending_question(db, run_id=run.id)
+            if cached is None or cached[0].question_id != question_id:
+                raise GameConflict("Previous hint already applied to an old question")
+            db.commit()
+            return cached
+        if run.status != "main":
+            raise GameConflict("No hints on bonus or finished games")
+        cached = pending_question(db, run_id=run.id)
+        if cached is None or cached[0].question_id != question_id:
+            raise GameConflict("No matching unanswered question")
+        attempt, question = cached
+        price = remove_price(attempt.hints_used, count)
+        # Validate sorting and scores BEFORE spending any stars.
+        hidden_choices(db, attempt, question)
+        spend_star(db, user_id=user_id, run_id=run_id, tier="bronze",
+                   amount=price, action=f"hide-{count}",
+                   operation_key=operation_key)
+        attempt.hints_used += count
+        run.hints_used += 1  # One action, whether it hides one or two.
+        db.commit()
+        db.refresh(attempt)
+        return attempt, question
     except Exception:
         db.rollback()
         raise

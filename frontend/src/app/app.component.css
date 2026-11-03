@@ -22,6 +22,7 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 .question-label { color: #97c9f7; font-size: 12px; font-weight: 800; letter-spacing: .15em; }
 .bonus { color: #f6d88c; margin-inline-start: 10px; }
 .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.answers .hidden-answer-slot { min-height: 74px; visibility: hidden; pointer-events: none; }
 .answers button { background: #26294a; border: 1px solid #515879; color: #eff2ff; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; text-align: start; gap: 14px; min-height: 74px; }
 .answers button:hover:not(:disabled), .answers button:focus-visible { border-color: #8ce9ef; background: #32375d; outline: none; }
 .letter { display: grid; place-items: center; border-radius: 9px; border: 1px solid #6c769e; flex: 0 0 36px; height: 36px; color: #a3dce8; font-weight: 800; }
@@ -332,3 +333,132 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .outline-button:hover:not(:disabled) { background: rgba(255, 255, 255, .09); }
 .outline-button:focus-visible { outline: 2px solid #c4b2ff; outline-offset: 3px; }
 .outline-button:disabled { opacity: .55; cursor: not-allowed; }
+
+
+/* Spendable stars are exchanged in-place between adjacent tiers. */
+.star-items-exchange {
+  /* Bronze → silver → gold remains left-to-right even in RTL UI. */
+  direction: ltr;
+  grid-template-columns: minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr) minmax(0,1fr);
+  gap: 4px;
+  align-items: stretch;
+}
+.star-items-exchange .star-item { padding: 8px 1px; }
+.exchange-pair {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 3px;
+}
+.exchange-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  min-height: 27px;
+  border: 1px solid #6b729d;
+  border-radius: 7px;
+  background: #2a3054;
+  color: #ccedfa;
+  cursor: pointer;
+  transition: background .16s, border-color .16s;
+  font: inherit;
+  line-height: 1;
+}
+.exchange-arrow span { font-size: 16px; line-height: 16px; }
+.exchange-arrow small { font-size: 8px; line-height: 10px; color: #aeb8d5; }
+.exchange-arrow:hover:not(:disabled) {
+  border-color: #8ce9ef;
+  background: #39436b;
+}
+.exchange-arrow:focus-visible { outline: 2px solid #c4b2ff; outline-offset: 2px; }
+.exchange-arrow:disabled { opacity: .36; cursor: not-allowed; }
+.category-pregame-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 4px 0 0;
+}
+.category-pregame-action .outline-button { padding: 11px 14px; font-size: 13px; }
+.perk-shop { border-top: 1px solid #ffffff22; margin-top: 22px; padding-top: 18px; }
+.perk-shop h3 { margin: 0 0 10px; font-size: 16px; }
+.perk-counter { font-size: 12px; color: #aeb5d4; margin: 8px 0; }
+.perk-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.perk-actions button {
+  border-radius: 9px;
+  padding: 9px 12px;
+  border: 1px solid #69749e;
+  color: #ecf3ff;
+  background: #292d50;
+}
+.perk-actions button:disabled { opacity: .46; cursor: not-allowed; }
+@media (max-width: 640px) {
+  .star-items-exchange {
+    grid-template-columns: minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr) minmax(0,1fr);
+    gap: 3px;
+  }
+  .star-items-exchange .star-item { flex-direction: column; }
+  .exchange-arrow span { font-size: 15px; }
+  .exchange-arrow small { font-size: 7px; }
+}
+
+/* Paid pre-game category exclusions and silver shop. */
+.category-preferences {
+  border: 1px solid #ffffff25;
+  border-radius: 12px;
+  padding: 14px;
+  background: #272b4a;
+  margin: 10px 0;
+}
+.category-preferences h3 { font-size: 15px; margin: 0 0 6px; }
+.category-preferences p { color: #b7c0e1; font-size: 12px; line-height: 1.5; }
+.category-exclusion-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #626988;
+  border-radius: 10px;
+  padding: 9px;
+  display: grid;
+  gap: 7px;
+}
+.category-exclusion-list label {
+  display: flex;
+  flex-direction: row;
+  gap: 9px;
+  align-items: center;
+  color: #dbe0f7;
+  font-size: 12px;
+  cursor: pointer;
+}
+.category-exclusion-list input { accent-color: #8ce9ef; }
+.category-preferences button { font-size: 12px; margin-top: 10px; }
+.perk-current-category { font-size: 12px; color: #b6e8ee; margin: 9px 0; }
+.perk-actions select {
+  min-width: 190px;
+  flex: 1;
+  max-width: 350px;
+  padding: 9px;
+  border-radius: 9px;
+  background: #292d50;
+  border: 1px solid #69749e;
+  color: #f0efff;
+  font-size: 12px;
+}
+
+/* Compact, collapsible in-question perks. Payment colors match the wallet tiers. */
+.round-summary { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px; font-size: 12px; color: #c9d4f1; }
+.shop-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; border: 1px solid #69749e; border-radius: 11px; padding: 11px 15px; background: #292d50; color: #f0efff; font: inherit; font-weight: 800; cursor: pointer; }
+.shop-toggle:hover { background: #353c67; }
+.shop-toggle:focus-visible { outline: 2px solid #8ce9ef; outline-offset: 3px; }
+.shop-content { margin-top: 15px; }
+.tier-price { font-weight: 800; white-space: nowrap; }
+.tier-price.bronze { color: #e4a377; }
+.tier-price.silver { color: #c2d3e8; }
+.tier-price.gold { color: #ffd26f; }
+.question-generation { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 140px; color: #c9d4f1; font-weight: 650; font-size: 17px; text-align: center; }
+.question-generation .gear-loader { --size: 1.4px; margin-top: 0; --gear-hole: #181a37; }
+@media (max-width: 640px) { .round-summary { flex-direction: column; gap: 5px; } .question-generation { min-height: 110px; } }

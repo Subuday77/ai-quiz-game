@@ -9,10 +9,12 @@ import { RESET_COPY, RESET_LANGUAGE_NAMES } from './localization/reset-copy';
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
 type StarTier = 'bronze' | 'silver' | 'gold' | 'platinum';
+type ConvertibleTier = Exclude<StarTier, 'platinum'>;
 type StarCounts = Record<StarTier, number>;
 type AuthMode = 'login' | 'register';
 
 const GAME_API = '/api/v2/games';
+const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
@@ -40,14 +42,28 @@ interface GameInfo {
   language: string;
   phase: string;
   correct_main_answers: number;
+  main_question_index?: number;
+  skipped_questions?: number;
 }
 interface PublicQuestion {
   question_id: string;
   number: number;
   difficulty: number;
   question: string;
-  answers: Record<Choice, string>;
+  answers: Partial<Record<Choice, string>>;
   bonus: boolean;
+  hidden_count: number;
+}
+interface CategoryInfo {
+  allowed: string[];
+  current: string | null;
+  alternatives: string[];
+  changes_used: number;
+  manual_used: number;
+  can_change: boolean;
+  can_choose: boolean;
+  can_exclude: boolean;
+  minimum_allowed: number;
 }
 interface AnswerFeedback {
   correct: boolean;
@@ -106,9 +122,15 @@ export class AppComponent implements OnInit, OnDestroy {
   correctAnswers = 0;
 
   selectedLanguage = 'English';
+  private gameLanguage = '';
+  languageSaving = false;
   screen: Screen = 'setup';
   gameId = '';
   resumeAvailable = false;
+  // A saved round is only an offer, not the selected game. Keeping it
+  // separate lets the player choose a new question language and new game.
+  resumeCandidate: GameInfo | null = null;
+  private resumeRunLanguage = '';
   current: PublicQuestion | null = null;
   feedback: AnswerFeedback | null = null;
   loading = false;
@@ -118,7 +140,7 @@ export class AppComponent implements OnInit, OnDestroy {
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
-  private warningMs = 8000;
+  private warningMs = 15000;
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
@@ -128,6 +150,18 @@ export class AppComponent implements OnInit, OnDestroy {
   stars: string[] = [];
   currentStars: StarCounts = emptyStars();
   totalStars: StarCounts = emptyStars();
+  spendableStars: StarCounts = emptyStars();
+  gameCorrectAnswers = 0;
+  skippedQuestions = 0;
+  shopOpen = false;
+  generatingNextQuestion = false;
+  perksBusy = false;
+  perksError = '';
+  showCategoryExclusions = false;
+  categoryInfo: CategoryInfo | null = null;
+  categoriesToExclude: string[] = [];
+  chosenCategory = '';
+  categoryLoading = false;
 
   constructor(private readonly http: HttpClient) {
     this.locale = new LocalizationStore(http);
@@ -135,10 +169,76 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // A game ID is allocated before the first question arrives. While that
   // request is pending, the setup button must not claim the game is resumable.
+  get currentQuestionNumber(): number {
+    // progress tracks answered/skipped slots, not the number on screen.
+    // While Q1 is being generated progress is 0, but the current slot is 1.
+    // On the results screen retain the final question's number.
+    if (this.current) return this.current.number;
+    return this.screen === 'done'
+      ? Math.max(1, this.progress)
+      : Math.min(15, this.progress + 1);
+  }
+
+  get currentQuestionTotal(): number {
+    return this.current?.bonus ? 16 : 15;
+  }
+
+  get canEditPregameLanguage(): boolean {
+    return this.screen === 'setup' && (
+      !this.gameId || this.resumeAvailable ||
+      (this.progress === 0 && this.categoryInfo?.current === null)
+    );
+  }
+
+  // An excluded-category payment already allocated a game. Update its
+  // language in PostgreSQL, not just the dropdown, before Q1 is offered.
+  changeQuestionLanguage(language: string): void {
+    if (!this.languages.includes(language)) return;
+    if (!this.gameId || this.resumeAvailable) {
+      this.selectedLanguage = language;
+      return;
+    }
+    if (!this.canEditPregameLanguage || !this.account || this.loading ||
+        this.languageSaving || this.perksBusy || this.categoryLoading) {
+      this.selectedLanguage = this.gameLanguage;
+      return;
+    }
+    if (language === this.gameLanguage) {
+      this.selectedLanguage = language;
+      return;
+    }
+    const gameId = this.gameId;
+    const accountId = this.account.id;
+    this.languageSaving = true;
+    this.selectedLanguage = language;
+    this.error = '';
+    this.subscriptions.add(this.http.patch<GameInfo>(
+      GAME_API + '/' + gameId + '/language', { language },
+    ).pipe(timeout(10000), finalize(() => {
+      if (this.gameId === gameId) this.languageSaving = false;
+    })).subscribe({
+      next: (game) => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        this.gameLanguage = game.language;
+        this.selectedLanguage = game.language;
+      },
+      error: (err: unknown) => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else {
+          this.selectedLanguage = this.gameLanguage;
+          this.error = 'game.languageUpdateFailed';
+        }
+      },
+    }));
+  }
+
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    return this.gameId ? 'game.resume' : 'game.start';
+    if (this.gameId && this.categoryInfo && this.categoryInfo.current === null && this.progress === 0)
+      return 'perks.startQuestions';
+    return this.gameId || this.resumeCandidate ? 'game.resume' : 'game.start';
   }
 
   ngOnInit(): void {
@@ -277,7 +377,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get correctAnswerText(): string {
     return this.feedback && this.current
-      ? this.current.answers[this.feedback.correct_answer]
+      ? (this.current.answers[this.feedback.correct_answer] ?? '')
       : '';
   }
   get gameEnded(): boolean {
@@ -404,16 +504,78 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
+    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+        this.authBusy || this.restoringGame || this.categoryLoading ||
+        this.languageSaving || this.categoriesToExclude.length > 0) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
     }
-    if (this.gameId) {
-      this.resumeAvailable = false;
+    if (this.resumeCandidate) {
+      const run = this.resumeCandidate;
+      this.resumeCandidate = null;
+      this.gameId = run.game_id;
+      this.gameLanguage = run.language;
+      this.selectedLanguage = run.language;
+      this.progress = run.main_question_index ?? run.correct_main_answers;
+      this.gameCorrectAnswers = run.correct_main_answers;
+      this.skippedQuestions = run.skipped_questions ?? 0;
+      this.currentStars = {
+        bronze: run.correct_main_answers >= 5 ? 1 : 0,
+        silver: run.correct_main_answers >= 10 ? 1 : 0,
+        gold: run.correct_main_answers >= 15 ? 1 : 0,
+        platinum: 0,
+      };
+      this.stars = this.starTiers.filter(tier => this.currentStars[tier.key] > 0)
+        .map(tier => tier.key);
+      this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
     }
+    if (this.gameId) {
+      // A recovered round might be shown alongside an editable new-game
+      // language selector. Resume always restores the original run language.
+      if (this.resumeAvailable && this.resumeRunLanguage)
+        this.selectedLanguage = this.resumeRunLanguage;
+      this.resumeRunLanguage = '';
+      this.showCategoryExclusions = false;
+      this.resumeAvailable = false;
+      this.generatingNextQuestion = this.progress > 0;
+      this.loadQuestion();
+      return;
+    }
+    this.createGame(false);
+  }
+
+  startFreshGame(): void {
+    // Keep the saved round intact until the new one is successfully created.
+    // If POST /games fails the player can still choose Resume.
+    if (!this.resumeAvailable || !this.account || this.loading || this.perksBusy ||
+        this.configLoading || this.authLoading || this.authBusy || this.restoringGame ||
+        this.categoryLoading || this.languageSaving) return;
+    this.createGame(false);
+  }
+
+  openCategoryExclusions(): void {
+    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+        this.authBusy || this.restoringGame || this.categoryLoading ||
+        this.languageSaving) return;
+    if (!this.account) {
+      void this.openAuthDialog('login');
+      return;
+    }
+    if (!this.gameId || this.resumeAvailable) {
+      // Allocate an empty game before taking payment. No question is issued
+      // until the player explicitly presses Start questions.
+      this.createGame(true);
+      return;
+    }
+    if (this.categoryInfo && !this.categoryInfo.can_exclude) return;
+    this.showCategoryExclusions = !this.showCategoryExclusions;
+    if (this.showCategoryExclusions && !this.categoryInfo) this.loadCategoryInfo();
+  }
+
+  private createGame(forExclusions: boolean): void {
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
@@ -421,14 +583,27 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
+        this.resumeCandidate = null;
+        this.resumeRunLanguage = '';
+        this.categoryInfo = null;
+        this.categoriesToExclude = [];
+        this.chosenCategory = '';
         this.stars = [];
         this.currentStars = emptyStars();
         this.progress = 0;
+        this.gameCorrectAnswers = 0;
+        this.skippedQuestions = 0;
+        this.generatingNextQuestion = false;
+        this.shopOpen = false;
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
-        this.loadQuestion();
+        this.screen = 'setup';
+        this.showCategoryExclusions = forExclusions;
+        if (forExclusions) this.loadCategoryInfo();
+        else this.loadQuestion();
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -439,8 +614,17 @@ export class AppComponent implements OnInit, OnDestroy {
 
   loadQuestion(): void {
     if (!this.gameId || this.loading || !this.account) return;
+    // An allocated run is already in progress, even if its very first AI
+    // question fails. Never leave the pregame controls visible on GET failure.
+    // Also discard stale feedback / answer buttons when loading a new slot.
+    this.screen = 'question';
+    this.current = null;
+    this.feedback = null;
+    this.showCategoryExclusions = false;
+    this.resumeAvailable = false;
     this.loading = true;
     this.questionLoading = true;
+    this.shopOpen = false;
     this.longWait = false;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
@@ -454,14 +638,17 @@ export class AppComponent implements OnInit, OnDestroy {
         warning.unsubscribe();
         this.loading = false;
         this.questionLoading = false;
+        this.generatingNextQuestion = false;
         this.longWait = false;
       }),
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.progress = Math.max(this.progress, Math.min(15, question.number - 1));
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
+        this.loadCategoryInfo();
       },
       error: (error: unknown) => {
         if (this.isUnauthorized(error)) {
@@ -492,7 +679,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   retryQuestion(): void {
-    if (this.canRetryQuestion && !this.loading) this.loadQuestion();
+    if (this.canRetryQuestion && !this.loading) {
+      this.generatingNextQuestion = this.progress > 0;
+      this.loadQuestion();
+    }
   }
 
   returnToMenuAfterDuplicate(): void {
@@ -501,6 +691,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // round without losing progress or opening a new game in PostgreSQL.
     this.screen = 'setup';
     this.resumeAvailable = !!this.gameId;
+    this.resumeRunLanguage = this.selectedLanguage;
     this.current = null;
     this.feedback = null;
     this.canRetryQuestion = false;
@@ -509,7 +700,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   answer(choice: Choice): void {
-    if (this.loading || !this.current || this.screen !== 'question' || !this.account) return;
+    if (this.loading || this.perksBusy || !this.current || this.screen !== 'question' || !this.account) return;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
@@ -521,7 +712,8 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.feedback = result;
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
-        this.progress = result.correct_main_answers;
+        this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
+        this.gameCorrectAnswers = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
           this.stars.push(result.achievement);
           this.currentStars[result.achievement] += 1;
@@ -551,6 +743,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.gameEnded) {
       this.screen = 'done';
     } else {
+      this.generatingNextQuestion = true;
       this.loadQuestion();
     }
   }
@@ -562,7 +755,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private signedIn(account: Account): void {
-    if (this.account?.id !== account.id) this.resetGameView();
+    if (this.account?.id !== account.id) {
+      this.resetGameView();
+      this.spendableStars = emptyStars();
+    }
     this.account = account;
     this.authLoading = false;
     this.locale.load(account.ui_language || 'en');
@@ -582,6 +778,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoringGame = false;
     this.account = null;
     this.totalStars = emptyStars();
+    this.spendableStars = emptyStars();
     this.gamesPlayed = 0;
     this.correctAnswers = 0;
     this.statsLoading = false;
@@ -595,7 +792,322 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loading = false;
   }
 
+  get exclusionCost(): number { return this.categoriesToExclude.length * 5; }
+
+  // Sort what the player actually sees, not the canonical English API values.
+  // Return a copy: the backend order and category identifiers stay unchanged.
+  sortCategoryLabels(categories: readonly string[]): string[] {
+    const collator = new Intl.Collator(this.locale.code, { sensitivity: 'base' });
+    return [...categories].sort((a, b) =>
+      collator.compare(this.locale.t('category.' + a), this.locale.t('category.' + b)) ||
+      a.localeCompare(b, 'en'));
+  }
+
+  get sortedAllowedCategories(): string[] {
+    return this.sortCategoryLabels(this.categoryInfo?.allowed ?? []);
+  }
+
+  toggleExcludedCategory(category: string, checked: boolean): void {
+    if (this.perksBusy || !this.categoryInfo?.can_exclude) return;
+    if (checked && !this.categoriesToExclude.includes(category))
+      this.categoriesToExclude = [...this.categoriesToExclude, category];
+    else if (!checked)
+      this.categoriesToExclude = this.categoriesToExclude.filter(value => value !== category);
+  }
+
+  private loadCategoryInfo(): void {
+    if (!this.account || !this.gameId) return;
+    const gameId = this.gameId;
+    this.categoryLoading = true;
+    this.subscriptions.add(this.http.get<CategoryInfo>(
+      GAME_API + '/' + gameId + '/categories',
+    ).pipe(timeout(10000), finalize(() => { this.categoryLoading = false; }))
+      .subscribe({
+        next: (info) => {
+          if (this.gameId !== gameId) return;
+          this.categoryInfo = info;
+          if (!info.alternatives.includes(this.chosenCategory))
+            this.chosenCategory = this.sortCategoryLabels(info.alternatives)[0] ?? '';
+          this.categoriesToExclude = this.categoriesToExclude.filter(
+            value => info.allowed.includes(value),
+          );
+        },
+        error: (err: unknown) => {
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.perksError = 'perks.categoriesUnavailable';
+        },
+      }));
+  }
+
+  async excludeCategories(): Promise<void> {
+    const info = this.categoryInfo;
+    if (!info?.can_exclude || !this.account || !this.gameId ||
+        !this.categoriesToExclude.length || this.perksBusy || this.loading ||
+        this.exclusionCost > this.spendableStars.silver ||
+        info.allowed.length - this.categoriesToExclude.length < 16) return;
+    const { default: Swal } = await import('sweetalert2');
+    const decision = await Swal.fire({
+      titleText: this.locale.t('perks.excludeTitle'),
+      text: this.locale.format('perks.excludeConfirm', {
+        count: this.categoriesToExclude.length, price: this.exclusionCost,
+      }),
+      showCancelButton: true,
+      confirmButtonText: this.locale.t('perks.confirm'),
+      cancelButtonText: this.locale.t('auth.cancel'),
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+    });
+    if (!decision.isConfirmed || this.perksBusy || !this.gameId) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    const gameId = this.gameId;
+    this.subscriptions.add(this.http.post<CategoryInfo>(
+      GAME_API + '/' + gameId + '/categories/exclude',
+      { categories: [...this.categoriesToExclude], request_id: crypto.randomUUID() },
+    ).pipe(timeout(15000), finalize(() => { this.perksBusy = false; }))
+      .subscribe({
+        next: (state) => {
+          if (this.gameId !== gameId) return;
+          this.categoryInfo = state;
+          this.categoriesToExclude = [];
+          this.showCategoryExclusions = false;
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.perksError = 'perks.actionFailed';
+        },
+      }));
+  }
+
+  async openCategoryChangeDialog(): Promise<void> {
+    const state = this.categoryInfo;
+    if (!state?.can_change || !this.current || this.current.bonus || this.screen !== 'question' ||
+        this.loading || this.perksBusy || this.spendableStars.silver < 1) return;
+    const { default: Swal } = await import('sweetalert2');
+    const style = { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
+    while (this.current && !this.loading && !this.perksBusy) {
+      const choice = await Swal.fire({
+        titleText: this.locale.t('perks.changeCategory'),
+        text: this.locale.t('perks.currentCategory') + ': ' +
+              this.locale.t('category.' + (this.categoryInfo?.current ?? '')),
+        showCancelButton: true,
+        showDenyButton: !!this.categoryInfo?.can_choose && this.spendableStars.silver >= 2,
+        confirmButtonText: this.locale.t('perks.randomCategory') + ' — 1 ' + this.locale.t('stars.silver') + ' ★',
+        denyButtonText: this.locale.t('perks.chooseCategory') + ' — 2 ' + this.locale.t('stars.silver') + ' ★',
+        cancelButtonText: this.locale.t('auth.cancel'),
+        ...style,
+      });
+      if (choice.isConfirmed) {
+        const pay = await Swal.fire({
+          titleText: this.locale.t('perks.randomCategory'),
+          text: this.locale.t('perks.randomConfirm'),
+          showCancelButton: true, showDenyButton: true,
+          confirmButtonText: this.locale.t('perks.confirmChange'),
+          denyButtonText: this.locale.t('perks.back'),
+          cancelButtonText: this.locale.t('auth.cancel'),
+          ...style,
+        });
+        if (pay.isDenied) continue;
+        if (pay.isConfirmed) this.changeCategory('random');
+        return;
+      }
+      if (choice.isDenied) {
+        const alternatives = this.sortCategoryLabels(this.categoryInfo?.alternatives ?? []);
+        const selected = await Swal.fire({
+          titleText: this.locale.t('perks.chooseCategory'),
+          input: 'select',
+          inputLabel: this.locale.t('perks.selectCategory'),
+          inputOptions: Object.fromEntries(alternatives.map(category =>
+            [category, this.locale.t('category.' + category)])),
+          inputValue: alternatives.includes(this.chosenCategory) ? this.chosenCategory : alternatives[0],
+          inputValidator: value => alternatives.includes(value) ? undefined : this.locale.t('perks.selectCategory'),
+          showCancelButton: true, showDenyButton: true,
+          confirmButtonText: this.locale.t('perks.confirmChange') + ' — 2 ' + this.locale.t('stars.silver') + ' ★',
+          denyButtonText: this.locale.t('perks.back'),
+          cancelButtonText: this.locale.t('auth.cancel'),
+          ...style,
+        });
+        if (selected.isDenied) continue;
+        if (selected.isConfirmed && alternatives.includes(String(selected.value))) {
+          this.chosenCategory = String(selected.value);
+          this.changeCategory('manual');
+        }
+      }
+      return;
+    }
+  }
+
+  changeCategory(mode: 'random' | 'manual'): void {
+    const current = this.current, state = this.categoryInfo;
+    if (!this.account || !current || current.bonus || !state ||
+        this.screen !== 'question' || this.loading || this.perksBusy ||
+        !state.can_change || (mode === 'manual' && !state.can_choose)) return;
+    if (mode === 'manual' && !state.alternatives.includes(this.chosenCategory)) return;
+    const cost = mode === 'manual' ? 2 : 1;
+    if (this.spendableStars.silver < cost) return;
+    const gameId = this.gameId;
+    const accountId = this.account.id;
+    const shopWasOpen = this.shopOpen;
+    // The confirmed category change can take as long as question generation.
+    // Hide the previous question immediately rather than leaving it actionable
+    // behind the closed SweetAlert dialog.
+    this.perksBusy = true;
+    this.loading = true;
+    this.questionLoading = true;
+    this.generatingNextQuestion = true;
+    this.current = null;
+    this.feedback = null;
+    this.shopOpen = false;
+    this.perksError = '';
+    this.longWait = false;
+    const warning = timer(this.warningMs).subscribe(() => {
+      if (this.gameId === gameId && this.questionLoading) this.longWait = true;
+    });
+    this.subscriptions.add(this.http.post<PublicQuestion>(
+      GAME_API + '/' + gameId + '/categories/change',
+      { question_id: current.question_id, mode,
+        category: mode === 'manual' ? this.chosenCategory : null,
+        request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs),
+           finalize(() => {
+             warning.unsubscribe();
+             // Session expiry clears the account and game, but must still
+             // release the pending UI flags for the next login.
+             if (this.account && (this.gameId !== gameId || this.account.id !== accountId)) return;
+             this.perksBusy = false;
+             this.loading = false;
+             this.questionLoading = false;
+             this.generatingNextQuestion = false;
+             this.longWait = false;
+           }))
+      .subscribe({
+        next: (question) => {
+          if (this.gameId !== gameId || this.account?.id !== accountId) return;
+          this.current = question;
+          this.loadCategoryInfo();
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.gameId !== gameId || this.account?.id !== accountId) return;
+          if (this.isUnauthorized(err)) {
+            this.sessionExpired();
+            return;
+          }
+          // A failed request must not strand the player on an empty question.
+          this.current = current;
+          this.shopOpen = shopWasOpen;
+          this.perksError = 'perks.categoryFailed';
+        },
+      }));
+  }
+
+  private refreshSpendableStars(): void {
+    if (!this.account) return;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.get<StarCounts>(STARS_API).pipe(
+      timeout(10000),
+    ).subscribe({
+      next: (values) => {
+        if (this.account?.id === accountId) this.spendableStars = values;
+      },
+      error: () => { this.perksError = 'perks.balanceUnavailable'; },
+    }));
+  }
+
+  removeOptions(count: 1 | 2): void {
+    const current = this.current;
+    if (!this.account || !current || current.bonus || this.screen !== 'question' ||
+        this.perksBusy || this.loading) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<PublicQuestion>(
+      GAME_API + '/' + this.gameId + '/hints/remove',
+      { question_id: current.question_id, count, request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => { this.perksBusy = false; }))
+     .subscribe({
+      next: (question) => {
+        if (this.current?.question_id === current.question_id) this.current = question;
+        this.refreshSpendableStars();
+      },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.actionFailed';
+      },
+    }));
+  }
+
+  skipCurrentQuestion(): void {
+    const current = this.current;
+    if (!this.account || !current || current.bonus || this.screen !== 'question' ||
+        this.perksBusy || this.loading) return;
+    this.perksBusy = true;
+    this.loading = true;
+    this.perksError = '';
+    this.current = null;
+    this.generatingNextQuestion = true;
+    this.questionLoading = true;
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/skip',
+      { question_id: current.question_id, request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs),
+           finalize(() => { this.perksBusy = false; }))
+     .subscribe({
+      next: (game) => {
+        this.progress = game.main_question_index ?? Math.min(15, current.number);
+        this.gameCorrectAnswers = game.correct_main_answers;
+        this.skippedQuestions = game.skipped_questions ?? this.skippedQuestions + 1;
+        this.current = null;
+        this.refreshStats();
+        this.refreshSpendableStars();
+        if (game.phase === 'completed') {
+          this.finishedPhase = 'completed';
+          this.forgetActiveGame();
+          this.screen = 'done';
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+          this.loading = false;
+        } else {
+          // Finalize loading before asking for the next main slot.
+          this.loading = false;
+          this.loadQuestion();
+        }
+      },
+      error: (err: unknown) => {
+        this.loading = false;
+        this.questionLoading = false;
+        this.generatingNextQuestion = false;
+        this.current = current;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.actionFailed';
+      },
+    }));
+  }
+
+  exchangeBetween(source: ConvertibleTier, target: ConvertibleTier): void {
+    const upward = (source === 'bronze' && target === 'silver') ||
+                   (source === 'silver' && target === 'gold');
+    const downward = (source === 'silver' && target === 'bronze') ||
+                     (source === 'gold' && target === 'silver');
+    if (!this.account || this.perksBusy || this.loading || (!upward && !downward)) return;
+    const amount = upward ? 10 : 1; // One click = one adjacent-tier exchange.
+    if (this.spendableStars[source] < amount) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<StarCounts>(STARS_API + '/exchange', {
+      source, target, amount, request_id: crypto.randomUUID(),
+    }).pipe(timeout(15000), finalize(() => { this.perksBusy = false; }))
+     .subscribe({
+      next: (balances) => { this.spendableStars = balances; },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.exchangeFailed';
+      },
+    }));
+  }
+
   private refreshStats(): void {
+    this.refreshSpendableStars();
     const accountId = this.account?.id;
     if (!accountId) return;
     const version = ++this.statsVersion;
@@ -642,21 +1154,14 @@ export class AppComponent implements OnInit, OnDestroy {
           this.removeSavedGame(accountId);
           return;
         }
-        this.gameId = run.game_id;
+        // The backend confirmed the saved run is still open. Don't bind it to
+        // the UI as the active run until the player explicitly chooses Resume.
+        this.resumeCandidate = run;
+        this.resumeRunLanguage = run.language;
         this.resumeAvailable = true;
-        this.selectedLanguage = run.language;
-        this.progress = run.correct_main_answers;
         this.current = null;
         this.feedback = null;
         this.screen = 'setup';
-        this.currentStars = {
-          bronze: run.correct_main_answers >= 5 ? 1 : 0,
-          silver: run.correct_main_answers >= 10 ? 1 : 0,
-          gold: run.correct_main_answers >= 15 ? 1 : 0,
-          platinum: 0,
-        };
-        this.stars = this.starTiers.filter((tier) => this.currentStars[tier.key] > 0)
-          .map((tier) => tier.key);
       },
       error: (err: unknown) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
@@ -680,7 +1185,9 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (run) => {
         this.loading = false;
         this.canRetryQuestion = false;
-        this.progress = run.correct_main_answers;
+        this.progress = run.main_question_index ?? run.correct_main_answers;
+        this.gameCorrectAnswers = run.correct_main_answers;
+        this.skippedQuestions = run.skipped_questions ?? 0;
         if (run.phase === 'completed' || run.phase === 'lost') {
           this.forgetActiveGame();
           this.feedback = null;
@@ -694,6 +1201,7 @@ export class AppComponent implements OnInit, OnDestroy {
           this.finishedPhase = null;
           this.screen = 'setup';
           this.resumeAvailable = true;
+          this.resumeRunLanguage = run.language;
         }
         this.error = 'game.answerAlreadyRecorded';
       },
@@ -706,14 +1214,26 @@ export class AppComponent implements OnInit, OnDestroy {
     this.duplicateExhausted = false;
     this.longWait = false;
     this.gameId = '';
+    this.gameLanguage = '';
+    this.languageSaving = false;
     this.resumeAvailable = false;
+    this.resumeCandidate = null;
+    this.resumeRunLanguage = '';
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
     this.error = '';
     this.progress = 0;
+    this.gameCorrectAnswers = 0;
+    this.skippedQuestions = 0;
+    this.shopOpen = false;
+    this.generatingNextQuestion = false;
     this.stars = [];
     this.currentStars = emptyStars();
+    this.categoryInfo = null;
+    this.categoriesToExclude = [];
+    this.chosenCategory = '';
+    this.showCategoryExclusions = false;
     this.screen = 'setup';
   }
 
