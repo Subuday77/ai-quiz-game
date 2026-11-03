@@ -15,6 +15,19 @@ def _fold(text: str) -> str:
 # QA report: AI_Quiz_Game_P1_Final_Live_QA(1).md, 2026-11-03.
 # We exclude the exact BAD FORMULATION, not all questions about this topic.
 _KNOWN_ITEMS = [
+    # P2 browser QA, 2026-11-03: exact formulations only.
+    ("paper_ambiguous_cotton_bamboo",
+     "Какое растение обычно используют для изготовления бумаги?",
+     "Бамбук"),
+    ("mandelbrot_incomplete_definition",
+     "Какой математик дал имя множеству, определяемому в комплексной плоскости итерацией отображения z -> z^2 + c?",
+     "Бенуа Мандельброт"),
+    ("oersted_semantic_answer_leak",
+     "Какое открытие сделал датский физик Ханс Кристиан Эрстед в 1820 году, наблюдая отклонение магнитной стрелки рядом с проводом, по которому шел ток?",
+     "Связь электрического тока и магнетизма"),
+    ("third_man_ambiguous_historical_attribution",
+     "Какой античный философ сформулировал «третий человек» как возражение против платоновской теории идей?",
+     "Аристотель"),
     ("calvados_ambiguous_apple_pear",
      "Из какого фрукта традиционно делают кальвадос?", "Из яблока"),
     ("savarin_surname_shortcut",
