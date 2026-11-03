@@ -175,6 +175,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from tagging.core import require_unique, critic_neighbors, threshold
         from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
         from tagging.quality_skill.fact_tool import known_false_fact
+        from tagging.quality_skill.known_issues import known_qa_issue
         from tagging.repair import repair_four_entity_tags, validation_retry_hint
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
@@ -242,6 +243,12 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 if contradiction is not None:
                     event("known_fact_contradiction_blocked",
                           code=contradiction["code"])
+                    raise QualityRegenerationError()
+                qa_hold = known_qa_issue(question)
+                if qa_hold is not None:
+                    # Exact known QA regressions (including ambiguous paper)
+                    # should not be regenerated with the same bad wording.
+                    event("known_qa_issue_blocked", code=qa_hold)
                     raise QualityRegenerationError()
             # Strict deterministic Python check runs BEFORE the paid critic.
             if tagged:
