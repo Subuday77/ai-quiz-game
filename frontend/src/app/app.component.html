@@ -53,16 +53,52 @@
     </div>
     <div class="star-panel">
       <div class="star-panel-title">
-        {{ locale.t('stars.allTime') }}
+        {{ locale.t('perks.balance') }}
         <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
       </div>
-      <div class="star-items">
-        <div class="star-item" *ngFor="let tier of starTiers" [ngClass]="tier.key"
-             [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + totalStars[tier.key]">
-          <span class="star-icon" aria-hidden="true">★</span>
-          <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
-          <strong class="star-number">{{ totalStars[tier.key] }}</strong>
-        </div>
+      <div class="star-items star-items-exchange">
+        <ng-container *ngFor="let tier of starTiers">
+          <div class="star-item" [ngClass]="tier.key"
+               [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + spendableStars[tier.key]">
+            <span class="star-icon" aria-hidden="true">★</span>
+            <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
+            <strong class="star-number">{{ spendableStars[tier.key] }}</strong>
+          </div>
+          <div class="exchange-pair" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
+            <ng-container *ngIf="tier.key === 'bronze'">
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('bronze', 'silver')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.bronze < 10"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })">
+                <span aria-hidden="true">→</span><small>10:1</small>
+              </button>
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('silver', 'bronze')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.silver < 1"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })">
+                <span aria-hidden="true">←</span><small>1:10</small>
+              </button>
+            </ng-container>
+            <ng-container *ngIf="tier.key === 'silver'">
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('silver', 'gold')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.silver < 10"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })">
+                <span aria-hidden="true">→</span><small>10:1</small>
+              </button>
+              <button type="button" class="exchange-arrow"
+                      (click)="exchangeBetween('gold', 'silver')"
+                      [disabled]="!account || perksBusy || loading || spendableStars.gold < 1"
+                      [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })"
+                      [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })">
+                <span aria-hidden="true">←</span><small>1:10</small>
+              </button>
+            </ng-container>
+          </div>
+        </ng-container>
       </div>
       <div class="stats-caption" *ngIf="account">
         <span *ngIf="statsLoading">{{ locale.t('stats.loading') }}</span>
@@ -70,37 +106,6 @@
         <span class="stats-warning" *ngIf="statsError" role="status">{{ locale.t(statsError) }}</span>
       </div>
     </div>
-  </section>
-
-  <section class="spendable-star-panel" *ngIf="account" aria-label="Spendable stars">
-    <div class="star-panel-title">{{ locale.t('perks.balance') }}</div>
-    <div class="spendable-grid">
-      <div *ngFor="let tier of starTiers">
-        <span>{{ locale.t('stars.' + tier.key) }}:</span>
-        <strong>{{ spendableStars[tier.key] }}</strong>
-      </div>
-    </div>
-    <div class="exchange-controls">
-      <label>{{ locale.t('perks.from') }}
-        <select [(ngModel)]="exchangeSource" [disabled]="perksBusy">
-          <option *ngFor="let tier of exchangeTiers" [ngValue]="tier">{{ locale.t('stars.' + tier) }}</option>
-        </select>
-      </label>
-      <label>{{ locale.t('perks.to') }}
-        <select [(ngModel)]="exchangeTarget" [disabled]="perksBusy">
-          <option *ngFor="let tier of exchangeTiers" [ngValue]="tier">{{ locale.t('stars.' + tier) }}</option>
-        </select>
-      </label>
-      <label>{{ locale.t('perks.amount') }}
-        <input type="number" min="1" step="1" [(ngModel)]="exchangeAmount" [disabled]="perksBusy" />
-      </label>
-      <button type="button" class="outline-button" (click)="exchangeStars()"
-              [disabled]="perksBusy || loading || exchangeSource === exchangeTarget ||
-                          exchangeAmount < 1 || spendableStars[exchangeSource] < exchangeAmount">
-        {{ locale.t('perks.exchange') }}
-      </button>
-    </div>
-    <p class="perk-subtitle">{{ locale.t('perks.rates') }}</p>
   </section>
 
   <section class="card">
@@ -125,7 +130,14 @@
       <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
-      <div class="category-preferences" *ngIf="gameId && categoryInfo?.can_exclude">
+      <div class="category-pregame-action" *ngIf="account && (!gameId || categoryInfo?.can_exclude)">
+        <button class="outline-button" type="button" (click)="openCategoryExclusions()"
+                [disabled]="loading || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
+          {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
+        </button>
+        <span class="perk-counter">{{ locale.t('perks.exclusionPriceShort') }}</span>
+      </div>
+      <div class="category-preferences" *ngIf="showCategoryExclusions && gameId && categoryInfo?.can_exclude">
         <h3>{{ locale.t('perks.excludeTitle') }}</h3>
         <p>{{ locale.t('perks.excludeHelp') }}</p>
         <div class="category-exclusion-list" role="group" aria-label="Excluded categories">
@@ -151,7 +163,7 @@
       </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="startGame()"
-                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame">
+                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
