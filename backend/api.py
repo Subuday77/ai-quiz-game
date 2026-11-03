@@ -425,7 +425,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     return question
 
 
-@app.get("/api/games/{game_id}/question", response_model=PublicQuestion)
+@app.get("/api/games/{game_id}/question", response_model=PublicQuestion,
+         response_model_exclude_defaults=True)
 def get_question(game_id: str) -> PublicQuestion:
     session = find_session(game_id)
     lock_start = perf_counter()
