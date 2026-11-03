@@ -125,6 +125,30 @@
       <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
+      <div class="category-preferences" *ngIf="gameId && categoryInfo?.can_exclude">
+        <h3>{{ locale.t('perks.excludeTitle') }}</h3>
+        <p>{{ locale.t('perks.excludeHelp') }}</p>
+        <div class="category-exclusion-list" role="group" aria-label="Excluded categories">
+          <label *ngFor="let category of categoryInfo!.allowed">
+            <input type="checkbox" [checked]="categoriesToExclude.includes(category)"
+                   [disabled]="loading || perksBusy"
+                   (change)="toggleExcludedCategory(category, $any($event.target).checked)" />
+            <span>{{ category }}</span>
+          </label>
+        </div>
+        <div class="perk-counter">
+          {{ locale.t('perks.excludeSelected') }}: {{ categoriesToExclude.length }}
+          · {{ locale.t('perks.price') }}: {{ exclusionCost }} {{ locale.t('stars.silver') }} ★
+          · {{ locale.t('perks.remaining') }}:
+          {{ categoryInfo!.allowed.length - categoriesToExclude.length }}
+        </div>
+        <button class="outline-button" type="button" (click)="excludeCategories()"
+                [disabled]="loading || perksBusy || !categoriesToExclude.length ||
+                            categoryInfo!.allowed.length - categoriesToExclude.length < 16 ||
+                            exclusionCost > spendableStars.silver">
+          {{ locale.t('perks.confirmExclusions') }}
+        </button>
+      </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || configLoading || authLoading || authBusy || restoringGame">
@@ -145,7 +169,7 @@
       <div class="answers">
         <ng-container *ngFor="let choice of choices">
           <button *ngIf="question.answers[choice] as answerText"
-                  type="button" (click)="answer(choice)" [disabled]="loading">
+                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy">
             <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
           </button>
         </ng-container>
@@ -169,11 +193,31 @@
             {{ locale.t('perks.skip') }} — 1 {{ locale.t('stars.gold') }} ★
           </button>
         </div>
-        <div class="perk-counter">{{ locale.t('perks.categoryChanges') }}: 0/2 ·
-          {{ locale.t('perks.manualCategory') }}: 0/1</div>
+        <div class="perk-counter">
+          {{ locale.t('perks.categoryChanges') }}:
+          {{ categoryInfo?.changes_used ?? 0 }}/2 ·
+          {{ locale.t('perks.manualCategory') }}: {{ categoryInfo?.manual_used ?? 0 }}/1
+        </div>
+        <div class="perk-current-category" *ngIf="categoryInfo?.current">
+          {{ locale.t('perks.currentCategory') }}: {{ categoryInfo?.current }}
+        </div>
         <div class="perk-actions">
-          <button class="outline-button" type="button" disabled>{{ locale.t('perks.randomCategory') }} — 1 ★</button>
-          <button class="outline-button" type="button" disabled>{{ locale.t('perks.chooseCategory') }} — 2 ★</button>
+          <button class="outline-button" type="button" (click)="changeCategory('random')"
+                  [disabled]="loading || perksBusy || !categoryInfo?.can_change ||
+                              spendableStars.silver < 1">
+            {{ locale.t('perks.randomCategory') }} — 1 {{ locale.t('stars.silver') }} ★
+          </button>
+          <select [(ngModel)]="chosenCategory" [disabled]="loading || perksBusy || !categoryInfo?.can_choose"
+                  aria-label="Select category">
+            <option *ngFor="let category of categoryInfo?.alternatives" [value]="category">
+              {{ category }}
+            </option>
+          </select>
+          <button class="outline-button" type="button" (click)="changeCategory('manual')"
+                  [disabled]="loading || perksBusy || !categoryInfo?.can_choose ||
+                              !chosenCategory || spendableStars.silver < 2">
+            {{ locale.t('perks.chooseCategory') }} — 2 {{ locale.t('stars.silver') }} ★
+          </button>
           <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
         </div>
       </div>
