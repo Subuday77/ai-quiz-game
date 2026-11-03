@@ -195,16 +195,25 @@ matching language, difficulty, category, a previously accepted v5 review, and
 user-specific fact dedup. If no valid question is available, the game preserves
 the 15/15 progress and offers **Retry**.
 
-After a bonus generation failure, the UI also offers **Change bonus topic**.
-The authenticated `POST /api/v2/games/{id}/bonus/change-topic` is valid
-only during the unresolved bonus phase, after a failed generation and before
-a question was issued. Topic selection is persisted in `GameRun`, moves through
-a stable per-game shuffle of all categories, cycles back to the first topic on
-the next click after the last, and has **no usage limit**. It never consumes
-bonus eligibility or overwrites an offered question, and survives logout and
-backend restart. A stale generation for the previous topic is rejected by
-the commit-side row-lock guard. The frontend hides **Next question** when
-Retry is shown, preventing two visually competing actions.
+After an unsuccessful bonus generation (after any configured approved-pool
+fallback is exhausted), the **server automatically rotates** to the next
+category in a stable per-game permutation. The new selection is persisted on
+`GameRun`, so the next ordinary `GET /question`—including a normal Retry
+after HTTP 502/503—uses the new topic. Every failed attempt advances at most
+one topic; after all categories have been visited, the sequence wraps and
+starts again, with no lifetime limit. No extra AI call is issued immediately
+by the rotation itself, respecting the existing per-request time and cost
+budget. Bonus eligibility, 15/15 progress, gold and all previous answers
+remain intact. A previously issued Q16 cannot be replaced; a concurrent stale
+generation for the former topic is discarded at the commit-side row lock.
+
+**Topic selection is internal, not a player action.** The former
+`POST /api/v2/games/{id}/bonus/change-topic` endpoint and Angular button
+have been removed. The persisted index and original topic-rotation mechanism
+are retained to support future explicit topic-selection *star perks*, which
+will require separate authorization/charging design. For now the UI presents
+only Retry after failure and never both Retry and Next question.
+
 
 Run offline tests from `backend/` using
 `python -m unittest discover -s tests -v`; Angular in `frontend/`:
