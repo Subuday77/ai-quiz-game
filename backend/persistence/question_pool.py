@@ -84,14 +84,78 @@ def _tagged_from_saved(db: Session, question: Question) -> TaggedQuestion | None
         return None
 
 
+def _eligible_for_bonus_reuse(db: Session, question: Question) -> bool:
+    """Fail closed for historical Q16 approvals without Terra v2, no new AI cost.
+
+    A stored v5 critic acceptance alone does NOT satisfy current bonus rules.
+    Keep user exposure history intact; reuse only independently reviewed items.
+    """
+    from pydantic import ValidationError
+    from tagging.quality_skill.arbiter import (
+        ARBITRATION_CONTRACT_VERSION, ArbitrationVerdict, is_suitable,
+        stem_claims_anchored,
+    )
+
+    reviews = db.scalars(
+        select(QuestionReview).where(
+            QuestionReview.question_id == question.id,
+            QuestionReview.checker_type == "ai_tagged_critic",
+            QuestionReview.decision == "accept",
+            QuestionReview.contract_version == "tagged_review_v5",
+        ).order_by(QuestionReview.created_at.desc())
+    ).all()
+    for review in reviews:
+        details = review.details if isinstance(review.details, dict) else {}
+        primary = details.get("verdict")
+        assessment = details.get("assessment")
+        arbitration = details.get("arbitration")
+        if not (isinstance(primary, dict) and isinstance(assessment, dict)
+                and isinstance(arbitration, dict)):
+            continue
+        if (primary.get("difficulty") == "too_easy"
+                or primary.get("tags_valid") != "pass"
+                or primary.get("fact_valid") != "pass"
+                or primary.get("facts") != "pass"
+                or primary.get("options") != "pass"
+                or primary.get("leakage") != "pass"
+                or primary.get("semantic_duplicate") is not False
+                or assessment.get("critical") != "none"):
+            continue
+        score = assessment.get("total")
+        threshold = assessment.get("score_threshold")
+        if (not isinstance(score, (int, float)) or isinstance(score, bool)
+                or not isinstance(threshold, (int, float))
+                or isinstance(threshold, bool)
+                or threshold <= 0 or score >= threshold):
+            continue
+        if (arbitration.get("checker_type") != "ai_terra_arbiter"
+                or arbitration.get("provider") != "openai"
+                or arbitration.get("contract_version") != ARBITRATION_CONTRACT_VERSION
+                or arbitration.get("decision") != "accept"):
+            continue
+        try:
+            verdict = ArbitrationVerdict.model_validate(arbitration["details"])
+        except (KeyError, ValidationError, ValueError, TypeError):
+            continue
+        if (stem_claims_anchored(verdict, question.text)
+                and is_suitable(
+                    verdict, correct_answer=question.correct_key, bonus=True
+                )[0]):
+            return True
+    return False
+
+
 def offer_approved_pool_question(
     db: Session, *, run_id: UUID, user_id: UUID,
     category: str, max_candidates: int | None = None,
+    expected_bonus_topic_index: int | None = None,
 ) -> tuple[QuestionAttempt, Question] | None:
     """Find an already reviewed question and atomically offer it to this user.
 
     Only tagged v5 critic-accepted, currently approved, unreported questions
-    enter the pool. Exact-language/category/difficulty matches are mandatory.
+    enter the pool. Bonus reuse additionally requires Terra v2 accepted
+    evidence and the new strict difficulty gate. Old reviews cannot bypass it.
+    Exact-language/category/difficulty matches are mandatory.
     The SQL anti-join prevents exact repeats; require_unique also prevents
     fact/tag/semantic repeats, including those across the user's languages.
     """
@@ -101,6 +165,7 @@ def offer_approved_pool_question(
         raise ValueError("Pool scan limit must be in 1..1000")
     checked = 0
     duplicate = 0
+    bonus_unverified = 0
     try:
         # Serialize concurrent assignments, including other game runs owned
         # by the same user. Acquire locks in the same order as offer_question.
@@ -108,6 +173,9 @@ def offer_approved_pool_question(
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
+        if (run.status == "bonus" and expected_bonus_topic_index is not None
+                and run.bonus_topic_index != expected_bonus_topic_index):
+            raise GameConflict("Bonus category changed during pool lookup")
         cached = pending_question(db, run_id=run_id)
         if cached is not None:
             db.commit()
@@ -168,6 +236,9 @@ def offer_approved_pool_question(
             saved = db.get(Question, question_id)
             if saved is None or saved.status != "approved":
                 continue
+            if run.status == "bonus" and not _eligible_for_bonus_reuse(db, saved):
+                bonus_unverified += 1
+                continue
             candidate = _tagged_from_saved(db, saved)
             if candidate is None:
                 continue
@@ -185,12 +256,16 @@ def offer_approved_pool_question(
             db.commit()
             db.refresh(attempt)
             event("question_pool_fallback", outcome="hit", examined=checked,
-                  duplicate_skips=duplicate, requested_difficulty=difficulty)
+                  duplicate_skips=duplicate, unverified_bonus_skips=bonus_unverified,
+                  requested_difficulty=difficulty)
             return attempt, saved
 
         db.rollback()
-        event("question_pool_fallback", outcome="no_unique_match",
+        event("question_pool_fallback",
+              outcome="no_verified_bonus" if bonus_unverified and run.status == "bonus"
+              else "no_unique_match",
               examined=checked, duplicate_skips=duplicate,
+              unverified_bonus_skips=bonus_unverified,
               requested_difficulty=difficulty)
         return None
     except Exception:
