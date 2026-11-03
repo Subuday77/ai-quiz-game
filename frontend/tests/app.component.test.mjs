@@ -580,7 +580,7 @@ test('setup button shows loading during resume and start again after failed crea
   assert.equal(app.setupButtonLabelKey, 'game.start');
 });
 
-test('restores unfinished round on login without creating another game', () => {
+test('offers a saved round without locking language and resumes only on choice', () => {
   const previous = globalThis.localStorage;
   const saved = new Map([['ai-quiz-game:active-round:v2:user-1', 'saved-game-id']]);
   globalThis.localStorage = {
@@ -600,16 +600,153 @@ test('restores unfinished round on login without creating another game', () => {
       phase: 'main', correct_main_answers: 7 });
     assert.equal(app.restoringGame, false);
     assert.equal(app.resumeAvailable, true);
+    assert.equal(app.gameId, '');
+    assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
+    assert.equal(app.progress, 0);
+    assert.equal(app.currentStars.bronze, 0);
+    assert.equal(app.setupButtonLabelKey, 'game.resume');
+    app.selectedLanguage = 'Spanish'; // Available for a fresh game.
+    app.startGame();
     assert.equal(app.gameId, 'saved-game-id');
+    assert.equal(app.selectedLanguage, 'German'); // Resume uses saved run language.
     assert.equal(app.progress, 7);
     assert.equal(app.currentStars.bronze, 1);
-    app.startGame();
     assert.equal(requests[1].url, '/api/v2/games/saved-game-id/question');
     succeed(requests[1]);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
   }
+});
+
+test('saved round can be replaced by a fresh game in the selected language', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'saved-game-id']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup();
+    app.gameId = '';
+    succeed(requests[0], { game_id: 'saved-game-id', language: 'German',
+      phase: 'main', correct_main_answers: 7, main_question_index: 8 });
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(saved.get(key), 'saved-game-id');
+    app.selectedLanguage = 'Hebrew';
+    scheduler.run(() => {
+      app.startFreshGame();
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].url, '/api/v2/games');
+      assert.equal(posts[0].body.language, 'Hebrew');
+      assert.equal(app.loading, true);
+      assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
+      assert.equal(saved.get(key), 'saved-game-id');
+      succeed(posts[0], { game_id: 'new-game-id', language: 'Hebrew',
+        phase: 'main', correct_main_answers: 0 });
+      assert.equal(app.gameId, 'new-game-id');
+      assert.equal(saved.get(key), 'new-game-id');
+      assert.equal(app.resumeAvailable, false);
+      assert.equal(app.resumeCandidate, null);
+      assert.equal(app.selectedLanguage, 'Hebrew');
+      assert.equal(app.progress, 0);
+      assert.equal(requests[1].url, '/api/v2/games/new-game-id/question');
+      succeed(requests[1], { ...question, number: 1 });
+    });
+    assert.equal(posts.length, 1);
+    assert.equal(app.screen, 'question');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('failed start-new request leaves the saved game resumable', () => {
+  const { app, posts, scheduler } = setup();
+  app.gameId = '';
+  app.resumeCandidate = { game_id: 'saved-game-id', language: 'Russian',
+    phase: 'main', correct_main_answers: 3 };
+  app.resumeAvailable = true;
+  app.selectedLanguage = 'French';
+  scheduler.run(() => {
+    app.startFreshGame();
+    assert.equal(posts[0].body.language, 'French');
+    posts[0].subject.error(new Error('offline'));
+  });
+  assert.equal(app.loading, false);
+  assert.equal(app.gameId, '');
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
+});
+
+test('closed and missing saved games do not block a new round', () => {
+  for (const mode of ['lost', 'completed', 'abandoned', 'missing']) {
+    const previous = globalThis.localStorage;
+    const key = 'ai-quiz-game:active-round:v2:user-1';
+    const saved = new Map([[key, 'saved-game-id']]);
+    globalThis.localStorage = {
+      getItem: k => saved.get(k) ?? null,
+      setItem: (k, value) => saved.set(k, value),
+      removeItem: k => saved.delete(k),
+    };
+    try {
+      const { app, requests, posts, scheduler } = setup();
+      app.gameId = '';
+      if (mode === 'missing') {
+        requests[0].subject.error(new HttpErrorResponse({ status: 404 }));
+      } else {
+        succeed(requests[0], { game_id: 'saved-game-id',
+          language: 'English', phase: mode, correct_main_answers: 7 });
+      }
+      assert.equal(app.resumeCandidate, null);
+      assert.equal(app.resumeAvailable, false);
+      assert.equal(saved.has(key), false);
+      app.selectedLanguage = 'Italian';
+      scheduler.run(() => {
+        app.startGame();
+        assert.equal(posts[0].body.language, 'Italian');
+        succeed(posts[0], { game_id: 'new-game-id',
+          language: 'Italian', phase: 'main', correct_main_answers: 0 });
+        succeed(requests[1], { ...question, number: 1 });
+      });
+      assert.equal(app.gameId, 'new-game-id');
+    } finally {
+      if (previous === undefined) delete globalThis.localStorage;
+      else globalThis.localStorage = previous;
+    }
+  }
+});
+
+test('restored-game choice keeps the pregame exclusion workflow available', () => {
+  const { app, posts, scheduler } = setup();
+  app.gameId = '';
+  app.resumeAvailable = true;
+  app.resumeCandidate = { game_id: 'old-game-id', language: 'English',
+    phase: 'main', correct_main_answers: 4 };
+  app.selectedLanguage = 'Spanish';
+  scheduler.run(() => {
+    app.openCategoryExclusions();
+    assert.equal(posts[0].body.language, 'Spanish');
+    succeed(posts[0], { game_id: 'new-game-id', language: 'Spanish',
+      phase: 'main', correct_main_answers: 0 });
+  });
+  assert.equal(app.resumeCandidate, null);
+  assert.equal(app.resumeAvailable, false);
+  assert.equal(app.gameId, 'new-game-id');
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.screen, 'setup');
+});
+
+test('template exposes both choices and does not disable language for a saved candidate', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startFreshGame\(\)"/);
+  assert.match(html, /\*ngIf="resumeAvailable" class="outline-button"[^>]*\(click\)="startGame\(\)"/);
+  assert.match(html, /\[disabled\]="loading \|\| !!gameId \|\| authLoading \|\| restoringGame"/);
+  assert.match(html, /locale\.t\('game\.startNew'\)/);
+  assert.equal(english['game.startNew'], 'Start a new game →');
+  assert.match(english['hero.resumed'], /continue it or start a new game/i);
 });
 
 test('setup and answer requests have timeouts without automatic POST retries', () => {

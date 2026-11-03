@@ -132,7 +132,7 @@
 
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
-      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading">
+      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading || restoringGame">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
       <div class="category-pregame-action" *ngIf="account && (!gameId || categoryInfo?.can_exclude)">
@@ -167,7 +167,15 @@
         </button>
       </div>
       <div class="question-actions">
-        <button class="primary" type="button" (click)="startGame()"
+        <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
+                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+          {{ locale.t(setupButtonLabelKey) }}
+        </button>
+        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startFreshGame()"
+                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
+          {{ locale.t('game.startNew') }}
+        </button>
+        <button *ngIf="resumeAvailable" class="outline-button" type="button" (click)="startGame()"
                 [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>

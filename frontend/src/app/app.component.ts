@@ -125,6 +125,9 @@ export class AppComponent implements OnInit, OnDestroy {
   screen: Screen = 'setup';
   gameId = '';
   resumeAvailable = false;
+  // A saved round is only an offer, not the selected game. Keeping it
+  // separate lets the player choose a new question language and new game.
+  resumeCandidate: GameInfo | null = null;
   current: PublicQuestion | null = null;
   feedback: AnswerFeedback | null = null;
   loading = false;
@@ -182,7 +185,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.loading) return 'game.loading';
     if (this.gameId && this.categoryInfo && this.categoryInfo.current === null && this.progress === 0)
       return 'perks.startQuestions';
-    return this.gameId ? 'game.resume' : 'game.start';
+    return this.gameId || this.resumeCandidate ? 'game.resume' : 'game.start';
   }
 
   ngOnInit(): void {
@@ -455,6 +458,26 @@ export class AppComponent implements OnInit, OnDestroy {
       void this.openAuthDialog('login');
       return;
     }
+    if (this.resumeCandidate) {
+      const run = this.resumeCandidate;
+      this.resumeCandidate = null;
+      this.gameId = run.game_id;
+      this.selectedLanguage = run.language;
+      this.progress = run.main_question_index ?? run.correct_main_answers;
+      this.gameCorrectAnswers = run.correct_main_answers;
+      this.skippedQuestions = run.skipped_questions ?? 0;
+      this.currentStars = {
+        bronze: run.correct_main_answers >= 5 ? 1 : 0,
+        silver: run.correct_main_answers >= 10 ? 1 : 0,
+        gold: run.correct_main_answers >= 15 ? 1 : 0,
+        platinum: 0,
+      };
+      this.stars = this.starTiers.filter(tier => this.currentStars[tier.key] > 0)
+        .map(tier => tier.key);
+      this.generatingNextQuestion = this.progress > 0;
+      this.loadQuestion();
+      return;
+    }
     if (this.gameId) {
       this.showCategoryExclusions = false;
       this.resumeAvailable = false;
@@ -462,6 +485,15 @@ export class AppComponent implements OnInit, OnDestroy {
       this.loadQuestion();
       return;
     }
+    this.createGame(false);
+  }
+
+  startFreshGame(): void {
+    // Keep the saved round intact until the new one is successfully created.
+    // If POST /games fails the player can still choose Resume.
+    if (!this.resumeAvailable || !this.account || this.loading || this.perksBusy ||
+        this.configLoading || this.authLoading || this.authBusy || this.restoringGame ||
+        this.categoryLoading) return;
     this.createGame(false);
   }
 
@@ -492,6 +524,10 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (game) => {
         this.gameId = game.game_id;
         this.rememberActiveGame(game.game_id);
+        this.resumeCandidate = null;
+        this.categoryInfo = null;
+        this.categoriesToExclude = [];
+        this.chosenCategory = '';
         this.stars = [];
         this.currentStars = emptyStars();
         this.progress = 0;
@@ -1042,24 +1078,13 @@ export class AppComponent implements OnInit, OnDestroy {
           this.removeSavedGame(accountId);
           return;
         }
-        this.gameId = run.game_id;
+        // The backend confirmed the saved run is still open. Don't bind it to
+        // the UI as the active run until the player explicitly chooses Resume.
+        this.resumeCandidate = run;
         this.resumeAvailable = true;
-        this.selectedLanguage = run.language;
-        this.progress = run.main_question_index ?? run.correct_main_answers;
-        this.gameCorrectAnswers = run.correct_main_answers;
-        this.skippedQuestions = run.skipped_questions ?? 0;
         this.current = null;
         this.feedback = null;
         this.screen = 'setup';
-        this.loadCategoryInfo();
-        this.currentStars = {
-          bronze: run.correct_main_answers >= 5 ? 1 : 0,
-          silver: run.correct_main_answers >= 10 ? 1 : 0,
-          gold: run.correct_main_answers >= 15 ? 1 : 0,
-          platinum: 0,
-        };
-        this.stars = this.starTiers.filter((tier) => this.currentStars[tier.key] > 0)
-          .map((tier) => tier.key);
       },
       error: (err: unknown) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
@@ -1112,6 +1137,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.longWait = false;
     this.gameId = '';
     this.resumeAvailable = false;
+    this.resumeCandidate = null;
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
