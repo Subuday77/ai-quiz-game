@@ -24,15 +24,25 @@ class GameState:
     """Track progression and eligibility for the optional bonus question."""
 
     correct_main_answers: int = 0
+    # Physical main-question slot, not the number of correct answers. A paid
+    # skip consumes one of the 15 slots without incrementing correctness.
+    # None preserves compatibility with callers restoring pre-skip games.
+    main_question_index: int | None = None
     hints_used: int = 0
     phase: GamePhase = "main"
     bonus_correct: bool | None = None
+
+    def __post_init__(self) -> None:
+        if self.main_question_index is None:
+            self.main_question_index = self.correct_main_answers
+        if not 0 <= self.correct_main_answers <= self.main_question_index <= MAIN_QUESTION_COUNT:
+            raise ValueError("Invalid main round progress")
 
     @property
     def current_difficulty(self) -> int:
         """Return the next question's difficulty, or reject a finished game."""
         if self.phase == "main":
-            return self.correct_main_answers
+            return self.main_question_index
         if self.phase == "bonus":
             return BONUS_DIFFICULTY
         raise RuntimeError("The game has already ended")
@@ -42,6 +52,20 @@ class GameState:
         if self.phase != "main":
             raise RuntimeError("Hints are only available during the main round")
         self.hints_used += 1
+
+    def skip_main_question(self) -> AnswerResult:
+        """Use a gold skip: advance the slot, never award a correct answer.
+
+        The persistence layer must charge the gold star in the same DB
+        transaction as marking the current attempt skipped.
+        """
+        if self.phase != "main" or self.main_question_index >= MAIN_QUESTION_COUNT:
+            raise RuntimeError("No main question to skip")
+        self.record_hint_use()  # A skip always disqualifies Q16.
+        self.main_question_index += 1
+        if self.main_question_index == MAIN_QUESTION_COUNT:
+            self.phase = "completed"
+        return AnswerResult(correct=False, phase=self.phase)
 
     def submit_answer(self, is_correct: bool) -> AnswerResult:
         """Move the game forward after the caller has verified an answer."""
@@ -62,9 +86,12 @@ class GameState:
             return AnswerResult(correct=False, phase=self.phase)
 
         self.correct_main_answers += 1
+        self.main_question_index += 1
         achievement = STAR_MILESTONES.get(self.correct_main_answers)
-        if self.correct_main_answers == MAIN_QUESTION_COUNT:
-            self.phase = "bonus" if self.hints_used == 0 else "completed"
+        if self.main_question_index == MAIN_QUESTION_COUNT:
+            self.phase = ("bonus" if self.hints_used == 0
+                          and self.correct_main_answers == MAIN_QUESTION_COUNT
+                          else "completed")
 
         return AnswerResult(
             correct=True,
