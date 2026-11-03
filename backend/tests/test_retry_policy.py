@@ -1,5 +1,6 @@
 """Offline retry, budget, concurrency and browser-abandonment recovery tests."""
 
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
