@@ -187,6 +187,71 @@ test('45-second timeout clears loading and offers retry without a new game', () 
   assert.equal(app.canRetryQuestion, false);
 });
 
+test('failed first generated question shows Retry only, never the setup or exclusions', () => {
+  // Regression: POST /games succeeded, but the first GET /question returned 502.
+  // The run must remain allocated; a retry is the ONLY ordinary action.
+  const { app, requests, posts, scheduler } = setup();
+  app.gameId = '';
+  app.screen = 'setup';
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(posts.length, 1);
+    succeed(posts[0], { game_id: 'started-round', language: 'Russian',
+      phase: 'main', correct_main_answers: 0 });
+    assert.equal(app.screen, 'question');
+    assert.equal(app.current, null);
+    assert.equal(app.showCategoryExclusions, false);
+    assert.equal(requests.length, 1);
+    requests[0].subject.error(new HttpErrorResponse({ status: 502 }));
+    assert.equal(app.screen, 'question');
+    assert.equal(app.current, null);
+    assert.equal(app.feedback, null);
+    assert.equal(app.loading, false);
+    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.duplicateExhausted, false);
+    assert.equal(app.gameId, 'started-round');
+    assert.equal(app.progress, 0);
+    assert.equal(posts.length, 1); // No second game created.
+    app.retryQuestion();
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].url, '/api/v2/games/started-round/question');
+    succeed(requests[1], { ...question, number: 1, difficulty: 0 });
+  });
+  assert.equal(app.screen, 'question');
+  assert.equal(app.current.number, 1);
+  assert.equal(app.canRetryQuestion, false);
+  assert.equal(app.error, '');
+  assert.equal(posts.length, 1);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  // Setup and category actions are under screen=setup, inaccessible on failure.
+  assert.match(template, /<div \*ngIf="screen === 'setup'" class="setup">/);
+  assert.match(template, /<div class="question-actions" \*ngIf="canRetryQuestion && !duplicateExhausted">/);
+});
+
+test('failed later question discards stale feedback and keeps the original game', () => {
+  const { app, requests, posts, scheduler } = setup();
+  app.screen = 'feedback';
+  app.progress = 8;
+  app.current = question;
+  app.feedback = { phase: 'main', correct: true, correct_answer: 'B',
+    correct_main_answers: 8, achievement: null };
+  scheduler.run(() => {
+    app.continue();
+    assert.equal(app.screen, 'question');
+    assert.equal(app.current, null);
+    assert.equal(app.feedback, null);
+    requests[0].subject.error(new HttpErrorResponse({ status: 503 }));
+    assert.equal(app.screen, 'question');
+    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.progress, 8);
+    app.retryQuestion();
+    succeed(requests[1], { ...question, number: 9, difficulty: 8 });
+  });
+  assert.equal(app.current.number, 9);
+  assert.equal(app.gameId, 'existing-game');
+  assert.equal(posts.length, 0);
+});
+
 test('backend and connection failures clear loading and allow a retry', () => {
   for (const status of [0, 502, 503]) {
     const { app, requests, scheduler } = setup();
