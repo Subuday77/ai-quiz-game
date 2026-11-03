@@ -33,13 +33,18 @@ def inspect(question, settings) -> list[Finding]:
         best = None
         for answer_word in _tokens(text):
             for stem_word in stem:
-                if answer_word == stem_word:
-                    # Exact repetition is the existing local gate's concern.
-                    continue
+                # A whole answer may not repeat the question, but a component
+                # of a hyphenated surname CAN be the entire hidden clue:
+                # 'саварен' -> 'Брийя-Саварен'. The old exact-word skip missed
+                # this, while exact whole-choice leaks have a separate gate.
+                exact_component = (answer_word == stem_word
+                                   and len(answer_word) >= 5)
                 prefix = _prefix_length(answer_word, stem_word)
-                if (prefix < settings.lexical_min_prefix
+                if not exact_component and (
+                    prefix < settings.lexical_min_prefix
                     or prefix / min(len(answer_word), len(stem_word))
-                    < settings.lexical_min_shared_fraction):
+                    < settings.lexical_min_shared_fraction
+                ):
                     continue
                 if best is None or prefix > best[2]:
                     best = (stem_word, answer_word, prefix)
@@ -51,17 +56,20 @@ def inspect(question, settings) -> list[Finding]:
         return []
     key, (stem_word, answer_word, prefix) = next(iter(matches.items()))
     is_keyed = key == question.correct_answer
+    exact = stem_word == answer_word
     return [Finding(
         tool="lexical",
-        code="unique_morphological_shortcut" if is_keyed else "distractor_word_overlap",
+        code=("unique_exact_name_component" if exact else "unique_morphological_shortcut")
+        if is_keyed else "distractor_word_overlap",
         severity=3 if is_keyed else 1,
-        confidence=0.82 if is_keyed else 0.55,
+        confidence=(0.92 if exact else 0.82) if is_keyed else 0.55,
         evidence={
             "question_token": stem_word,
             "option_token": answer_word,
             "common_prefix": stem_word[:prefix],
             "option": key,
             "matches_correct_option": is_keyed,
+            "exact_component": exact,
             "note": "heuristic shared root; not proof of a shortcut",
         },
     )]
