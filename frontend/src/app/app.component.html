@@ -72,6 +72,37 @@
     </div>
   </section>
 
+  <section class="spendable-star-panel" *ngIf="account" aria-label="Spendable stars">
+    <div class="star-panel-title">{{ locale.t('perks.balance') }}</div>
+    <div class="spendable-grid">
+      <div *ngFor="let tier of starTiers">
+        <span>{{ locale.t('stars.' + tier.key) }}:</span>
+        <strong>{{ spendableStars[tier.key] }}</strong>
+      </div>
+    </div>
+    <div class="exchange-controls">
+      <label>{{ locale.t('perks.from') }}
+        <select [(ngModel)]="exchangeSource" [disabled]="perksBusy">
+          <option *ngFor="let tier of exchangeTiers" [ngValue]="tier">{{ locale.t('stars.' + tier) }}</option>
+        </select>
+      </label>
+      <label>{{ locale.t('perks.to') }}
+        <select [(ngModel)]="exchangeTarget" [disabled]="perksBusy">
+          <option *ngFor="let tier of exchangeTiers" [ngValue]="tier">{{ locale.t('stars.' + tier) }}</option>
+        </select>
+      </label>
+      <label>{{ locale.t('perks.amount') }}
+        <input type="number" min="1" step="1" [(ngModel)]="exchangeAmount" [disabled]="perksBusy" />
+      </label>
+      <button type="button" class="outline-button" (click)="exchangeStars()"
+              [disabled]="perksBusy || loading || exchangeSource === exchangeTarget ||
+                          exchangeAmount < 1 || spendableStars[exchangeSource] < exchangeAmount">
+        {{ locale.t('perks.exchange') }}
+      </button>
+    </div>
+    <p class="perk-subtitle">{{ locale.t('perks.rates') }}</p>
+  </section>
+
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
@@ -119,6 +150,33 @@
           </button>
         </ng-container>
       </div>
+      <div class="perk-shop" *ngIf="!question.bonus">
+        <h3>{{ locale.t('perks.title') }}</h3>
+        <div class="perk-counter">{{ locale.t('perks.removed') }}: {{ question.hidden_count || 0 }}/2</div>
+        <div class="perk-actions">
+          <button class="outline-button" type="button" (click)="removeOptions(1)"
+                  [disabled]="loading || perksBusy || (question.hidden_count || 0) >= 2 ||
+                              spendableStars.bronze < 2">
+            {{ locale.t('perks.removeOne') }} — 2 ★
+          </button>
+          <button class="outline-button" type="button" (click)="removeOptions(2)"
+                  [disabled]="loading || perksBusy || (question.hidden_count || 0) !== 0 ||
+                              spendableStars.bronze < 3">
+            {{ locale.t('perks.removeTwo') }} — 3 ★
+          </button>
+          <button class="outline-button" type="button" (click)="skipCurrentQuestion()"
+                  [disabled]="loading || perksBusy || spendableStars.gold < 1">
+            {{ locale.t('perks.skip') }} — 1 {{ locale.t('stars.gold') }} ★
+          </button>
+        </div>
+        <div class="perk-counter">{{ locale.t('perks.categoryChanges') }}: 0/2 ·
+          {{ locale.t('perks.manualCategory') }}: 0/1</div>
+        <div class="perk-actions">
+          <button class="outline-button" type="button" disabled>{{ locale.t('perks.randomCategory') }} — 1 ★</button>
+          <button class="outline-button" type="button" disabled>{{ locale.t('perks.chooseCategory') }} — 2 ★</button>
+          <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
+        </div>
+      </div>
     </div>
 
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
@@ -139,7 +197,7 @@
 
     <div *ngIf="screen === 'done'" class="results">
       <p>{{ locale.t(finishedPhase === 'lost' ? 'game.resultsLost' : 'game.resultsCompleted') }}</p>
-      <p>{{ locale.format('game.roundScore', { count: progress }) }}</p>
+      <p>{{ locale.format('game.roundScore', { count: gameCorrectAnswers }) }}</p>
       <div class="star-list" *ngIf="stars.length">★ {{ starNames }}</div>
       <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
     </div>
@@ -158,6 +216,7 @@
     </div>
     <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
+    <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
     <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
       <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
         {{ locale.t('game.retry') }}
