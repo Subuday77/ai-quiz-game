@@ -475,4 +475,6 @@ def submit_answer(game_id: str, payload: AnswerInput) -> AnswerFeedback:
 # Versioned authenticated API. Legacy /api/games stays available until
 # Angular is migrated and the in-memory API tests have been retired.
 from persistence.game_routes import router as persistent_games_router  # noqa: E402
+from persistence.star_routes import router as star_router  # noqa: E402
 app.include_router(persistent_games_router)
+app.include_router(star_router)
