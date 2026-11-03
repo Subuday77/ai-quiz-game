@@ -111,7 +111,7 @@ class TaggedQuestion(QuizQuestion):
     fact: Fact
     # Estimated once by the generator, never re-rated by a critic.
     # Optional for approved questions saved under previous schemas.
-    plausibility: dict[Choice, int] | None = None
+    plausibility: dict[Choice, int] | None = Field(default=None, exclude_if=lambda value: value is None)
     # Internal server-only audit payload; never part of model_dump/LLM JSON or Angular API.
     _review_report: dict | None = PrivateAttr(default=None)
     _duplicate_assessment: dict | None = PrivateAttr(default=None)
