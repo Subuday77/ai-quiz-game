@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -66,10 +66,23 @@ def owned_game(db: Session, *, run_id: UUID, user_id: UUID,
     return run
 
 
-def game_state(run: GameRun) -> GameState:
-    """Rebuild pure game progression from persisted columns."""
+def game_state(run: GameRun, db: Session | None = None) -> GameState:
+    """Rebuild progression; skipped slots differ from correct answer count.
+
+    A completed attempt with NULL selected_key / is_correct is a paid skip.
+    No new database column is required: count completed main question slots.
+    db=None preserves existing non-skip callers and tests.
+    """
+    slot_index = run.correct_main_answers
+    if db is not None:
+        slot_index = int(db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run.id,
+            QuestionAttempt.number <= 15,
+            QuestionAttempt.answered_at.is_not(None),
+        )) or 0)
     return GameState(
         correct_main_answers=run.correct_main_answers,
+        main_question_index=slot_index,
         hints_used=run.hints_used,
         phase=run.status,
         bonus_correct=run.bonus_correct,
@@ -137,7 +150,8 @@ def offer_question(
         if dedup_enforce:
             # Atomic recheck after another parallel request may have committed.
             require_unique(question, history_for_user(db, user_id))
-        expected_difficulty = game_state(run).current_difficulty
+        state = game_state(run, db)
+        expected_difficulty = state.current_difficulty
         if question.difficulty != expected_difficulty:
             raise GameConflict("Wrong question difficulty for current game state")
         topic = db.scalar(select(Topic).where(Topic.slug == category_slug(category)))
@@ -201,7 +215,7 @@ def offer_question(
             review = question._review_report
             if review is not None:
                 db.add(QuestionReview(question_id=stored.id, **review))
-        next_number = run.correct_main_answers + 1
+        next_number = 16 if run.status == "bonus" else state.main_question_index + 1
         attempt = QuestionAttempt(
             run_id=run.id, question_id=stored.id,
             number=next_number,
@@ -240,7 +254,7 @@ def record_answer(
             raise GameConflict("No matching unanswered question")
 
         now = _now()
-        state = game_state(run)
+        state = game_state(run, db)
         is_correct = selected == question.correct_key
         result = state.submit_answer(is_correct)
 
