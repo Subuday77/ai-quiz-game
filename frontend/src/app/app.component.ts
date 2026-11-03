@@ -480,7 +480,11 @@ export class AppComponent implements OnInit, OnDestroy {
         // Q16 remains available after a failed server generation. Topic
         // switching is permitted only after such a failure; the backend
         // independently checks the persisted bonus phase and unlock flag.
-        this.canChangeBonusTopic = this.progress === 15 && !this.gameEnded;
+        this.canChangeBonusTopic = (
+          this.progress === 15 && !this.gameEnded
+          && error instanceof HttpErrorResponse
+          && [409, 502, 503].includes(error.status)
+        );
         if (error instanceof HttpErrorResponse && error.status === 409 &&
             error.error?.detail?.code === 'duplicate_exhausted') {
           // No new question was offered. Keep the server game ID, progress,
@@ -517,6 +521,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.error = 'game.bonusTopicChanged';
         this.canRetryQuestion = true;
+        this.duplicateExhausted = false;
         // Keep the button available; each click rotates to the next topic.
         // Retry is explicit so the player can rotate any number of times.
       },
@@ -578,7 +583,9 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   continue(): void {
-    if (this.loading) return;
+    // Error recovery owns navigation; never silently issue a second request
+    // while the Retry action is visible.
+    if (this.loading || this.canRetryQuestion) return;
     if (this.gameEnded) {
       this.screen = 'done';
     } else {
