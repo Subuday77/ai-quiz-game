@@ -722,25 +722,28 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertEqual(score["score_threshold"], 3.25)
         self.assertFalse(score["threshold_preview"]["3.25"])
 
-    def test_difficulty_quarter_tips_three_points_to_enforce_rejection(self):
+    def test_bronze_boundary_restores_full_distractor_weight(self):
         other_three = {**self.verdict, "distractor_penalty": 3}
-        # An otherwise marginal question with three points is NOT rejected.
-        accepted = self.check(other_three, QualityMode.ENFORCE)
-        self.assertEqual(accepted._review_report["details"]["assessment"]["total"], 3)
         critical_plus_quarter = {
             **other_three, "difficulty": "too_easy", "knowledge_penalty": 0,
         }
+        # Q1-4: discounted editorial distractor penalty does not block.
+        accepted_early = self.check(critical_plus_quarter, QualityMode.ENFORCE)
+        early_score = accepted_early._review_report["details"]["assessment"]
+        self.assertEqual(early_score["penalties"]["distractors"], 1.5)
+        self.assertEqual(accepted_early._review_report["decision"], "accept")
+
+        # Q5 (difficulty 4): bronze milestone restores the original weight.
+        fifth = candidate().model_copy(update={"difficulty": 4})
+        accepted = self.check(other_three, QualityMode.ENFORCE, item=fifth)
+        self.assertEqual(accepted._review_report["details"]["assessment"]["total"], 3)
         with self.assertRaises(QualityRegenerationError):
-            self.check(critical_plus_quarter, QualityMode.ENFORCE)
-        # Audit still records the exact same 3.25 without blocking.
-        approved_in_audit = self.check(critical_plus_quarter, QualityMode.AUDIT)
-        self.assertEqual(
-            approved_in_audit._review_report["details"]["assessment"]["total"], 3.25
-        )
-        self.assertTrue(
-            approved_in_audit._review_report["details"]["assessment"][
-                "threshold_preview"]["3.25"]
-        )
+            self.check(critical_plus_quarter, QualityMode.ENFORCE, item=fifth)
+        approved_in_audit = self.check(critical_plus_quarter, QualityMode.AUDIT, item=fifth)
+        assessment = approved_in_audit._review_report["details"]["assessment"]
+        self.assertEqual(assessment["penalties"]["distractors"], 3)
+        self.assertGreaterEqual(assessment["total"], 3.25)
+        self.assertTrue(assessment["threshold_preview"]["3.25"])
 
     def test_invalid_tags_are_rejected_even_if_general_quality_off(self):
         with self.assertRaises(QualityRegenerationError):
@@ -931,8 +934,10 @@ class TaggedCriticTests(unittest.TestCase):
                 "relation": "setting-city", "object": "vice-city",
             },
         })
-        assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer)
-        self.assertEqual(assessment["total"], 1.25)
+        assessment = tagged_assessment(TaggedReview.model_validate(verdict), gta.correct_answer,
+                                       requested_difficulty=gta.difficulty)
+        self.assertEqual(assessment["penalties"]["distractors"], 1)
+        self.assertGreater(assessment["total"], 1.25)
         for mode in (QualityMode.OFF, QualityMode.AUDIT):
             with self.subTest(mode=mode):
                 reviewed = self.check(verdict, mode, item=gta)
