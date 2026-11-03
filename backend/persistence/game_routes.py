@@ -131,12 +131,15 @@ def _category_for_round(run_id: UUID, number: int,
     categories = random.Random(run_id.int).sample(allowed, k=len(allowed))
     unused = set(available_categories(db, run, number))
     base = (15 + bonus_topic_index) if number == 16 else number - 1
-    # Q16 auto retry cycles through unused, then through already-consumed
-    # allowed topics if fresh ones are exhausted; no excluded topic returns.
+    # Bonus retry walks the available-first order. Once all unused topics
+    # have been tried, cycle only within this player's permitted categories.
+    # With the default complete catalog, the order is identical to v2.
+    if number == 16:
+        rotation = categories[15:] + categories[:15]
+        ordered = ([cat for cat in rotation if cat in unused] +
+                   [cat for cat in rotation if cat not in unused])
+        return ordered[bonus_topic_index % len(ordered)]
     rotated = categories[base % len(categories):] + categories[:base % len(categories)]
-    if number == 16 and bonus_topic_index:
-        ordered = [x for x in rotated if x in unused] + [x for x in rotated if x not in unused]
-        return ordered[0]
     return next((category for category in rotated if category in unused),
                 rotated[0])
 
