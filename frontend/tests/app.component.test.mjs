@@ -1260,6 +1260,29 @@ test('failed category change restores the old question, shop and controls', () =
   assert.equal(app.spendableStars.silver, 1);
 });
 
+test('expired session during category change clears loading for a new login', () => {
+  const { app, posts, scheduler } = setup();
+  app.screen = 'question';
+  app.current = { ...question };
+  app.spendableStars.silver = 1;
+  app.categoryInfo = {
+    allowed: ['Biology', 'Physics'], current: 'Biology',
+    alternatives: ['Physics'], changes_used: 0, manual_used: 0,
+    can_change: true, can_choose: false, can_exclude: false, minimum_allowed: 16,
+  };
+  scheduler.run(() => {
+    app.changeCategory('random');
+    posts[0].subject.error(new HttpErrorResponse({ status: 401 }));
+  });
+  assert.equal(app.account, null);
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.loading, false);
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.generatingNextQuestion, false);
+  assert.equal(app.perksBusy, false);
+  assert.equal(app.error, 'account.sessionExpired');
+});
+
 test('category change timeout restores the question and removes the spinner', () => {
   const { app, posts, scheduler } = setup();
   app.screen = 'question';
