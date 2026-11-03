@@ -49,11 +49,6 @@ interface PublicQuestion {
   answers: Record<Choice, string>;
   bonus: boolean;
 }
-interface BonusTopicResult {
-  category: string;
-  topic_index: number;
-  cycle_reset: boolean;
-}
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -123,7 +118,6 @@ export class AppComponent implements OnInit, OnDestroy {
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
-  canChangeBonusTopic = false;
   private warningMs = 8000;
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
@@ -450,7 +444,6 @@ export class AppComponent implements OnInit, OnDestroy {
     this.longWait = false;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
-    this.canChangeBonusTopic = false;
     this.error = '';
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
     this.subscriptions.add(this.http.get<PublicQuestion>(
@@ -467,7 +460,6 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (question) => {
         this.current = question;
         this.feedback = null;
-        this.canChangeBonusTopic = false;
         this.screen = 'question';
         this.resumeAvailable = false;
       },
@@ -477,14 +469,6 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.canRetryQuestion = true;
-        // Q16 remains available after a failed server generation. Topic
-        // switching is permitted only after such a failure; the backend
-        // independently checks the persisted bonus phase and unlock flag.
-        this.canChangeBonusTopic = (
-          this.progress === 15 && !this.gameEnded
-          && error instanceof HttpErrorResponse
-          && [409, 502, 503].includes(error.status)
-        );
         if (error instanceof HttpErrorResponse && error.status === 409 &&
             error.error?.detail?.code === 'duplicate_exhausted') {
           // No new question was offered. Keep the server game ID, progress,
@@ -511,27 +495,6 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.canRetryQuestion && !this.loading) this.loadQuestion();
   }
 
-  changeBonusTopic(): void {
-    if (!this.canChangeBonusTopic || !this.gameId || this.loading) return;
-    this.loading = true;
-    this.subscriptions.add(this.http.post<BonusTopicResult>(
-      GAME_API + '/' + this.gameId + '/bonus/change-topic', {},
-    ).pipe(timeout(this.requestTimeoutMs)).subscribe({
-      next: () => {
-        this.loading = false;
-        this.error = 'game.bonusTopicChanged';
-        this.canRetryQuestion = true;
-        this.duplicateExhausted = false;
-        // Keep the button available; each click rotates to the next topic.
-        // Retry is explicit so the player can rotate any number of times.
-      },
-      error: (err: unknown) => {
-        if (this.isUnauthorized(err)) this.sessionExpired();
-        else this.fail('game.bonusTopicChangeFailed');
-      },
-    }));
-  }
-
   returnToMenuAfterDuplicate(): void {
     if (!this.duplicateExhausted || this.loading) return;
     // This is navigation, not game abandonment. Resume continues the same
@@ -542,7 +505,6 @@ export class AppComponent implements OnInit, OnDestroy {
     this.feedback = null;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
-    this.canChangeBonusTopic = false;
     this.error = '';
   }
 
@@ -742,7 +704,6 @@ export class AppComponent implements OnInit, OnDestroy {
   private resetGameView(): void {
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
-    this.canChangeBonusTopic = false;
     this.longWait = false;
     this.gameId = '';
     this.resumeAvailable = false;
