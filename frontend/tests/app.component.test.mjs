@@ -79,6 +79,18 @@ function setup({ warning = 8000, timeout = 45000, settingsError = false,
       if (url === '/api/profile/me/stats') {
         return of({ ...profile, star_awards: { ...profile.star_awards } });
       }
+      if (url === '/api/v2/stars') {
+        return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+      }
+      if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
+        return of({
+          allowed: ['Ancient history', 'Biology', 'Physics', 'Poetry'],
+          current: null, alternatives: ['Biology', 'Physics', 'Poetry'],
+          changes_used: 0, manual_used: 0,
+          can_change: true, can_choose: true, can_exclude: true,
+          minimum_allowed: 16,
+        });
+      }
       const subject = new Subject();
       requests.push({ url, subject });
       return subject.asObservable();
