@@ -180,6 +180,14 @@ claims and options** are present only in the existing opt-in `DEBUG:`
 `quality_arbitration_debug` event. DEBUG logs include candidate content and
 correct answers: never expose these logs to public clients.
 
+Previously approved questions identified by the 3-Nov browser QA report
+(calvados ambiguity, Savarin surname leak, Roman/Rome name leak, alleged
+Hua Rong Dao derivative, misnamed Puerto Williams airport, unsupported Thimphu
+river) are excluded from **shared-pool reuse by exact stem + keyed-answer
+matching**. This is a conservative safety hold, not a database deletion or
+an automatic factual claim about other questions. Original game history and
+awards remain intact. A later user-report workflow can adjudicate these records.
+
 At difficulty **15 (bonus)** a primary-critic `too_easy` verdict rejects the
 question regardless of its total weighted score. The `too_easy_only` emergency
 reserve is disabled for the bonus. Approved global-pool fallback still requires
