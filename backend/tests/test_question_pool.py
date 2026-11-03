@@ -384,7 +384,8 @@ class GlobalPoolTests(unittest.TestCase):
             q._review_report = report
             _, stored = offer_question(
                 db, run_id=bob_run.id, user_id=self.bob, question=q,
-                category=self.category, provider="test", model="stub",
+                category=_category_for_round(self.run_id, 16),
+                provider="test", model="stub",
                 dedup_enforce=True,
             )
             return stored.id
@@ -394,7 +395,8 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertIsNone(offer_approved_pool_question(
                 db, run_id=self.run_id, user_id=self.alice,
-                category=self.category, expected_bonus_topic_index=0,
+                category=_category_for_round(self.run_id, 16),
+                expected_bonus_topic_index=0,
             ))
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
             self.assertEqual(db.get(Question, old_question_id).status, "approved")
@@ -404,7 +406,8 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             attempt, saved = offer_approved_pool_question(
                 db, run_id=self.run_id, user_id=self.alice,
-                category=self.category, expected_bonus_topic_index=0,
+                category=_category_for_round(self.run_id, 16),
+                expected_bonus_topic_index=0,
             )
             self.assertEqual(saved.id, existing_id)
             self.assertEqual(attempt.number, 16)
@@ -418,7 +421,8 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertIsNone(offer_approved_pool_question(
                 db, run_id=self.run_id, user_id=self.alice,
-                category=self.category, expected_bonus_topic_index=0,
+                category=_category_for_round(self.run_id, 16),
+                expected_bonus_topic_index=0,
             ))
 
     def test_bonus_pool_rejects_obsolete_terra_v1(self):
@@ -426,8 +430,44 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertIsNone(offer_approved_pool_question(
                 db, run_id=self.run_id, user_id=self.alice,
-                category=self.category, expected_bonus_topic_index=0,
+                category=_category_for_round(self.run_id, 16),
+                expected_bonus_topic_index=0,
             ))
+
+    def test_v2_verified_bonus_is_reused_by_live_fallback_route(self):
+        existing_id = self._seed_bonus_candidate()
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=503, detail="AI provider unavailable",
+        )) as generator:
+            reply = self.request()
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertTrue(reply.json()["bonus"])
+        self.assertEqual(reply.json()["number"], 16)
+        self.assertEqual(reply.json()["question_id"], str(existing_id))
+        self.assertNotIn("correct_answer", reply.json())
+        generator.assert_called_once()
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+            self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
+            self.assertEqual(db.scalar(select(func.count(QuestionReview.id))), 1)
+
+    def test_old_bonus_fallback_returns_503_without_publishing(self):
+        self._seed_bonus_candidate(legacy=True)
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=503, detail="AI provider unavailable",
+        )) as generator:
+            reply = self.request()
+        self.assertEqual(reply.status_code, 503, reply.text)
+        self.assertNotIn("question", reply.json())
+        generator.assert_called_once()
+        from persistence.models import GameRun
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.correct_main_answers, 15)
+            self.assertEqual(run.bonus_topic_index, 1)
+            self.assertIsNone(db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == self.run_id
+            )))
 
     def test_bonus_pool_rejects_stale_topic_index(self):
         from persistence.gameplay import GameConflict
@@ -437,7 +477,8 @@ class GlobalPoolTests(unittest.TestCase):
             with self.assertRaises(GameConflict):
                 offer_approved_pool_question(
                     db, run_id=self.run_id, user_id=self.alice,
-                    category=self.category, expected_bonus_topic_index=1,
+                    category=_category_for_round(self.run_id, 16),
+                    expected_bonus_topic_index=1,
                 )
 
 if __name__ == "__main__":
