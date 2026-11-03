@@ -23,6 +23,7 @@ from persistence.seed_topics import category_slug
 from tagging.contract import Fact, TagCloud, TaggedQuestion
 from tagging.core import DuplicateQuestionError, require_unique
 from tagging.quality_skill.fact_tool import known_false_fact
+from tagging.quality_skill.known_issues import known_qa_issue
 from tagging.repository import history_for_user
 
 
@@ -72,6 +73,10 @@ def _tagged_from_saved(db: Session, question: Question) -> TaggedQuestion | None
         # a previously accepted but now source-disproven fact is never
         # re-issued from the shared pool.
         if known_false_fact(candidate) is not None:
+            return None
+        known_issue = known_qa_issue(candidate)
+        if known_issue is not None:
+            event("question_pool_known_issue_skipped", code=known_issue)
             return None
         return candidate
     except ValueError:
