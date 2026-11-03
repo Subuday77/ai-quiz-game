@@ -9,6 +9,7 @@ from question_transport_schema import QUIZ_SCHEMA_NAME, quiz_question_schema
 from tagging.schemas import (
     TAGGED_QUESTION_SCHEMA_NAME, TAGGED_REVIEW_SCHEMA_NAME, TAG_EXTRACTION_SCHEMA_NAME,
     tagged_question_schema, tagged_review_schema, tag_extraction_schema,
+    ARBITRATION_SCHEMA_NAME, arbitration_schema,
 )
 
 
@@ -20,6 +21,7 @@ class OutputContract(str, Enum):
     TAGGED_QUESTION = "tagged_question"
     TAGGED_REVIEW = "tagged_review"
     TAG_EXTRACTION = "tag_extraction"
+    ARBITRATION = "arbitration"
 
 
 def transport_contract(contract: OutputContract) -> tuple[str, dict]:
@@ -30,6 +32,8 @@ def transport_contract(contract: OutputContract) -> tuple[str, dict]:
         return TAGGED_QUESTION_SCHEMA_NAME, tagged_question_schema()
     if contract == OutputContract.TAGGED_REVIEW:
         return TAGGED_REVIEW_SCHEMA_NAME, tagged_review_schema()
+    if contract == OutputContract.ARBITRATION:
+        return ARBITRATION_SCHEMA_NAME, arbitration_schema()
     if contract == OutputContract.TAG_EXTRACTION:
         return TAG_EXTRACTION_SCHEMA_NAME, tag_extraction_schema()
     if contract == OutputContract.QUALITY_REVIEW_V3:
