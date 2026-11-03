@@ -1303,6 +1303,16 @@ test('category change timeout restores the question and removes the spinner', ()
   assert.equal(app.perksError, 'perks.categoryFailed');
 });
 
+test('hidden answer preserves the original letter cell rather than compacting the grid', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(html, /\*ngFor="let choice of choices"/);
+  assert.match(html, /\*ngIf="question\.answers\[choice\] as answerText"/);
+  assert.match(html, /\{\{ choice \}\}/);
+  assert.match(html, /\*ngIf="!question\.answers\[choice\]" class="hidden-answer-slot"/);
+  assert.match(css, /\.answers \.hidden-answer-slot\s*\{[^}]*visibility:\s*hidden/s);
+});
+
 test('collapsed shop uses tier-colored prices and only opens category changes in a dialog', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   const style = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');

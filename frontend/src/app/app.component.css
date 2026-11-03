@@ -22,6 +22,7 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 .question-label { color: #97c9f7; font-size: 12px; font-weight: 800; letter-spacing: .15em; }
 .bonus { color: #f6d88c; margin-inline-start: 10px; }
 .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.answers .hidden-answer-slot { min-height: 74px; visibility: hidden; pointer-events: none; }
 .answers button { background: #26294a; border: 1px solid #515879; color: #eff2ff; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; text-align: start; gap: 14px; min-height: 74px; }
 .answers button:hover:not(:disabled), .answers button:focus-visible { border-color: #8ce9ef; background: #32375d; outline: none; }
 .letter { display: grid; place-items: center; border-radius: 9px; border: 1px solid #6c769e; flex: 0 0 36px; height: 36px; color: #a3dce8; font-weight: 800; }

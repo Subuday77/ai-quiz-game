@@ -192,16 +192,24 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             return HTTPException(status_code=409, detail={"code": "duplicate_exhausted"})
         return HTTPException(status_code=fallback_status, detail=fallback_detail)
 
+    # Tagged games need a mandatory AI critic. Reserve its minimum time BEFORE
+    # starting the generator; otherwise a slow third generation leaves only a
+    # couple of seconds for review and produces an avoidable provider timeout.
+    critic_reserve = policy.critic_min_remaining_seconds if tagged else 0.0
     event("generation_policy", budget_ms=policy.budget_seconds * 1000,
           max_attempts=policy.max_attempts,
-          provider_timeout_ms=policy.provider_timeout_seconds * 1000, sdk_max_retries=0)
+          provider_timeout_ms=policy.provider_timeout_seconds * 1000,
+          critic_min_remaining_ms=critic_reserve * 1000, sdk_max_retries=0)
     for attempt in range(1, policy.max_attempts + 1):
         remaining = deadline - perf_counter()
-        if remaining <= 0:
-            event("generation_budget_exhausted")
+        if remaining <= critic_reserve:
+            event("generation_review_budget_insufficient", stage="before_generation",
+                  remaining_ms=max(0, round(remaining * 1000)),
+                  minimum_ms=round(critic_reserve * 1000))
             raise failure(503, "AI provider unavailable")
         token = generation_attempt.set(attempt)
-        timeout_token = provider_timeout.set(min(policy.provider_timeout_seconds, remaining))
+        timeout_token = provider_timeout.set(min(
+            policy.provider_timeout_seconds, remaining - critic_reserve))
         event("generation_attempt_started")
         failure_status = 503
         delay_hint = None
@@ -294,7 +302,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                                                  category_slug=topic_slug(category)),
                                      mode=quality_mode, deadline=deadline,
                                      timeout_seconds=policy.provider_timeout_seconds,
-                                     clock=perf_counter, shadow=shadow_result)
+                                     clock=perf_counter, shadow=shadow_result,
+                                     min_remaining_seconds=critic_reserve)
             else:
                 check_quality(question, difficulty, language, quality_mode,
                               deadline, policy.provider_timeout_seconds, clock=perf_counter)
@@ -417,9 +426,10 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 event("generation_retry_suppressed", reason="retry_after_exceeds_limit")
                 raise HTTPException(status_code=failure_status, detail=detail)
             delay = max(delay, delay_hint)
-        if delay >= deadline - perf_counter():
-            event("generation_budget_exhausted")
-            raise failure(failure_status, detail)
+        if delay + critic_reserve >= deadline - perf_counter():
+            event("generation_review_budget_insufficient", stage="before_retry",
+                  minimum_ms=round(critic_reserve * 1000))
+            raise failure(503, "AI provider unavailable")
         event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
         sleep(delay)
     return question

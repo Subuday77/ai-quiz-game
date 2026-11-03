@@ -114,12 +114,15 @@ def _game_info(db: Session, run) -> GameInfo:
 
 
 def _public(attempt, stored, phase: str, *, db: Session | None = None) -> PublicQuestion:
-    options = stored.choices
+    # Preserve the original keys and canonical A/B/C/D order even after hints.
+    # Never compact survivors into A/B/C; the displayed letters are part of
+    # the question's immutable answer mapping.
+    hidden = set()
     if attempt.hints_used:
         if db is None:
             raise GameConflict("Database needed for persisted question hints")
         hidden = set(hidden_choices(db, attempt, stored))
-        options = {key: text for key, text in stored.choices.items() if key not in hidden}
+    options = {key: stored.choices[key] for key in "ABCD" if key not in hidden}
     return PublicQuestion(
         question_id=str(attempt.question_id),
         number=attempt.number,

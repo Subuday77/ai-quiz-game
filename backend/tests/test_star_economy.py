@@ -154,5 +154,38 @@ class StarEconomyTests(unittest.TestCase):
             )
 
 
+    def test_hiding_b_preserves_original_a_c_d_keys_after_reload(self):
+        from persistence.game_routes import _public
+
+        self.credit("bronze", 2)
+        run_id, question_id, attempt_id = self.active_question()
+        stored = self.db.get(Question, question_id)
+        # This isolated fixture makes B a wrong answer and the lowest score.
+        stored.correct_key = "A"
+        self.db.add(QuestionReview(
+            question_id=question_id, checker_type="generator_plausibility",
+            contract_version="generator_plausibility_v1",
+            decision="unverified_estimate", issues=[],
+            details={"scores": {"A": 100, "B": 1, "C": 40, "D": 50}},
+        ))
+        self.db.commit()
+        original = _public(self.db.get(QuestionAttempt, attempt_id), stored, "main", db=self.db)
+        self.assertEqual(list(original.answers), ["A", "B", "C", "D"])
+
+        attempt, stored = hide_wrong_options(
+            self.db, run_id=run_id, user_id=self.user_id,
+            question_id=question_id, count=1, request_id=uuid4(),
+        )
+        expected = {"A": "bad 1", "C": "bad 2", "D": "bad 3"}
+        self.assertEqual(_public(attempt, stored, "main", db=self.db).answers, expected)
+        self.db.expire_all()
+        reloaded = _public(
+            self.db.get(QuestionAttempt, attempt_id),
+            self.db.get(Question, question_id), "main", db=self.db,
+        )
+        self.assertEqual(reloaded.answers, expected)
+        self.assertEqual(reloaded.hidden_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

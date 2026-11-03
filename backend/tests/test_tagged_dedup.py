@@ -430,7 +430,7 @@ class TaggedPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(review.details["option_diagnostics"]["outcome"], "single_correct")
         self.assertEqual(review.details["option_diagnostics"]["consistency_flags"], [])
-        self.assertEqual(review.details["assessment"]["total"], 2.25)
+        self.assertEqual(review.details["assessment"]["total"], 1.75)
         self.assertEqual(review.details["python_duplicate_check"]["score"], 0)
         self.assertEqual(review.details["python_duplicate_check"]["threshold"], 70)
         self.assertEqual(review.details["verdict"]["difficulty"], "too_easy")
@@ -671,15 +671,15 @@ class TaggedCriticTests(unittest.TestCase):
         self.assertIsNotNone(checked._review_report)
         details = checked._review_report["details"]
         self.assertEqual(details["verdict"]["difficulty"], "too_easy")
-        self.assertEqual(details["assessment"]["total"], 4.25)
-        self.assertEqual(details["assessment"]["penalties"]["distractors"], 2)
+        self.assertEqual(details["assessment"]["total"], 3.25)
+        self.assertEqual(details["assessment"]["penalties"]["distractors"], 1)
         self.assertEqual(details["assessment"]["penalties"]["wording"], 1)
         self.assertEqual(checked._review_report["decision"], "audit")
         self.assertNotIn("_review_report", checked.model_dump())
         scores = [call.kwargs for call in log.call_args_list
                   if call.args[0] == "tagged_review_score"]
         self.assertEqual(len(scores), 1)
-        self.assertEqual(scores[0]["score"], 4.25)
+        self.assertEqual(scores[0]["score"], 3.25)
         self.assertEqual(scores[0]["penalties"]["knowledge"], 0.25)
         self.assertEqual(scores[0]["difficulty"], "too_easy")
         self.assertNotIn("rationale", scores[0])

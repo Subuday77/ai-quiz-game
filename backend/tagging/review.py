@@ -287,8 +287,12 @@ def tagged_assessment(verdict: TaggedReview, answer: str,
     else:
         unit, cap = settings.ordinary_knowledge_unit, settings.ordinary_knowledge_cap
     difficulty_penalty = min(cap, units * unit)
+    # Difficulty is zero-based: questions 1-4 get the gentler editorial
+    # distractor weight; question 5 (bronze milestone) and onward stay strict.
+    distractors_weight = (settings.early_distractors_weight if level < 4
+                          else settings.distractors_weight)
     penalties = {
-        "distractors": raw["distractors"] * settings.distractors_weight,
+        "distractors": raw["distractors"] * distractors_weight,
         "knowledge": round(difficulty_penalty, 4),
         "suitability": raw["suitability"] * settings.suitability_weight,
         "wording": raw["wording"] * settings.wording_weight,
@@ -297,6 +301,7 @@ def tagged_assessment(verdict: TaggedReview, answer: str,
     limit = settings.score_threshold
     return {
         **assessment,
+        "distractors_weight_applied": distractors_weight,
         "total": total,
         "penalties": penalties,
         "raw_penalties": raw,
@@ -313,13 +318,19 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
                          requested_difficulty: int, category: str,
                          neighbors: list[dict], mode: QualityMode,
                          deadline: float, timeout_seconds: float,
-                         clock=perf_counter, shadow: dict | None = None) -> None:
+                         clock=perf_counter, shadow: dict | None = None,
+                         min_remaining_seconds: float = 0.0) -> None:
     """Raises to trigger the shared bounded generation retry loop.
 
     Metadata validation and semantic duplicates are hard failures in EVERY
     quality mode. Non-tag editorial checks honor the existing mode.
     """
     remaining = deadline - clock()
+    if remaining < min_remaining_seconds:
+        event("tagged_review_skipped", reason="insufficient_time",
+              remaining_ms=max(0, round(remaining * 1000)),
+              minimum_ms=round(min_remaining_seconds * 1000))
+        raise QualityReviewFailure("tag_review_insufficient_budget", retryable=False)
     if remaining <= 0:
         raise QualityReviewFailure("tag_review_budget_exhausted", retryable=False)
     settings = ReviewerSettings.from_env()

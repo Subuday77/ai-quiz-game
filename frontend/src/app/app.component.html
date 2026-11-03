@@ -194,6 +194,9 @@
                   type="button" (click)="answer(choice)" [disabled]="loading || perksBusy">
             <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
           </button>
+          <!-- Keep the original A/B/C/D cell occupied; otherwise CSS grid
+               slides C into B's old position when a bronze hint removes B. -->
+          <span *ngIf="!question.answers[choice]" class="hidden-answer-slot" aria-hidden="true"></span>
         </ng-container>
       </div>
       <div class="perk-shop" *ngIf="!question.bonus">

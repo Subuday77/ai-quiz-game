@@ -32,6 +32,7 @@ class DynamicDifficultyTests(unittest.TestCase):
         keys = [
             "QUIZ_QUALITY_SCORE_THRESHOLD",
             "QUIZ_QUALITY_DISTRACTORS_WEIGHT",
+            "QUIZ_QUALITY_EARLY_DISTRACTORS_WEIGHT",
             "QUIZ_QUALITY_SUITABILITY_WEIGHT",
             "QUIZ_QUALITY_WORDING_WEIGHT",
             "QUIZ_QUALITY_KNOWLEDGE_UNIT",
@@ -94,6 +95,21 @@ class DynamicDifficultyTests(unittest.TestCase):
         self.assertEqual(after["penalties"]["knowledge"], before["penalties"]["knowledge"])
         self.assertEqual(after["penalties"]["suitability"], before["penalties"]["suitability"])
         self.assertEqual(after["score_threshold"], 4.5)
+
+    def test_weak_distractors_are_discounted_only_in_questions_one_through_four(self):
+        v = critic(difficulty="appropriate", distractors=3, knowledge=0)
+        for difficulty in range(4):
+            with self.subTest(question=difficulty + 1):
+                score = tagged_assessment(v, "B", requested_difficulty=difficulty)
+                self.assertEqual(score["penalties"]["distractors"], 1.5)
+                self.assertEqual(score["distractors_weight_applied"], 0.5)
+                self.assertLess(score["total"], score["score_threshold"])
+        fifth = tagged_assessment(v, "B", requested_difficulty=4)
+        self.assertEqual(fifth["penalties"]["distractors"], 3)
+        self.assertEqual(fifth["distractors_weight_applied"], 1)
+        with patch.dict(os.environ, {"QUIZ_QUALITY_EARLY_DISTRACTORS_WEIGHT": "0.25"}):
+            first = tagged_assessment(v, "B", requested_difficulty=0)
+        self.assertEqual(first["penalties"]["distractors"], 0.75)
 
     def test_invalid_config_rejected(self):
         v = critic()
