@@ -313,7 +313,6 @@ test('failed question hides Next and offers one Retry without losing progress', 
     assert.equal(requests.length, 1);
     requests[0].subject.error(new HttpErrorResponse({ status: 502 }));
     assert.equal(app.canRetryQuestion, true);
-    assert.equal(app.canChangeBonusTopic, false);
     app.continue(); // Old "Next question" cannot issue an extra request.
     assert.equal(requests.length, 1);
     assert.equal(app.progress, 10);
@@ -328,7 +327,7 @@ test('failed question hides Next and offers one Retry without losing progress', 
   assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted"/);
 });
 
-test('bonus error allows unlimited topic switching, preserving 15 of 15 and Retry', () => {
+test('bonus failure keeps 15/15; only ordinary Retry is visible', () => {
   const { app, requests, posts, scheduler } = setup();
   app.screen = 'feedback';
   app.progress = 15;
@@ -339,29 +338,26 @@ test('bonus error allows unlimited topic switching, preserving 15 of 15 and Retr
     app.continue();
     requests[0].subject.error(new HttpErrorResponse({ status: 503 }));
     assert.equal(app.canRetryQuestion, true);
-    assert.equal(app.canChangeBonusTopic, true);
-    for (let i = 0; i < 4; i++) {
-      app.changeBonusTopic();
-      assert.equal(posts[i].url, '/api/v2/games/existing-game/bonus/change-topic');
-      assert.deepEqual(posts[i].body, {});
-      succeed(posts[i], { category: 'History', topic_index: i + 1,
-        cycle_reset: false });
-      assert.equal(app.canChangeBonusTopic, true);
-      assert.equal(app.loading, false);
-    }
     assert.equal(app.progress, 15);
     assert.equal(app.currentStars.gold, 1);
+    app.continue(); // "Next question" cannot issue a second request.
+    assert.equal(requests.length, 1);
     app.retryQuestion();
     assert.equal(requests.length, 2);
+    assert.equal(requests[1].url, '/api/v2/games/existing-game/question');
     succeed(requests[1], { ...question, number: 16, difficulty: 15, bonus: true });
   });
+  assert.equal(posts.length, 0); // Player has no topic-switch endpoint.
   assert.equal(app.current.bonus, true);
   assert.equal(app.canRetryQuestion, false);
-  assert.equal(app.canChangeBonusTopic, false);
   assert.equal(app.progress, 15);
+  assert.equal(app.currentStars.gold, 1);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.doesNotMatch(template, /changeBonusTopic|game.changeBonusTopic/);
+  assert.doesNotMatch(source, /changeBonusTopic|canChangeBonusTopic|bonus\/change-topic/);
 });
 
-test('no bonus topic switch on network error or when game is finished', () => {
+test('bonus network errors do not offer any topic selection', () => {
   for (const error of [
     new HttpErrorResponse({ status: 0 }), new Error('connection error')
   ]) {
@@ -374,16 +370,10 @@ test('no bonus topic switch on network error or when game is finished', () => {
       app.continue();
       requests[0].subject.error(error);
     });
-    assert.equal(app.canChangeBonusTopic, false);
-    app.changeBonusTopic();
+    assert.equal(app.canRetryQuestion, true);
     assert.equal(posts.length, 0);
   }
-  const { app, posts } = setup();
-  app.progress = 15;
-  app.feedback = { phase: 'completed', correct: true, correct_answer: 'B',
-    correct_main_answers: 15, achievement: 'gold' };
-  app.changeBonusTopic();
-  assert.equal(posts.length, 0);
+  assert.equal(english['game.changeBonusTopic'], undefined);
 });
 
 test('results button keeps results label and does not generate a new question', () => {
