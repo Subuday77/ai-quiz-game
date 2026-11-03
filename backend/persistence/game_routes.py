@@ -9,7 +9,7 @@ import random
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,7 +20,7 @@ from persistence.database import get_db
 from persistence.gameplay import (
     GameConflict, GameNotFound, TopicsNotSeeded, create_game, game_state,
     offer_question, owned_game, pending_question, record_answer,
-    skip_main_question,
+    skip_main_question, hide_wrong_options, hidden_choices,
 )
 from persistence.models import Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
@@ -41,6 +41,12 @@ class AnswerInput(BaseModel):
 
 class SkipInput(BaseModel):
     question_id: UUID
+    request_id: UUID
+
+
+class RemoveInput(BaseModel):
+    question_id: UUID
+    count: int = Field(ge=1, le=2)
     request_id: UUID
 
 
@@ -66,14 +72,21 @@ def _lookup(db: Session, run_id: UUID, user_id: UUID):
         raise HTTPException(status_code=404, detail="Game not found") from None
 
 
-def _public(attempt, stored, phase: str) -> PublicQuestion:
+def _public(attempt, stored, phase: str, *, db: Session | None = None) -> PublicQuestion:
+    options = stored.choices
+    if attempt.hints_used:
+        if db is None:
+            raise GameConflict("Database needed for persisted question hints")
+        hidden = set(hidden_choices(db, attempt, stored))
+        options = {key: text for key, text in stored.choices.items() if key not in hidden}
     return PublicQuestion(
         question_id=str(attempt.question_id),
         number=attempt.number,
         difficulty=attempt.requested_difficulty,
         question=stored.text,
-        answers=stored.choices,
+        answers=options,
         bonus=phase == "bonus",
+        hidden_count=attempt.hints_used,
     )
 
 
@@ -199,7 +212,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     cached = pending_question(db, run_id=run.id)
     if cached is not None:
         event("question_cache", hit=True)
-        return _public(*cached, phase=run.status)
+        return _public(*cached, phase=run.status, db=db)
 
     event("question_cache", hit=False)
     game_progress = game_state(run, db)
@@ -286,6 +299,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     if pooled is not None:
                         return _public(
                             *pooled, phase="bonus" if pooled[0].number == 16 else "main",
+                            db=db,
                         )
             if not use_reserve or not too_easy_reserve:
                 _advance_bonus_topic_after_failure(db, run_id=run_id, user_id=user.id, expected_topic_index=bonus_index, failure_status=generation_error.status_code)
@@ -345,7 +359,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
 
     # The previous round may have advanced while a concurrent AI call ran.
     # The commit-side row lock guarantees we only return the active question.
-    return _public(attempt, stored, phase="bonus" if attempt.number == 16 else "main")
+    return _public(attempt, stored, phase="bonus" if attempt.number == 16 else "main", db=db)
 
 
 @router.post("/{run_id}/answer", response_model=AnswerFeedback)
@@ -389,3 +403,21 @@ def skip_question(run_id: UUID, payload: SkipInput, request: Request,
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
     )
+
+
+@router.post("/{run_id}/hints/remove", response_model=PublicQuestion)
+def remove_distractors(run_id: UUID, payload: RemoveInput, request: Request,
+                       user: User = Depends(authenticated_user),
+                       db: Session = Depends(get_db)):
+    """2 bronze for one / 3 bronze for two; no hint on bonus Q16."""
+    validate_origin(request)
+    try:
+        attempt, question = hide_wrong_options(
+            db, run_id=run_id, user_id=user.id, question_id=payload.question_id,
+            count=payload.count, request_id=payload.request_id,
+        )
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except (GameConflict, PerkUnavailable) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return _public(attempt, question, phase="main", db=db)
