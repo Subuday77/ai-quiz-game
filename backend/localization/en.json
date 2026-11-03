@@ -177,5 +177,13 @@
   "perks.exchangeTip": "Exchange {{from}} for {{to}}",
   "perks.openExclusions": "Exclude categories",
   "perks.hideExclusions": "Hide category list",
-  "perks.exclusionPriceShort": "5 silver ★ per category"
+  "perks.exclusionPriceShort": "5 silver ★ per category",
+  "stats.roundCorrect": "Correct answers: {{count}}",
+  "stats.roundSkipped": "Skipped questions: {{count}}",
+  "hero.nextQuestion": "Moving to the next question",
+  "perks.changeCategory": "Change category",
+  "perks.randomConfirm": "Spend 1 silver star to switch to a random category?",
+  "perks.confirmChange": "Pay and change category",
+  "perks.selectCategory": "Select a category",
+  "perks.back": "Back"
 }

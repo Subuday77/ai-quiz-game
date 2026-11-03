@@ -447,3 +447,17 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   color: #f0efff;
   font-size: 12px;
 }
+
+/* Compact, collapsible in-question perks. Payment colors match the wallet tiers. */
+.round-summary { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px; font-size: 12px; color: #c9d4f1; }
+.shop-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; border: 1px solid #69749e; border-radius: 11px; padding: 11px 15px; background: #292d50; color: #f0efff; font: inherit; font-weight: 800; cursor: pointer; }
+.shop-toggle:hover { background: #353c67; }
+.shop-toggle:focus-visible { outline: 2px solid #8ce9ef; outline-offset: 3px; }
+.shop-content { margin-top: 15px; }
+.tier-price { font-weight: 800; white-space: nowrap; }
+.tier-price.bronze { color: #e4a377; }
+.tier-price.silver { color: #c2d3e8; }
+.tier-price.gold { color: #ffd26f; }
+.question-generation { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 140px; color: #c9d4f1; font-weight: 650; font-size: 17px; text-align: center; }
+.question-generation .gear-loader { --size: 1.4px; margin-top: 0; --gear-hole: #181a37; }
+@media (max-width: 640px) { .round-summary { flex-direction: column; gap: 5px; } .question-generation { min-height: 110px; } }

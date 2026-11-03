@@ -42,6 +42,8 @@ interface GameInfo {
   language: string;
   phase: string;
   correct_main_answers: number;
+  main_question_index?: number;
+  skipped_questions?: number;
 }
 interface PublicQuestion {
   question_id: string;
@@ -144,6 +146,9 @@ export class AppComponent implements OnInit, OnDestroy {
   totalStars: StarCounts = emptyStars();
   spendableStars: StarCounts = emptyStars();
   gameCorrectAnswers = 0;
+  skippedQuestions = 0;
+  shopOpen = false;
+  generatingNextQuestion = false;
   perksBusy = false;
   perksError = '';
   showCategoryExclusions = false;
@@ -439,6 +444,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.gameId) {
       this.showCategoryExclusions = false;
       this.resumeAvailable = false;
+      this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
     }
@@ -476,6 +482,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.currentStars = emptyStars();
         this.progress = 0;
         this.gameCorrectAnswers = 0;
+        this.skippedQuestions = 0;
+        this.generatingNextQuestion = false;
+        this.shopOpen = false;
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
@@ -503,6 +512,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resumeAvailable = false;
     this.loading = true;
     this.questionLoading = true;
+    this.shopOpen = false;
     this.longWait = false;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
@@ -516,6 +526,7 @@ export class AppComponent implements OnInit, OnDestroy {
         warning.unsubscribe();
         this.loading = false;
         this.questionLoading = false;
+        this.generatingNextQuestion = false;
         this.longWait = false;
       }),
     ).subscribe({
@@ -556,7 +567,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   retryQuestion(): void {
-    if (this.canRetryQuestion && !this.loading) this.loadQuestion();
+    if (this.canRetryQuestion && !this.loading) {
+      this.generatingNextQuestion = this.progress > 0;
+      this.loadQuestion();
+    }
   }
 
   returnToMenuAfterDuplicate(): void {
@@ -616,6 +630,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.gameEnded) {
       this.screen = 'done';
     } else {
+      this.generatingNextQuestion = true;
       this.loadQuestion();
     }
   }
@@ -739,6 +754,64 @@ export class AppComponent implements OnInit, OnDestroy {
       }));
   }
 
+  async openCategoryChangeDialog(): Promise<void> {
+    const state = this.categoryInfo;
+    if (!state?.can_change || !this.current || this.current.bonus || this.screen !== 'question' ||
+        this.loading || this.perksBusy || this.spendableStars.silver < 1) return;
+    const { default: Swal } = await import('sweetalert2');
+    const style = { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
+    while (this.current && !this.loading && !this.perksBusy) {
+      const choice = await Swal.fire({
+        titleText: this.locale.t('perks.changeCategory'),
+        text: this.locale.format('perks.currentCategory') + ': ' +
+              this.locale.t('category.' + (this.categoryInfo?.current ?? '')),
+        showCancelButton: true,
+        showDenyButton: !!this.categoryInfo?.can_choose && this.spendableStars.silver >= 2,
+        confirmButtonText: this.locale.t('perks.randomCategory') + ' — 1 ' + this.locale.t('stars.silver') + ' ★',
+        denyButtonText: this.locale.t('perks.chooseCategory') + ' — 2 ' + this.locale.t('stars.silver') + ' ★',
+        cancelButtonText: this.locale.t('auth.cancel'),
+        ...style,
+      });
+      if (choice.isConfirmed) {
+        const pay = await Swal.fire({
+          titleText: this.locale.t('perks.randomCategory'),
+          text: this.locale.t('perks.randomConfirm'),
+          showCancelButton: true, showDenyButton: true,
+          confirmButtonText: this.locale.t('perks.confirmChange'),
+          denyButtonText: this.locale.t('perks.back'),
+          cancelButtonText: this.locale.t('auth.cancel'),
+          ...style,
+        });
+        if (pay.isDenied) continue;
+        if (pay.isConfirmed) this.changeCategory('random');
+        return;
+      }
+      if (choice.isDenied) {
+        const alternatives = this.categoryInfo?.alternatives ?? [];
+        const selected = await Swal.fire({
+          titleText: this.locale.t('perks.chooseCategory'),
+          input: 'select',
+          inputLabel: this.locale.t('perks.selectCategory'),
+          inputOptions: Object.fromEntries(alternatives.map(category =>
+            [category, this.locale.t('category.' + category)])),
+          inputValue: alternatives.includes(this.chosenCategory) ? this.chosenCategory : alternatives[0],
+          inputValidator: value => alternatives.includes(value) ? undefined : this.locale.t('perks.selectCategory'),
+          showCancelButton: true, showDenyButton: true,
+          confirmButtonText: this.locale.t('perks.confirmChange') + ' — 2 ' + this.locale.t('stars.silver') + ' ★',
+          denyButtonText: this.locale.t('perks.back'),
+          cancelButtonText: this.locale.t('auth.cancel'),
+          ...style,
+        });
+        if (selected.isDenied) continue;
+        if (selected.isConfirmed && alternatives.includes(String(selected.value))) {
+          this.chosenCategory = String(selected.value);
+          this.changeCategory('manual');
+        }
+      }
+      return;
+    }
+  }
+
   changeCategory(mode: 'random' | 'manual'): void {
     const current = this.current, state = this.categoryInfo;
     if (!this.account || !current || current.bonus || !state ||
@@ -813,6 +886,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.perksBusy = true;
     this.loading = true;
     this.perksError = '';
+    this.current = null;
+    this.generatingNextQuestion = true;
+    this.questionLoading = true;
     this.subscriptions.add(this.http.post<GameInfo>(
       GAME_API + '/' + this.gameId + '/skip',
       { question_id: current.question_id, request_id: crypto.randomUUID() },
@@ -820,14 +896,19 @@ export class AppComponent implements OnInit, OnDestroy {
            finalize(() => { this.perksBusy = false; }))
      .subscribe({
       next: (game) => {
-        this.progress = Math.min(15, current.number);
+        this.progress = game.main_question_index ?? Math.min(15, current.number);
         this.gameCorrectAnswers = game.correct_main_answers;
+        this.skippedQuestions = game.skipped_questions ?? this.skippedQuestions + 1;
         this.current = null;
         this.refreshStats();
+        this.refreshSpendableStars();
         if (game.phase === 'completed') {
           this.finishedPhase = 'completed';
           this.forgetActiveGame();
           this.screen = 'done';
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+          this.loading = false;
         } else {
           // Finalize loading before asking for the next main slot.
           this.loading = false;
@@ -836,6 +917,9 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err: unknown) => {
         this.loading = false;
+        this.questionLoading = false;
+        this.generatingNextQuestion = false;
+        this.current = current;
         if (this.isUnauthorized(err)) this.sessionExpired();
         else this.perksError = 'perks.actionFailed';
       },
@@ -915,8 +999,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = run.game_id;
         this.resumeAvailable = true;
         this.selectedLanguage = run.language;
-        this.progress = run.correct_main_answers;
+        this.progress = run.main_question_index ?? run.correct_main_answers;
         this.gameCorrectAnswers = run.correct_main_answers;
+        this.skippedQuestions = run.skipped_questions ?? 0;
         this.current = null;
         this.feedback = null;
         this.screen = 'setup';
@@ -952,7 +1037,9 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (run) => {
         this.loading = false;
         this.canRetryQuestion = false;
-        this.progress = run.correct_main_answers;
+        this.progress = run.main_question_index ?? run.correct_main_answers;
+        this.gameCorrectAnswers = run.correct_main_answers;
+        this.skippedQuestions = run.skipped_questions ?? 0;
         if (run.phase === 'completed' || run.phase === 'lost') {
           this.forgetActiveGame();
           this.feedback = null;
@@ -985,6 +1072,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
     this.progress = 0;
     this.gameCorrectAnswers = 0;
+    this.skippedQuestions = 0;
+    this.shopOpen = false;
+    this.generatingNextQuestion = false;
     this.stars = [];
     this.currentStars = emptyStars();
     this.categoryInfo = null;

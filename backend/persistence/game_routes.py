@@ -72,6 +72,8 @@ class GameInfo(BaseModel):
     language: str
     phase: str
     correct_main_answers: int
+    main_question_index: int = 0
+    skipped_questions: int = 0
 
 
 class AnswerFeedback(BaseModel):
@@ -87,6 +89,28 @@ def _lookup(db: Session, run_id: UUID, user_id: UUID):
         return owned_game(db, run_id=run_id, user_id=user_id)
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
+
+
+def _game_info(db: Session, run) -> GameInfo:
+    """The progress bar follows consumed slots, not the number of right answers.
+
+    Skips are distinguished from ordinary answers by the NULL answer markers.
+    Both counts come from persisted attempts and survive page reloads.
+    """
+    state = game_state(run, db)
+    skipped = db.scalar(select(func.count(QuestionAttempt.id)).where(
+        QuestionAttempt.run_id == run.id,
+        QuestionAttempt.number <= 15,
+        QuestionAttempt.answered_at.is_not(None),
+        QuestionAttempt.selected_key.is_(None),
+        QuestionAttempt.is_correct.is_(None),
+    )) or 0
+    return GameInfo(
+        game_id=run.id, language=run.language, phase=run.status,
+        correct_main_answers=run.correct_main_answers,
+        main_question_index=state.main_question_index,
+        skipped_questions=int(skipped),
+    )
 
 
 def _public(attempt, stored, phase: str, *, db: Session | None = None) -> PublicQuestion:
@@ -201,20 +225,14 @@ def new_game(payload: NewGame, request: Request,
     if not {category_slug(name) for name in QUESTION_CATEGORIES}.issubset(existing):
         raise HTTPException(status_code=503, detail="Topic catalog not initialized")
     run = create_game(db, user_id=user.id, language=payload.language)
-    return GameInfo(
-        game_id=run.id, language=run.language, phase=run.status,
-        correct_main_answers=run.correct_main_answers,
-    )
+    return _game_info(db, run)
 
 
 @router.get("/{run_id}", response_model=GameInfo)
 def game_info(run_id: UUID, user: User = Depends(authenticated_user),
               db: Session = Depends(get_db)):
     run = _lookup(db, run_id, user.id)
-    return GameInfo(
-        game_id=run.id, language=run.language, phase=run.status,
-        correct_main_answers=run.correct_main_answers,
-    )
+    return _game_info(db, run)
 
 
 @router.get("/{run_id}/question", response_model=PublicQuestion)
@@ -414,10 +432,7 @@ def skip_question(run_id: UUID, payload: SkipInput, request: Request,
     except (GameConflict, PerkUnavailable) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     run = _lookup(db, run_id, user.id)
-    return GameInfo(
-        game_id=run.id, language=run.language, phase=run.status,
-        correct_main_answers=run.correct_main_answers,
-    )
+    return _game_info(db, run)
 
 
 @router.post("/{run_id}/hints/remove", response_model=PublicQuestion)

@@ -1139,3 +1139,69 @@ test('all category labels use the shared translated UI dictionary but API identi
   assert.match(template, /\[value\]="category"/);
   assert.doesNotMatch(template, /\{\{ category \}\}/);
 });
+
+
+test('gold skip shows next-question loading, updates persisted counts and keeps progress separate', () => {
+  const { app, posts, requests, scheduler } = setup();
+  app.screen = 'question';
+  app.current = { ...question };
+  app.progress = 4;
+  app.gameCorrectAnswers = 3;
+  app.spendableStars.gold = 1;
+  app.shopOpen = true;
+  scheduler.run(() => {
+    app.skipCurrentQuestion();
+    assert.equal(posts[0].url, '/api/v2/games/existing-game/skip');
+    assert.equal(app.current, null);
+    assert.equal(app.questionLoading, true);
+    assert.equal(app.generatingNextQuestion, true);
+    succeed(posts[0], { game_id: 'existing-game', language: 'English',
+      phase: 'main', correct_main_answers: 3, main_question_index: 5, skipped_questions: 1 });
+    assert.equal(app.progress, 5);
+    assert.equal(app.gameCorrectAnswers, 3);
+    assert.equal(app.skippedQuestions, 1);
+    assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
+    assert.equal(app.questionLoading, true);
+    succeed(requests[0], { ...question, number: 6 });
+  });
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.generatingNextQuestion, false);
+  assert.equal(app.shopOpen, false);
+  assert.equal(app.screen, 'question');
+});
+
+test('failed paid skip restores question and hides transition spinner', () => {
+  const { app, posts, scheduler } = setup();
+  app.screen = 'question';
+  app.current = { ...question };
+  app.spendableStars.gold = 1;
+  scheduler.run(() => {
+    app.skipCurrentQuestion();
+    posts[0].subject.error(new Error('offline'));
+  });
+  assert.equal(app.current.question_id, question.question_id);
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.generatingNextQuestion, false);
+  assert.equal(app.loading, false);
+  assert.equal(app.skippedQuestions, 0);
+  assert.equal(app.perksError, 'perks.actionFailed');
+});
+
+test('collapsed shop shows tier colors and category selection only through a dialog', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const style = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /class="shop-toggle"[\\s\\S]*?shopOpen = !shopOpen/);
+  assert.match(template, /class="shop-content"[\\s\\S]*?\\*ngIf="shopOpen"/);
+  assert.match(template, /openCategoryChangeDialog\\(\\)/);
+  assert.doesNotMatch(template, /\\(click\\)="changeCategory\\('random'\\)"/);
+  assert.doesNotMatch(template, /\\(click\\)="changeCategory\\('manual'\\)"/);
+  for (const tier of ['bronze', 'silver', 'gold']) {
+    assert.match(template, new RegExp('class="tier-price ' + tier + '"'));
+    assert.match(style, new RegExp('\\\\.tier-price\\\\.' + tier));
+  }
+  for (const key of ['stats.roundCorrect', 'stats.roundSkipped', 'hero.nextQuestion',
+    'perks.changeCategory', 'perks.back']) assert.ok(english[key], key);
+  assert.match(template, /class="question-generation"[\\s\\S]*?role="status"/);
+  assert.match(template, /locale\\.format\\('stats.roundSkipped'/);
+  assert.match(source, /if \\(selected\\.isDenied\\) continue/);
+});

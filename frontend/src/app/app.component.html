@@ -50,6 +50,10 @@
           <strong class="star-number">{{ currentStars[tier.key] }}</strong>
         </div>
       </div>
+      <div class="round-summary">
+        <span>{{ locale.format('stats.roundCorrect', { count: gameCorrectAnswers }) }}</span>
+        <span>{{ locale.format('stats.roundSkipped', { count: skippedQuestions }) }}</span>
+      </div>
     </div>
     <div class="star-panel">
       <div class="star-panel-title">
@@ -111,7 +115,8 @@
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
-    <h1 *ngIf="screen === 'question' && (current || questionLoading)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
+    <h1 *ngIf="screen === 'question' && questionLoading && generatingNextQuestion">{{ locale.t('hero.nextQuestion') }}</h1>
+    <h1 *ngIf="screen === 'question' && !(questionLoading && generatingNextQuestion) && (current || questionLoading || canRetryQuestion)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
     <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
@@ -171,9 +176,9 @@
       </div>
     </div>
 
-    <div class="question-actions" *ngIf="screen === 'question' && questionLoading && !current">
+    <div class="question-generation" *ngIf="screen === 'question' && questionLoading && !current" role="status" aria-live="polite">
       <span class="gear-loader" aria-hidden="true"></span>
-      <span class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
+      <span>{{ locale.t('game.loading') }}</span>
     </div>
 
     <div *ngIf="screen === 'question' && current as question" class="question"
@@ -192,50 +197,47 @@
         </ng-container>
       </div>
       <div class="perk-shop" *ngIf="!question.bonus">
-        <h3>{{ locale.t('perks.title') }}</h3>
-        <div class="perk-counter">{{ locale.t('perks.removed') }}: {{ question.hidden_count || 0 }}/2</div>
-        <div class="perk-actions">
-          <button class="outline-button" type="button" (click)="removeOptions(1)"
-                  [disabled]="loading || perksBusy || (question.hidden_count || 0) >= 2 ||
-                              spendableStars.bronze < 2">
-            {{ locale.t('perks.removeOne') }} — 2 ★
-          </button>
-          <button class="outline-button" type="button" (click)="removeOptions(2)"
-                  [disabled]="loading || perksBusy || (question.hidden_count || 0) !== 0 ||
-                              spendableStars.bronze < 3">
-            {{ locale.t('perks.removeTwo') }} — 3 ★
-          </button>
-          <button class="outline-button" type="button" (click)="skipCurrentQuestion()"
-                  [disabled]="loading || perksBusy || spendableStars.gold < 1">
-            {{ locale.t('perks.skip') }} — 1 {{ locale.t('stars.gold') }} ★
-          </button>
-        </div>
-        <div class="perk-counter">
-          {{ locale.t('perks.categoryChanges') }}:
-          {{ categoryInfo?.changes_used ?? 0 }}/2 ·
-          {{ locale.t('perks.manualCategory') }}: {{ categoryInfo?.manual_used ?? 0 }}/1
-        </div>
-        <div class="perk-current-category" *ngIf="categoryInfo?.current">
-          {{ locale.t('perks.currentCategory') }}: {{ locale.t('category.' + categoryInfo?.current) }}
-        </div>
-        <div class="perk-actions">
-          <button class="outline-button" type="button" (click)="changeCategory('random')"
-                  [disabled]="loading || perksBusy || !categoryInfo?.can_change ||
-                              spendableStars.silver < 1">
-            {{ locale.t('perks.randomCategory') }} — 1 {{ locale.t('stars.silver') }} ★
-          </button>
-          <select [(ngModel)]="chosenCategory" [disabled]="loading || perksBusy || !categoryInfo?.can_choose"
-                  aria-label="Select category">
-            <option *ngFor="let category of categoryInfo?.alternatives" [value]="category">
-              {{ locale.t('category.' + category) }}
-            </option>
-          </select>
-          <button class="outline-button" type="button" (click)="changeCategory('manual')"
-                  [disabled]="loading || perksBusy || !categoryInfo?.can_choose ||
-                              !chosenCategory || spendableStars.silver < 2">
-            {{ locale.t('perks.chooseCategory') }} — 2 {{ locale.t('stars.silver') }} ★
-          </button>
-          <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
+        <button type="button" class="shop-toggle" (click)="shopOpen = !shopOpen"
+                [attr.aria-expanded]="shopOpen" aria-controls="quiz-perk-options">
+          <span>{{ locale.t('perks.title') }}</span>
+          <span aria-hidden="true">{{ shopOpen ? '▴' : '▾' }}</span>
+        </button>
+        <div class="shop-content" id="quiz-perk-options" *ngIf="shopOpen">
+          <div class="perk-counter">{{ locale.t('perks.removed') }}: {{ question.hidden_count || 0 }}/2</div>
+          <div class="perk-actions">
+            <button class="outline-button" type="button" (click)="removeOptions(1)"
+                    [disabled]="loading || perksBusy || (question.hidden_count || 0) >= 2 ||
+                                spendableStars.bronze < 2">
+              {{ locale.t('perks.removeOne') }} — 2
+              <span class="tier-price bronze">★ {{ locale.t('stars.bronze') }}</span>
+            </button>
+            <button class="outline-button" type="button" (click)="removeOptions(2)"
+                    [disabled]="loading || perksBusy || (question.hidden_count || 0) !== 0 ||
+                                spendableStars.bronze < 3">
+              {{ locale.t('perks.removeTwo') }} — 3
+              <span class="tier-price bronze">★ {{ locale.t('stars.bronze') }}</span>
+            </button>
+            <button class="outline-button" type="button" (click)="skipCurrentQuestion()"
+                    [disabled]="loading || perksBusy || spendableStars.gold < 1">
+              {{ locale.t('perks.skip') }} — 1
+              <span class="tier-price gold">★ {{ locale.t('stars.gold') }}</span>
+            </button>
+          </div>
+          <div class="perk-current-category" *ngIf="categoryInfo?.current">
+            {{ locale.t('perks.currentCategory') }}: {{ locale.t('category.' + categoryInfo?.current) }}
+          </div>
+          <div class="perk-actions">
+            <button class="outline-button" type="button" (click)="openCategoryChangeDialog()"
+                    [disabled]="loading || perksBusy || !categoryInfo?.can_change || spendableStars.silver < 1">
+              {{ locale.t('perks.changeCategory') }}
+              <span class="tier-price silver">★ {{ locale.t('stars.silver') }}</span>
+            </button>
+            <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
+          </div>
+          <div class="perk-counter">
+            {{ locale.t('perks.categoryChanges') }}: {{ categoryInfo?.changes_used ?? 0 }}/2 ·
+            {{ locale.t('perks.manualCategory') }}: {{ categoryInfo?.manual_used ?? 0 }}/1
+          </div>
         </div>
       </div>
     </div>
