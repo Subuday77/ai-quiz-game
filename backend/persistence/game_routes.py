@@ -238,6 +238,36 @@ def game_info(run_id: UUID, user: User = Depends(authenticated_user),
     return _game_info(db, run)
 
 
+@router.patch("/{run_id}/language", response_model=GameInfo)
+def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
+                            user: User = Depends(authenticated_user),
+                            db: Session = Depends(get_db)):
+    """Change language on this existing run, preserving paid exclusions.
+
+    A row lock and issued-attempt check prevent changes once Q1 exists.
+    Does not create another game, charge stars or modify the allowlist.
+    """
+    validate_origin(request)
+    if payload.language not in LANGUAGE_DICT.values():
+        raise HTTPException(status_code=422, detail="Unsupported language")
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        issued = db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run_id
+        )) or 0
+        if run.status != "main" or issued:
+            raise HTTPException(status_code=409, detail="Question language is locked after Q1")
+        run.language = payload.language
+        db.commit()
+        return _game_info(db, run)
+    except GameNotFound:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.get("/{run_id}/question", response_model=PublicQuestion)
 def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                  db: Session = Depends(get_db)):
