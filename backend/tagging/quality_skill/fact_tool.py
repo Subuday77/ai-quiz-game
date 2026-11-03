@@ -26,8 +26,8 @@ _PATTERNS = (
     ("superlative_comparison", 3, 0.68, (
         r"\b(?:меньше\s+всего|больше\s+всего|среди\s+всех|наименьш\w*|"
         r"наибольш\w*|сам\w*\s+высок\w*|fewest|least|most\s+points|"
-        r"among\\s+all|highest|lowest|сам\\w*\\s+южн\\w*|"
-        r"сам\\w*\\s+северн\\w*|сам\\w*\\s+стар\\w*)\\b")),
+        r"among\s+all|highest|lowest|сам\w*\s+южн\w*|"
+        r"сам\w*\s+северн\w*|сам\w*\s+стар\w*)\b")),
     ("exclusive_claim", 3, 0.68, (
         r"\b(?:единственн\w*|исключительн\w*|only|sole|unique)\b")),
     ("first_or_last_claim", 2, 0.62, (
@@ -35,12 +35,12 @@ _PATTERNS = (
     # These signals flag independent secondary claims omitted from the
     # generator's fact triple; they do not themselves assert a falsehood.
     ("named_river_location", 3, 0.73, (
-        r"\\b(?:на\\s+берегах\\s+реки|у\\s+реки|on\\s+the\\s+river)\\s+[\\w-]+\\b")),
+        r"\b(?:на\s+берегах\s+реки|у\s+реки|on\s+the\s+river)\s+[\w-]+\b")),
     ("named_airport_attribution", 2, 0.70, (
-        r"\\b(?:аэропорт|аэродром|airport|airfield)\\b")),
+        r"\b(?:аэропорт|аэродром|airport|airfield)\b")),
     ("historical_derivation_claim", 3, 0.70, (
-        r"\\b(?:происходящ\\w*\\s+из|произош\\w*\\s+от|"
-        r"derived\\s+from|originat\\w*\\s+from)\\b")),
+        r"\b(?:происходящ\w*\s+из|произош\w*\s+от|"
+        r"derived\s+from|originat\w*\s+from)\b")),
     ("compound_historical_claim", 2, 0.60, (
         r"\b(?:разделив\w*\s+(?:награду|преми\w*)|совместно\s+получив\w*|"
         r"shared\s+(?:an?\s+)?(?:award|prize))\b")),
