@@ -138,6 +138,29 @@ class BonusTopicRotationTests(unittest.TestCase):
             self.assertEqual(run.correct_main_answers, 15)
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
 
+    def test_tagged_bonus_empty_pool_does_not_publish_too_easy_reserve(self):
+        """A failed bonus remains retryable despite an enabled reserve flag."""
+        self.set_bonus()
+        with patch.dict(os.environ, {
+            "AI_TAG_DEDUP_ENABLED": "true",
+            "QUIZ_QUESTION_POOL_FALLBACK_ENABLED": "true",
+            "QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED": "true",
+        }), patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=502, detail="No acceptable bonus candidate"
+        )) as gen:
+            result = self.client.get(self.base + "/question")
+        self.assertEqual(result.status_code, 502, result.text)
+        gen.assert_called_once()
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(self.game_id))
+            self.assertTrue(run.bonus_topic_change_unlocked)
+            self.assertEqual(run.status, "bonus")
+            self.assertEqual(run.correct_main_answers, 15)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 0)
+        self.assertEqual(self.client.post(
+            self.base + "/bonus/change-topic"
+        ).status_code, 200)
+
     def test_bonus_change_respects_origin_and_authentication(self):
         self.set_bonus()
         self.failed_generation()
