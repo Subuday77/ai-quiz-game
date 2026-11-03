@@ -126,7 +126,7 @@
     <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
 
     <div class="status" *ngIf="screen !== 'setup'">
-      <div><span>{{ locale.t('game.progress') }}</span><strong>{{ progress }} / 15</strong></div>
+      <div><span>{{ locale.t('game.progress') }}</span><strong>{{ currentQuestionNumber }} / {{ currentQuestionTotal }}</strong></div>
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
