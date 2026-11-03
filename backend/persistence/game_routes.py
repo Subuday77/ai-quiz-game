@@ -339,7 +339,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
             db, run_id=run_id, user_id=user.id, question=candidate,
             category=category, provider=provider, model=model,
             prompt_version="tagged-v2" if tagged else "v1",
-            schema_version="question_tagged_v2" if tagged else "question_v1",
+            schema_version="question_tagged_v3" if tagged else "question_v1",
             dedup_enforce=tagged,
             expected_bonus_topic_index=bonus_index,
         )
