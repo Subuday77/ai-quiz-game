@@ -59,6 +59,44 @@ class GameStateTests(unittest.TestCase):
         self.assertIs(game.bonus_correct, True)
         self.assertEqual(game.phase, "completed")
 
+
+    def test_gold_skip_shifts_silver_award_to_eleventh_slot(self):
+        game = GameState()
+        for _ in range(8):
+            game.submit_answer(True)
+        skipped = game.skip_main_question()
+        self.assertFalse(skipped.correct)
+        self.assertEqual(game.correct_main_answers, 8)
+        self.assertEqual(game.current_difficulty, 9)
+        self.assertEqual(game.hints_used, 1)
+        self.assertIsNone(game.submit_answer(True).achievement)
+        self.assertEqual(game.submit_answer(True).achievement, "silver")
+        self.assertEqual(game.correct_main_answers, 10)
+        for _ in range(4):
+            game.submit_answer(True)
+        self.assertEqual(game.phase, "completed")
+        self.assertEqual(game.correct_main_answers, 14)
+        self.assertEqual(game.hints_used, 1)
+
+    def test_skip_fifteenth_slot_never_awards_gold_or_bonus(self):
+        game = GameState()
+        for _ in range(14):
+            game.submit_answer(True)
+        result = game.skip_main_question()
+        self.assertEqual(result.phase, "completed")
+        self.assertEqual(game.correct_main_answers, 14)
+        self.assertEqual(game.main_question_index, 15)
+        with self.assertRaises(RuntimeError):
+            game.skip_main_question()
+
+    def test_restored_game_with_skips_uses_slot_index(self):
+        game = GameState(correct_main_answers=8, main_question_index=9,
+                         hints_used=1)
+        self.assertEqual(game.current_difficulty, 9)
+        self.assertEqual(game.submit_answer(True).achievement, None)
+        self.assertEqual(game.current_difficulty, 10)
+        self.assertEqual(game.submit_answer(True).achievement, "silver")
+
     def test_no_hints_during_bonus(self):
         game = GameState()
         for _ in range(15):
