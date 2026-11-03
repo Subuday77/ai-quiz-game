@@ -35,7 +35,7 @@ class ProviderTimeoutBudgetError(Exception):
 class LLMClient:
     def __init__(self, provider: str, *, model_id: str | None = None,
                  structured_output_mode: str | None = None,
-                 role: Literal["generator", "reviewer"] = "generator") -> None:
+                 role: Literal["generator", "reviewer", "arbiter"] = "generator") -> None:
         """
         Initialize a provider-specific LLM client.
         :param provider: Provider identifier to configure: openai, nvidia, or bedrock.
@@ -281,7 +281,7 @@ class LLMClient:
             self.provider == OPENAI
             and re.fullmatch(
                 r"gpt-(?:4o(?:-mini)?|4\.1(?:-mini|-nano)?|"
-                r"5(?:\.[0-9]+)?(?:-mini|-nano)?|6(?:\.[0-9]+)?(?:-luna|-sol)?)",
+                r"5(?:\.[0-9]+)?(?:-mini|-nano)?|6(?:\.[0-9]+)?(?:-luna|-sol|-terra)?)",
                 self.model,
             ) is not None
         )
