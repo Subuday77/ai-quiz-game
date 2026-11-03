@@ -93,41 +93,35 @@ def _public(attempt, stored, phase: str, *, db: Session | None = None) -> Public
 def _category_for_round(run_id: UUID, number: int,
                         bonus_topic_index: int = 0,
                         db: Session | None = None) -> str:
-    """Stable normal sequence; a skipped topic is not consumed.
+    """Deterministic category order, restricted to the per-game allowlist.
 
-    After the first paid skip, derive a deterministic draw from categories
-    not yet ANSWERED in this game. The skipped topic remains eligible, while
-    selected topics avoid repeats. This holds across backend restarts.
+    Previously *answered* categories are consumed. A paid category rejection
+    or a gold skip is eligible in a future slot; all resets use the allowlist.
+    db=None retains the original pure legacy/test calculation.
     """
     if not 1 <= number <= 16:
         raise GameConflict("Invalid round question number")
-    categories = random.Random(run_id.int).sample(
-        QUESTION_CATEGORIES, k=len(QUESTION_CATEGORIES)
-    )
-    if number == 16:
-        return categories[(15 + bonus_topic_index) % len(categories)]
-    if db is not None:
-        skipped = db.scalar(select(func.count(QuestionAttempt.id)).where(
-            QuestionAttempt.run_id == run_id,
-            QuestionAttempt.answered_at.is_not(None),
-            QuestionAttempt.selected_key.is_(None),
-        )) or 0
-        if skipped:
-            used = set(db.scalars(
-                select(Topic.slug)
-                .join(Question, Question.topic_id == Topic.id)
-                .join(QuestionAttempt, QuestionAttempt.question_id == Question.id)
-                .where(QuestionAttempt.run_id == run_id,
-                       QuestionAttempt.answered_at.is_not(None),
-                       QuestionAttempt.selected_key.is_not(None))
-            ))
-            remaining = [category for category in categories
-                         if category_slug(category) not in used]
-            if not remaining:  # Exhaustion resets the working list.
-                remaining = categories
-            return random.Random(run_id.int ^ (number << 20)).choice(remaining)
-    return categories[number - 1]
-
+    if db is None:
+        categories = random.Random(run_id.int).sample(
+            QUESTION_CATEGORIES, k=len(QUESTION_CATEGORIES))
+        return categories[(15 + bonus_topic_index) % len(categories)] if number == 16 else categories[number - 1]
+    from persistence.categories import allowed_categories, available_categories
+    from persistence.models import GameRun
+    run = db.get(GameRun, run_id)
+    if run is None:
+        raise GameNotFound("Game not found")
+    allowed = list(allowed_categories(run))
+    categories = random.Random(run_id.int).sample(allowed, k=len(allowed))
+    unused = set(available_categories(db, run, number))
+    base = (15 + bonus_topic_index) if number == 16 else number - 1
+    # Q16 auto retry cycles through unused, then through already-consumed
+    # allowed topics if fresh ones are exhausted; no excluded topic returns.
+    rotated = categories[base % len(categories):] + categories[:base % len(categories)]
+    if number == 16 and bonus_topic_index:
+        ordered = [x for x in rotated if x in unused] + [x for x in rotated if x not in unused]
+        return ordered[0]
+    return next((category for category in rotated if category in unused),
+                rotated[0])
 
 
 def _advance_bonus_topic_after_failure(
@@ -152,7 +146,8 @@ def _advance_bonus_topic_after_failure(
             db.rollback()
             event("bonus_topic_rotation_skipped", reason="state_changed")
             return
-        next_index = (run.bonus_topic_index + 1) % len(QUESTION_CATEGORIES)
+        from persistence.categories import allowed_categories
+        next_index = (run.bonus_topic_index + 1) % len(allowed_categories(run))
         old_index = run.bonus_topic_index
         run.bonus_topic_index = next_index
         # Retain for the future star-perk policy, but do not offer players
