@@ -6,6 +6,7 @@ for irreversible answer transitions.
 """
 import os
 import random
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,10 @@ from persistence.gameplay import (
     GameConflict, GameNotFound, TopicsNotSeeded, create_game, game_state,
     offer_question, owned_game, pending_question, record_answer,
     skip_main_question, hide_wrong_options, hidden_choices,
+)
+from persistence.categories import (
+    allowed_categories, available_categories, category_snapshot,
+    exclude_pregame_categories,
 )
 from persistence.models import Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
@@ -48,6 +53,18 @@ class RemoveInput(BaseModel):
     question_id: UUID
     count: int = Field(ge=1, le=2)
     request_id: UUID
+
+
+class ExcludeInput(BaseModel):
+    categories: list[str] = Field(min_length=1)
+    request_id: UUID
+
+
+class ChangeCategoryInput(BaseModel):
+    question_id: UUID
+    request_id: UUID
+    mode: str  # random | manual
+    category: str | None = None
 
 
 class GameInfo(BaseModel):
@@ -416,3 +433,107 @@ def remove_distractors(run_id: UUID, payload: RemoveInput, request: Request,
     except (GameConflict, PerkUnavailable) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return _public(attempt, question, phase="main", db=db)
+
+
+@router.get("/{run_id}/categories")
+def categories(run_id: UUID, user: User = Depends(authenticated_user),
+               db: Session = Depends(get_db)):
+    """Available per-game topics; no private question or correct key."""
+    return category_snapshot(db, _lookup(db, run_id, user.id))
+
+
+@router.post("/{run_id}/categories/exclude")
+def exclude_categories(run_id: UUID, payload: ExcludeInput, request: Request,
+                       user: User = Depends(authenticated_user),
+                       db: Session = Depends(get_db)):
+    """Before Q1, pay five silver for every newly excluded category."""
+    validate_origin(request)
+    try:
+        exclude_pregame_categories(
+            db, run_id=run_id, user_id=user.id,
+            categories=payload.categories, request_id=payload.request_id)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except (GameConflict, PerkUnavailable) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return category_snapshot(db, _lookup(db, run_id, user.id))
+
+
+@router.post("/{run_id}/categories/change")
+def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request,
+                    user: User = Depends(authenticated_user),
+                    db: Session = Depends(get_db)):
+    """Pay silver only after a replacement question is successfully validated.
+
+    Generator and critic operate without held DB locks; the final transaction
+    verifies attempt identity, caps, category uniqueness, user balance, then
+    commits the new version and debit together. A failed AI call costs zero.
+    """
+    validate_origin(request)
+    from star_perks import category_change_price
+    if payload.mode not in ("random", "manual"):
+        raise HTTPException(status_code=422, detail="Invalid category mode")
+    manual = payload.mode == "manual"
+    if manual != (payload.category is not None):
+        raise HTTPException(status_code=422, detail="Manual mode requires category only")
+    run = _lookup(db, run_id, user.id)
+    if run.status != "main":
+        raise HTTPException(status_code=409, detail="No category changes on bonus/finished games")
+    pending = pending_question(db, run_id=run_id)
+    if pending is None or pending[0].question_id != payload.question_id:
+        raise HTTPException(status_code=409, detail="No matching unanswered question")
+    attempt, current_question = pending
+    snapshot = category_snapshot(db, run)
+    try:
+        category_change_price(
+            allowed_count=len(allowed_categories(run)),
+            changes_used=attempt.category_change_count,
+            manual_used=attempt.manual_category_used,
+            manual=manual,
+        )
+    except PerkUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    options = snapshot["alternatives"]
+    if not options:
+        raise HTTPException(status_code=409, detail="No unused categories available")
+    if manual and payload.category not in options:
+        raise HTTPException(status_code=409, detail="Category is not available")
+    chosen = payload.category if manual else secrets.choice(options)
+    old_attempt_id = attempt.id
+    difficulty = attempt.requested_difficulty
+    language = run.language
+    db.rollback()  # Never keep a PostgreSQL lock/connection during AI calls.
+
+    from api import generate_valid_question
+    tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
+    if tagged:
+        from tagging.core import HistoryNotTagged, generator_context
+        from tagging.repository import history_for_user
+        try:
+            history = history_for_user(db, user.id)
+        except HistoryNotTagged:
+            raise HTTPException(status_code=503, detail="Historical tags required") from None
+        context = generator_context(history, category_slug(chosen))
+        db.rollback()
+        candidate = generate_valid_question(
+            difficulty, language, chosen, tag_history=history, tag_context=context)
+    else:
+        candidate = generate_valid_question(difficulty, language, chosen)
+    provider, model = _generation_metadata()
+    try:
+        new_attempt, stored = offer_question(
+            db, run_id=run_id, user_id=user.id, question=candidate,
+            category=chosen, provider=provider, model=model,
+            prompt_version="tagged-v2" if tagged else "v1",
+            schema_version="question_tagged_v3" if tagged else "question_v1",
+            dedup_enforce=tagged,
+            replace_question_id=payload.question_id,
+            replace_attempt_id=old_attempt_id,
+            replace_manual=manual,
+            category_operation_key=f"star:{user.id}:{payload.request_id}:category",
+        )
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except (GameConflict, PerkUnavailable) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return _public(new_attempt, stored, phase="main", db=db)
