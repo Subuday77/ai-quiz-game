@@ -1136,7 +1136,8 @@ test('all category labels use the shared translated UI dictionary but API identi
   for (const key of categories) assert.equal(english[key], key.slice('category.'.length));
   assert.match(template, /locale\.t\('category\.' \+ category\)/);
   assert.match(template, /locale\.t\('category\.' \+ categoryInfo\?\.current\)/);
-  assert.match(template, /\[value\]="category"/);
+  assert.ok(source.includes('inputOptions: Object.fromEntries(alternatives.map(category =>'));
+  assert.ok(source.includes("[category, this.locale.t('category.' + category)]"));
   assert.doesNotMatch(template, /\{\{ category \}\}/);
 });
 
