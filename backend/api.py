@@ -207,6 +207,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         rejection_reason = None
         rejection_error_type = None
         duplicate_reason = None
+        shadow_result = None
         try:
             raw = (create_question(
                 difficulty, language, category, tag_context=exclusions,
@@ -273,7 +274,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 # candidate if the experimental shadow checker has a bug.
                 from tagging.quality_skill import evaluate_shadow
                 try:
-                    evaluate_shadow(question, requested_difficulty=difficulty)
+                    shadow_result = evaluate_shadow(question, requested_difficulty=difficulty)
                 except Exception as exc:
                     event("quality_skill_shadow_failed", error_type=type(exc).__name__)
             check_local_leak(question, leak_mode)
@@ -284,7 +285,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                                                  category_slug=topic_slug(category)),
                                      mode=quality_mode, deadline=deadline,
                                      timeout_seconds=policy.provider_timeout_seconds,
-                                     clock=perf_counter)
+                                     clock=perf_counter, shadow=shadow_result)
             else:
                 check_quality(question, difficulty, language, quality_mode,
                               deadline, policy.provider_timeout_seconds, clock=perf_counter)
@@ -314,8 +315,8 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
-            if (tagged and too_easy_reserve is not None and question is not None
-                    and is_strict_too_easy_reserve(question)):
+            if (tagged and difficulty < 15 and too_easy_reserve is not None
+                    and question is not None and is_strict_too_easy_reserve(question)):
                 # Keep only a fully checked, strictly too-easy-only question;
                 # publication is a separate last resort AFTER the global pool.
                 too_easy_reserve.append(question.model_copy(deep=True))
