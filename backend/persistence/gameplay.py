@@ -339,3 +339,85 @@ def skip_main_question(
     except Exception:
         db.rollback()
         raise
+
+
+def question_plausibility(db: Session, question_id: UUID) -> dict | None:
+    """Read the original generator estimate; never request or infer a re-score."""
+    review = db.scalar(select(QuestionReview).where(
+        QuestionReview.question_id == question_id,
+        QuestionReview.checker_type == "generator_plausibility",
+    ).order_by(QuestionReview.created_at.asc(), QuestionReview.id.asc()))
+    if review is None or not isinstance(review.details, dict):
+        return None  # Old verified question: the pure helper uses neutral 50.
+    scores = review.details.get("scores")
+    return scores if isinstance(scores, dict) else None
+
+
+def hidden_choices(db: Session, attempt: QuestionAttempt,
+                   question: Question) -> tuple[str, ...]:
+    """Reconstruct stable ties from persisted attempt UUID and score record."""
+    import random
+    from star_perks import choose_to_hide
+
+    if not attempt.hints_used:
+        return ()
+    if attempt.hints_used not in (1, 2):
+        raise GameConflict("Invalid hidden answer count")
+    return choose_to_hide(
+        question.correct_key, question_plausibility(db, question.id),
+        count=attempt.hints_used, rng=random.Random(attempt.id.int),
+    )
+
+
+def hide_wrong_options(
+    db: Session, *, run_id: UUID, user_id: UUID, question_id: UUID,
+    count: int, request_id: UUID,
+) -> tuple[QuestionAttempt, Question]:
+    """Pay bronze and hide lowest-scored false choices, as one transaction.
+
+    The server persists 0/1/2 hidden count on QuestionAttempt. For a given
+    attempt UUID, generated scores and deterministic tie shuffle reproduce
+    exactly the same set after restart. One 2-option action costs 3 bronze;
+    two separate 1-option actions cost 2+2.
+    """
+    from persistence.models import WalletTransaction
+    from persistence.star_economy import lock_user_stars, spend_star
+    from star_perks import PerkUnavailable, remove_price
+
+    operation_key = f"star:{user_id}:{request_id}:hide"
+    try:
+        lock_user_stars(db, user_id)
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        previous = db.scalar(select(WalletTransaction).where(
+            WalletTransaction.idempotency_key == operation_key
+        ))
+        if previous is not None:
+            if (previous.user_id != user_id or previous.run_id != run_id
+                    or previous.reason != f"star/bronze/hide-{count}"
+                    or previous.amount not in (-2, -3)):
+                raise PerkUnavailable("Idempotency key reused")
+            cached = pending_question(db, run_id=run.id)
+            if cached is None or cached[0].question_id != question_id:
+                raise GameConflict("Previous hint already applied to an old question")
+            db.commit()
+            return cached
+        if run.status != "main":
+            raise GameConflict("No hints on bonus or finished games")
+        cached = pending_question(db, run_id=run.id)
+        if cached is None or cached[0].question_id != question_id:
+            raise GameConflict("No matching unanswered question")
+        attempt, question = cached
+        price = remove_price(attempt.hints_used, count)
+        # Validate sorting and scores BEFORE spending any stars.
+        hidden_choices(db, attempt, question)
+        spend_star(db, user_id=user_id, run_id=run_id, tier="bronze",
+                   amount=price, action=f"hide-{count}",
+                   operation_key=operation_key)
+        attempt.hints_used += count
+        run.hints_used += 1  # One action, whether it hides one or two.
+        db.commit()
+        db.refresh(attempt)
+        return attempt, question
+    except Exception:
+        db.rollback()
+        raise
