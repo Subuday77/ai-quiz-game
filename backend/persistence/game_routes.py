@@ -44,6 +44,12 @@ class GameInfo(BaseModel):
     correct_main_answers: int
 
 
+class BonusTopicResponse(BaseModel):
+    category: str
+    cycle_reset: bool
+    topic_index: int
+
+
 class AnswerFeedback(BaseModel):
     correct: bool
     correct_answer: Choice
@@ -70,14 +76,67 @@ def _public(attempt, stored, phase: str) -> PublicQuestion:
     )
 
 
-def _category_for_round(run_id: UUID, number: int) -> str:
+def _category_for_round(run_id: UUID, number: int,
+                        bonus_topic_index: int = 0) -> str:
     """Stable per-round shuffled category order, surviving process restart."""
     if not 1 <= number <= 16:
         raise GameConflict("Invalid round question number")
     categories = random.Random(run_id.int).sample(
         QUESTION_CATEGORIES, k=len(QUESTION_CATEGORIES)
     )
+    if number == 16:
+        return categories[(15 + bonus_topic_index) % len(categories)]
     return categories[number - 1]
+
+
+
+def _unlock_bonus_topic_change(db: Session, *, run_id: UUID, user_id: UUID) -> None:
+    """Persist permission after actual generation failure, not after success."""
+    db.rollback()
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status == "bonus" and pending_question(db, run_id=run.id) is None:
+            run.bonus_topic_change_unlocked = True
+            db.commit()
+            event("bonus_topic_change_unlocked", topic_index=run.bonus_topic_index)
+        else:
+            db.rollback()
+    except Exception as exc:
+        db.rollback()
+        event("bonus_topic_change_unlock_failed", error_type=type(exc).__name__)
+
+
+@router.post("/{run_id}/bonus/change-topic", response_model=BonusTopicResponse)
+def change_bonus_topic(run_id: UUID, request: Request,
+                       user: User = Depends(authenticated_user),
+                       db: Session = Depends(get_db)):
+    """Change Q16 topic after a failed generation, indefinitely and cyclically."""
+    validate_origin(request)
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        if (run.status != "bonus" or run.correct_main_answers != 15
+                or pending_question(db, run_id=run.id) is not None
+                or not run.bonus_topic_change_unlocked):
+            db.rollback()
+            raise HTTPException(status_code=409,
+                                detail="Bonus topic cannot be changed now")
+        run.bonus_topic_index = (
+            run.bonus_topic_index + 1
+        ) % len(QUESTION_CATEGORIES)
+        index = run.bonus_topic_index
+        db.commit()
+    except HTTPException:
+        raise
+    except GameNotFound:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except Exception:
+        db.rollback()
+        raise
+    category = _category_for_round(run_id, 16, index)
+    event("bonus_topic_changed", topic_index=index, cycle_reset=(index == 0))
+    return BonusTopicResponse(category=category,
+                              cycle_reset=index == 0, topic_index=index)
 
 
 def _generation_metadata() -> tuple[str, str]:
@@ -129,7 +188,10 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
 
     event("question_cache", hit=False)
     difficulty = game_state(run).current_difficulty
-    category = _category_for_round(run.id, run.correct_main_answers + 1)
+    bonus_index = run.bonus_topic_index if run.status == "bonus" else None
+    category = _category_for_round(
+        run.id, run.correct_main_answers + 1, bonus_index or 0
+    )
     language = run.language
     if db.scalar(select(Topic.id).where(
             Topic.slug == category_slug(category))) is None:
@@ -173,6 +235,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                            or (generation_error.status_code == 409
                                and generation_error.detail == {"code": "duplicate_exhausted"}))
             if not recoverable:
+                _unlock_bonus_topic_change(db, run_id=run_id, user_id=user.id)
                 raise
             from persistence.question_pool import (
                 enabled as fallback_enabled, offer_approved_pool_question, scan_limit,
@@ -180,10 +243,14 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
             from tagging.review import is_strict_too_easy_reserve
             try:
                 use_pool = fallback_enabled("QUIZ_QUESTION_POOL_FALLBACK_ENABLED")
-                use_reserve = fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
+                use_reserve = (
+                    run.status != "bonus"
+                    and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
+                )
                 limit = scan_limit() if use_pool else 1
             except ValueError:
                 event("question_fallback_configuration_failed")
+                _unlock_bonus_topic_change(db, run_id=run_id, user_id=user.id)
                 raise HTTPException(
                     status_code=503, detail="Invalid question fallback configuration"
                 ) from None
@@ -204,12 +271,14 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                             *pooled, phase="bonus" if pooled[0].number == 16 else "main",
                         )
             if not use_reserve or not too_easy_reserve:
+                _unlock_bonus_topic_change(db, run_id=run_id, user_id=user.id)
                 raise
             candidate = next(
                 (item for item in too_easy_reserve
                  if is_strict_too_easy_reserve(item)), None,
             )
             if candidate is None:
+                _unlock_bonus_topic_change(db, run_id=run_id, user_id=user.id)
                 raise
             # Keep the original rejected verdict for audit. This emergency
             # publication is NEVER eligible for the normal approved pool,
@@ -224,7 +293,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
             event("question_too_easy_fallback", outcome="selected",
                   requested_difficulty=difficulty)
     else:
-        candidate = generate_valid_question(difficulty, language, category)
+        try:
+            candidate = generate_valid_question(difficulty, language, category)
+        except HTTPException:
+            _unlock_bonus_topic_change(db, run_id=run_id, user_id=user.id)
+            raise
     provider, model = _generation_metadata()
     try:
         attempt, stored = offer_question(
@@ -233,6 +306,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
             prompt_version="tagged-v2" if tagged else "v1",
             schema_version="question_tagged_v2" if tagged else "question_v1",
             dedup_enforce=tagged,
+            expected_bonus_topic_index=bonus_index,
         )
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
