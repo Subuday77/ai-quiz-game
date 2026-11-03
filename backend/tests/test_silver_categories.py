@@ -112,6 +112,71 @@ class SilverCategoryTests(unittest.TestCase):
         })
         self.assertEqual(failure.status_code, 409)
 
+    def test_paid_exclusions_survive_language_change_before_q1(self):
+        self.credit(5)
+        removed = QUESTION_CATEGORIES[0]
+        excluded = self.client.post(self.base + "/categories/exclude", json={
+            "categories": [removed], "request_id": str(uuid4()),
+        })
+        self.assertEqual(excluded.status_code, 200, excluded.text)
+        self.assertEqual(self.silver(), 0)
+        allowed = excluded.json()["allowed"]
+        self.assertNotIn(removed, allowed)
+
+        changed = self.client.patch(self.base + "/language", json={
+            "language": "Russian",
+        })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["game_id"], self.run_id)
+        self.assertEqual(changed.json()["language"], "Russian")
+        self.assertEqual(self.client.get(self.base + "/categories").json()["allowed"], allowed)
+        self.assertEqual(self.silver(), 0)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(self.run_id))
+            self.assertEqual(run.language, "Russian")
+            self.assertEqual(run.allowed_categories, allowed)
+        self.first_question()
+        self.assertEqual(self.generator.call_args.args[1], "Russian")
+        self.assertNotIn(self.generator.call_args.args[2], [removed])
+        # The first question is already issued; changing it would mix languages.
+        self.assertEqual(self.client.patch(
+            self.base + "/language", json={"language": "English"},
+        ).status_code, 409)
+
+    def test_language_change_rejects_invalid_language_and_foreign_run(self):
+        self.assertEqual(self.client.patch(
+            self.base + "/language", json={"language": "Klingon"},
+        ).status_code, 422)
+        self.assertEqual(self.client.get(self.base).json()["language"], "English")
+        with TestClient(app) as stranger:
+            registered = stranger.post("/api/auth/register", json={
+                "username": "ForeignLanguageUser",
+                "password": "offline-test-password-2026!",
+            })
+            self.assertEqual(registered.status_code, 201, registered.text)
+            self.assertEqual(stranger.patch(
+                self.base + "/language", json={"language": "Russian"},
+            ).status_code, 404)
+        self.assertEqual(self.client.get(self.base).json()["language"], "English")
+
+    def test_language_change_when_sixteen_categories_remain(self):
+        removed = QUESTION_CATEGORIES[:-16]
+        self.credit(len(removed) * 5)
+        result = self.client.post(self.base + "/categories/exclude", json={
+            "categories": removed, "request_id": str(uuid4()),
+        })
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertFalse(result.json()["can_exclude"])
+        allowed = result.json()["allowed"]
+        changed = self.client.patch(self.base + "/language", json={
+            "language": "Russian",
+        })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(self.client.get(self.base + "/categories").json()["allowed"], allowed)
+        self.assertEqual(self.silver(), 0)
+        self.first_question()
+        self.assertEqual(self.generator.call_args.args[1], "Russian")
+
     def test_exactly_sixteen_categories_disable_swaps(self):
         remove = QUESTION_CATEGORIES[:-16]
         self.credit(len(remove) * 5)
