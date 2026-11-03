@@ -169,10 +169,12 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         return _public(*cached, phase=run.status)
 
     event("question_cache", hit=False)
-    difficulty = game_state(run).current_difficulty
+    game_progress = game_state(run, db)
+    difficulty = game_progress.current_difficulty
     bonus_index = run.bonus_topic_index if run.status == "bonus" else None
     category = _category_for_round(
-        run.id, run.correct_main_answers + 1, bonus_index or 0
+        run.id, (16 if run.status == "bonus" else game_progress.main_question_index + 1),
+        bonus_index or 0
     )
     language = run.language
     if db.scalar(select(Topic.id).where(
