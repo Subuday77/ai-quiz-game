@@ -66,7 +66,8 @@ class TaggedContractTests(unittest.TestCase):
     def test_v2_transport_is_separate_from_legacy_question_contract(self):
         from question_transport_schema import quiz_question_schema
         self.assertNotIn("fact", quiz_question_schema()["properties"])
-        self.assertEqual(transport_contract(OutputContract.TAGGED_QUESTION)[0], "quiz_question_tagged_v2")
+        self.assertEqual(transport_contract(OutputContract.TAGGED_QUESTION)[0], "quiz_question_tagged_v3")
+        self.assertEqual(set(tagged_question_schema()["properties"]["plausibility"]["required"]), set("ABCD"))
         schema = tagged_question_schema()
         self.assertEqual(set(schema["properties"]), set(TaggedQuestion.model_fields))
         self.assertEqual(set(schema["required"]), set(TaggedQuestion.model_fields))
