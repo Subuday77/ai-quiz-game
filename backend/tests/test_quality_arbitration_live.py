@@ -8,7 +8,9 @@ from time import perf_counter
 import unittest
 from unittest.mock import patch
 
-from quality_errors import QualityRegenerationError
+from quality_errors import (
+    QualityArbitrationUnavailable, QualityRegenerationError,
+)
 from quality_schema import QualityMode
 from provider_result import Completion, ProviderResult
 from tagging.contract import TaggedQuestion
@@ -27,11 +29,10 @@ def verdict(**changes):
         "choices": {k: "yes" if k == "B" else "no" for k in "ABCD"},
         "difficulty": "appropriate",
         "answer_leak": False,
-        "claims": [
-            {"claim": "Location and event in the question",
-             "verdict": "supported", "reason": "The cited association is valid."},
-            {"claim": "Correct choice is unique",
-             "verdict": "supported", "reason": "Competing choices do not fit."},
+        "stem_claims": [
+            {"claim": "The question mentions Albert Einstein",
+             "anchor": "Albert Einstein", "verdict": "supported",
+             "reason": "The named person appears in the stem."},
         ],
         "rationale": "All independent checks passed.",
     }
@@ -45,10 +46,10 @@ class ArbitrationPolicyTests(unittest.TestCase):
             (dict(choices={"A":"yes","B":"yes","C":"no","D":"no"}), "options_not_unique"),
             (dict(choices={"A":"no","B":"yes","C":"uncertain","D":"no"}), "uncertain_option"),
             (dict(answer_leak=True), "answer_leak"),
-            (dict(claims=[
-                {"claim": "The named river exists", "verdict": "uncertain",
-                 "reason": "No independent confirmation"}
-            ]), "unsupported_claim"),
+            (dict(stem_claims=[
+                {"claim": "The named river exists", "anchor": "river",
+                 "verdict": "uncertain", "reason": "No independent confirmation"}
+            ]), "unsupported_stem_claim"),
             (dict(difficulty="too_easy"), "bonus_too_easy"),
         ]
         for changes, reason in cases:
@@ -61,6 +62,38 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertTrue(is_suitable(
             verdict(difficulty="too_easy"), correct_answer="B", bonus=False
         )[0])
+
+    def test_false_distractor_is_not_a_false_question_premise(self):
+        """Real P2: rook castling/mashed potatoes distractors must stay choices."""
+        good = verdict()
+        self.assertTrue(is_suitable(
+            good, correct_answer="B", bonus=True
+        )[0])
+        # The wrong answer's negative assessment is already represented
+        # by choices[A]="no"; it MUST NOT appear in stem_claims.
+        self.assertEqual(good.choices["A"], "no")
+        self.assertEqual(len(good.stem_claims), 1)
+        from tagging.quality_skill.arbiter import stem_claims_anchored
+        self.assertTrue(stem_claims_anchored(
+            good, "In what year was Albert Einstein born?"
+        ))
+        fake_option_claim = verdict(stem_claims=[
+            {"claim": "Rice is not used for mashed potatoes",
+             "anchor": "Rice", "verdict": "false",
+             "reason": "This is about a distractor, not the stem"}
+        ])
+        self.assertFalse(stem_claims_anchored(
+            fake_option_claim,
+            "Which ingredient is used for mashed potatoes?"
+        ))
+
+    def test_arbiter_schema_has_separate_verbatim_stem_evidence(self):
+        from output_contracts import transport_contract, OutputContract
+        name, schema = transport_contract(OutputContract.ARBITRATION)
+        self.assertEqual(name, "quiz_quality_arbitration_v2")
+        self.assertIn("stem_claims", schema["required"])
+        self.assertNotIn("claims", schema["properties"])
+        self.assertIn("anchor", schema["properties"]["stem_claims"]["items"]["required"])
 
     def test_default_off_never_calls_model(self):
         with patch.dict(os.environ, {"QUIZ_QUALITY_ARBITER_MODE": "off"}), patch(
@@ -95,6 +128,7 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertTrue(accepted)
         self.assertEqual(why, "accepted")
         self.assertEqual(report["model"], "gpt-6.1-terra")
+        self.assertEqual(report["contract_version"], "arbitration_v2")
         self.assertEqual(llm.call_args.kwargs["role"], "arbiter")
         self.assertEqual(llm.call_args.kwargs["structured_output_mode"], "strict")
         self.assertEqual(llm.return_value.responses.create.call_args.kwargs[
@@ -165,7 +199,10 @@ class ArbitrationPolicyTests(unittest.TestCase):
             "tagging.review.LLMClient"
         ) as reviewer, patch(
             "tagging.quality_skill.arbiter.arbitrate",
-            return_value=(False, None, "unsupported_claim")
+            return_value=(False, {
+                "checker_type": "ai_terra_arbiter",
+                "decision": "reject",
+            }, "unsupported_stem_claim")
         ) as terra:
             reviewer.return_value.responses.create.return_value = ProviderResult(
                 json.dumps(review.model_dump(mode="json")), Completion.COMPLETE,
