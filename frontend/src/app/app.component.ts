@@ -9,10 +9,12 @@ import { RESET_COPY, RESET_LANGUAGE_NAMES } from './localization/reset-copy';
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
 type StarTier = 'bronze' | 'silver' | 'gold' | 'platinum';
+type ConvertibleTier = Exclude<StarTier, 'platinum'>;
 type StarCounts = Record<StarTier, number>;
 type AuthMode = 'login' | 'register';
 
 const GAME_API = '/api/v2/games';
+const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
@@ -46,8 +48,9 @@ interface PublicQuestion {
   number: number;
   difficulty: number;
   question: string;
-  answers: Record<Choice, string>;
+  answers: Partial<Record<Choice, string>>;
   bonus: boolean;
+  hidden_count: number;
 }
 interface AnswerFeedback {
   correct: boolean;
@@ -128,6 +131,14 @@ export class AppComponent implements OnInit, OnDestroy {
   stars: string[] = [];
   currentStars: StarCounts = emptyStars();
   totalStars: StarCounts = emptyStars();
+  spendableStars: StarCounts = emptyStars();
+  gameCorrectAnswers = 0;
+  perksBusy = false;
+  perksError = '';
+  readonly exchangeTiers: ConvertibleTier[] = ['bronze', 'silver', 'gold'];
+  exchangeSource: ConvertibleTier = 'bronze';
+  exchangeTarget: ConvertibleTier = 'silver';
+  exchangeAmount = 10;
 
   constructor(private readonly http: HttpClient) {
     this.locale = new LocalizationStore(http);
@@ -425,6 +436,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.stars = [];
         this.currentStars = emptyStars();
         this.progress = 0;
+        this.gameCorrectAnswers = 0;
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
@@ -459,6 +471,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.progress = Math.max(this.progress, Math.min(15, question.number - 1));
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
@@ -521,7 +534,8 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.feedback = result;
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
-        this.progress = result.correct_main_answers;
+        this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
+        this.gameCorrectAnswers = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
           this.stars.push(result.achievement);
           this.currentStars[result.achievement] += 1;
@@ -572,6 +586,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
+    this.refreshSpendableStars();
     this.restoreActiveGame();
   }
 
@@ -582,6 +597,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoringGame = false;
     this.account = null;
     this.totalStars = emptyStars();
+    this.spendableStars = emptyStars();
     this.gamesPlayed = 0;
     this.correctAnswers = 0;
     this.statsLoading = false;
@@ -595,7 +611,102 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loading = false;
   }
 
+  private refreshSpendableStars(): void {
+    if (!this.account) return;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.get<StarCounts>(STARS_API).pipe(
+      timeout(10000),
+    ).subscribe({
+      next: (values) => {
+        if (this.account?.id === accountId) this.spendableStars = values;
+      },
+      error: () => { this.perksError = 'perks.balanceUnavailable'; },
+    }));
+  }
+
+  removeOptions(count: 1 | 2): void {
+    const current = this.current;
+    if (!this.account || !current || current.bonus || this.screen !== 'question' ||
+        this.perksBusy || this.loading) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<PublicQuestion>(
+      GAME_API + '/' + this.gameId + '/hints/remove',
+      { question_id: current.question_id, count, request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => { this.perksBusy = false; }))
+     .subscribe({
+      next: (question) => {
+        if (this.current?.question_id === current.question_id) this.current = question;
+        this.refreshSpendableStars();
+      },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.actionFailed';
+      },
+    }));
+  }
+
+  skipCurrentQuestion(): void {
+    const current = this.current;
+    if (!this.account || !current || current.bonus || this.screen !== 'question' ||
+        this.perksBusy || this.loading) return;
+    this.perksBusy = true;
+    this.loading = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/skip',
+      { question_id: current.question_id, request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs),
+           finalize(() => { this.perksBusy = false; this.loading = false; }))
+     .subscribe({
+      next: (game) => {
+        this.progress = Math.min(15, current.number);
+        this.gameCorrectAnswers = game.correct_main_answers;
+        this.current = null;
+        this.refreshSpendableStars();
+        this.refreshStats();
+        if (game.phase === 'completed') {
+          this.finishedPhase = 'completed';
+          this.forgetActiveGame();
+          this.screen = 'done';
+        } else {
+          // Finalize loading before asking for the next main slot.
+          this.loading = false;
+          this.loadQuestion();
+        }
+      },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else if (err instanceof HttpErrorResponse && err.status === 409) {
+          this.perksError = 'perks.actionFailed';
+        } else {
+          this.perksError = 'perks.actionFailed';
+        }
+      },
+    }));
+  }
+
+  exchangeStars(): void {
+    const amount = Number(this.exchangeAmount);
+    if (!this.account || this.perksBusy || this.exchangeSource === this.exchangeTarget ||
+        !Number.isSafeInteger(amount) || amount <= 0) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<StarCounts>(STARS_API + '/exchange', {
+      source: this.exchangeSource, target: this.exchangeTarget,
+      amount, request_id: crypto.randomUUID(),
+    }).pipe(timeout(15000), finalize(() => { this.perksBusy = false; }))
+     .subscribe({
+      next: (balances) => { this.spendableStars = balances; },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.exchangeFailed';
+      },
+    }));
+  }
+
   private refreshStats(): void {
+    this.refreshSpendableStars();
     const accountId = this.account?.id;
     if (!accountId) return;
     const version = ++this.statsVersion;
@@ -646,6 +757,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.resumeAvailable = true;
         this.selectedLanguage = run.language;
         this.progress = run.correct_main_answers;
+        this.gameCorrectAnswers = run.correct_main_answers;
         this.current = null;
         this.feedback = null;
         this.screen = 'setup';
@@ -712,6 +824,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.finishedPhase = null;
     this.error = '';
     this.progress = 0;
+    this.gameCorrectAnswers = 0;
+    this.spendableStars = emptyStars();
     this.stars = [];
     this.currentStars = emptyStars();
     this.screen = 'setup';
