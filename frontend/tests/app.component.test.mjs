@@ -399,7 +399,7 @@ test('results button keeps results label and does not generate a new question', 
   assert.equal(requests.length, 0);
 });
 
-test('starting a game hands loading state to generation and preserves its game ID', () => {
+test('new round offers pregame category exclusions before generating Q1', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
   scheduler.run(() => {
@@ -408,6 +408,11 @@ test('starting a game hands loading state to generation and preserves its game I
     assert.equal(posts[0].url, '/api/v2/games');
     succeed(posts[0], { game_id: 'created-game', language: 'English', phase: 'main',
       correct_main_answers: 0 });
+    assert.equal(app.loading, false);
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(requests.length, 0);
+    app.startGame();
     assert.equal(app.loading, true);
     assert.equal(requests[0].url, '/api/v2/games/created-game/question');
     requests[0].subject.error(new Error('offline'));
@@ -419,7 +424,7 @@ test('starting a game hands loading state to generation and preserves its game I
   assert.equal(app.gameId, 'created-game');
 });
 
-test('setup button shows loading until the first question arrives, not resume prematurely', () => {
+test('setup shows Start questions while pregame exclusions are offered', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
   assert.equal(app.setupButtonLabelKey, 'game.start');
@@ -429,6 +434,9 @@ test('setup button shows loading until the first question arrives, not resume pr
     succeed(posts[0], { game_id: 'created-game', language: 'English', phase: 'main',
       correct_main_answers: 0 });
     assert.equal(app.gameId, 'created-game');
+    assert.equal(app.loading, false);
+    assert.equal(app.setupButtonLabelKey, 'perks.startQuestions');
+    app.startGame();
     assert.equal(app.loading, true);
     assert.equal(app.setupButtonLabelKey, 'game.loading');
     succeed(requests[0]);
