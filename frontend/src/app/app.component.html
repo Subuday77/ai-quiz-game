@@ -112,9 +112,12 @@
       </div>
       <h2>{{ question.question }}</h2>
       <div class="answers">
-        <button *ngFor="let choice of choices" type="button" (click)="answer(choice)" [disabled]="loading">
-          <span class="letter">{{ choice }}</span><span>{{ question.answers[choice] }}</span>
-        </button>
+        <ng-container *ngFor="let choice of choices">
+          <button *ngIf="question.answers[choice] as answerText"
+                  type="button" (click)="answer(choice)" [disabled]="loading">
+            <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
+          </button>
+        </ng-container>
       </div>
     </div>
 
