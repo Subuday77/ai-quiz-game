@@ -148,10 +148,6 @@
         <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
           {{ locale.t('game.duplicateRetry') }}
         </button>
-        <button class="outline-button" type="button" (click)="changeBonusTopic()"
-                *ngIf="canChangeBonusTopic" [disabled]="loading">
-          {{ locale.t('game.changeBonusTopic') }}
-        </button>
         <button class="outline-button" type="button" (click)="returnToMenuAfterDuplicate()" [disabled]="loading">
           {{ locale.t('game.returnToMenu') }}
         </button>
@@ -162,10 +158,6 @@
     <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
       <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
         {{ locale.t('game.retry') }}
-      </button>
-      <button class="outline-button" type="button" (click)="changeBonusTopic()"
-              *ngIf="canChangeBonusTopic" [disabled]="loading">
-        {{ locale.t('game.changeBonusTopic') }}
       </button>
     </div>
   </section>
