@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
@@ -22,7 +22,7 @@ from persistence.gameplay import (
     offer_question, owned_game, pending_question, record_answer,
     skip_main_question,
 )
-from persistence.models import Topic, User
+from persistence.models import Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
 from question_schema import Choice, PublicQuestion
 from star_perks import PerkUnavailable
@@ -78,8 +78,14 @@ def _public(attempt, stored, phase: str) -> PublicQuestion:
 
 
 def _category_for_round(run_id: UUID, number: int,
-                        bonus_topic_index: int = 0) -> str:
-    """Stable per-round shuffled category order, surviving process restart."""
+                        bonus_topic_index: int = 0,
+                        db: Session | None = None) -> str:
+    """Stable normal sequence; a skipped topic is not consumed.
+
+    After the first paid skip, derive a deterministic draw from categories
+    not yet ANSWERED in this game. The skipped topic remains eligible, while
+    selected topics avoid repeats. This holds across backend restarts.
+    """
     if not 1 <= number <= 16:
         raise GameConflict("Invalid round question number")
     categories = random.Random(run_id.int).sample(
@@ -87,6 +93,26 @@ def _category_for_round(run_id: UUID, number: int,
     )
     if number == 16:
         return categories[(15 + bonus_topic_index) % len(categories)]
+    if db is not None:
+        skipped = db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run_id,
+            QuestionAttempt.answered_at.is_not(None),
+            QuestionAttempt.selected_key.is_(None),
+        )) or 0
+        if skipped:
+            used = set(db.scalars(
+                select(Topic.slug)
+                .join(Question, Question.topic_id == Topic.id)
+                .join(QuestionAttempt, QuestionAttempt.question_id == Question.id)
+                .where(QuestionAttempt.run_id == run_id,
+                       QuestionAttempt.answered_at.is_not(None),
+                       QuestionAttempt.selected_key.is_not(None))
+            ))
+            remaining = [category for category in categories
+                         if category_slug(category) not in used]
+            if not remaining:  # Exhaustion resets the working list.
+                remaining = categories
+            return random.Random(run_id.int ^ (number << 20)).choice(remaining)
     return categories[number - 1]
 
 
@@ -181,7 +207,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     bonus_index = run.bonus_topic_index if run.status == "bonus" else None
     category = _category_for_round(
         run.id, (16 if run.status == "bonus" else game_progress.main_question_index + 1),
-        bonus_index or 0
+        bonus_index or 0, db=db
     )
     language = run.language
     if db.scalar(select(Topic.id).where(
