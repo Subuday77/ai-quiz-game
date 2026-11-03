@@ -245,6 +245,7 @@ class NativeRequestTests(unittest.TestCase):
             for level in (0, 6, 15):
                 self.reset(provider, fmt)
                 sessions[self.game_id].state.correct_main_answers = level if level < 15 else 15
+                sessions[self.game_id].state.main_question_index = level if level < 15 else 15
                 sessions[self.game_id].state.phase = "main" if level < 15 else "bonus"
                 self.calls[provider].return_value = RESPONSES[provider](text=json.dumps({**QUESTION, "difficulty": level}))
                 self.assertEqual(self.http.get(self.url).status_code, 200)
