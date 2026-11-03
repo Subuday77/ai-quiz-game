@@ -92,8 +92,5 @@
   "questionLanguage.Italian": "Italian",
   "game.duplicateExhausted": "We couldn't find a new unique question this time. The candidates were too similar to questions you've already seen. Would you like to try again?",
   "game.duplicateRetry": "Try again",
-  "game.returnToMenu": "Back to menu",
-  "game.changeBonusTopic": "Change bonus topic ↻",
-  "game.bonusTopicChanged": "Bonus topic changed. Retry to generate a new question, or change it again.",
-  "game.bonusTopicChangeFailed": "Could not change the bonus topic. Retry or try again."
+  "game.returnToMenu": "Back to menu"
 }
