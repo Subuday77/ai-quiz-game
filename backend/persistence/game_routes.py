@@ -240,6 +240,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     pooled = offer_approved_pool_question(
                         db, run_id=run_id, user_id=user.id,
                         category=category, max_candidates=limit,
+                        expected_bonus_topic_index=bonus_index,
                     )
                 except Exception as exc:
                     # A broken optional fallback must not accidentally bypass
