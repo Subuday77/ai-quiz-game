@@ -219,6 +219,80 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertEqual(q._review_report["decision"], "reject")
         terra.assert_called_once()
 
+    def test_missing_terra_verdict_is_not_a_content_rejection(self):
+        q = sample_question().model_copy(update={"difficulty": 15})
+        review = sample_critic(difficulty="appropriate", distractors=0, knowledge=0)
+        with patch.dict(os.environ, {"QUIZ_QUALITY_ARBITER_MODE": "on"}), patch(
+            "tagging.review.LLMClient"
+        ) as reviewer, patch(
+            "tagging.quality_skill.arbiter.arbitrate",
+            return_value=(False, None, "unavailable"),
+        ):
+            reviewer.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(review.model_dump(mode="json")), Completion.COMPLETE,
+                "completed",
+            )
+            with self.assertRaises(QualityArbitrationUnavailable) as raised:
+                check_tagged_quality(
+                    q, language="Russian", requested_difficulty=15,
+                    category="Geography", neighbors=[],
+                    mode=QualityMode.ENFORCE,
+                    deadline=perf_counter()+30, timeout_seconds=12,
+                    shadow={"would_arbitrate": True},
+                )
+        self.assertEqual(raised.exception.reason, "unavailable")
+        self.assertEqual(q._review_report["decision"], "arbitration_unavailable")
+
+    def test_arbiter_unavailable_aborts_paid_retry_loop_after_one_attempt(self):
+        from fastapi import HTTPException
+        from api import generate_valid_question
+        q = sample_question()
+        with patch.dict(os.environ, {
+            "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_GENERATION_BUDGET_SECONDS": "30",
+            "AI_QUALITY_MODE": "enforce",
+            "AI_LOCAL_LEAK_MODE": "off",
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("api.create_question", return_value=q.model_dump()) as generator, patch(
+            "tagging.review.check_tagged_quality",
+            side_effect=QualityArbitrationUnavailable("unavailable")
+        ) as reviewer, patch("api.sleep") as sleep:
+            with self.assertRaises(HTTPException) as failed:
+                generate_valid_question(
+                    q.difficulty, "English", "General knowledge",
+                    tag_history=[], tag_context=[], too_easy_reserve=[],
+                )
+        self.assertEqual(failed.exception.status_code, 503)
+        self.assertEqual(generator.call_count, 1)
+        self.assertEqual(reviewer.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_invalid_claim_anchor_is_unavailable_not_a_false_fact(self):
+        from tagging.quality_skill.arbiter import stem_claims_anchored
+        q = sample_question()
+        invalid = verdict(stem_claims=[{
+            "claim": "Rice is not used for potato mash",
+            "anchor": "rice", "verdict": "false",
+            "reason": "A false option cannot become a false stem.",
+        }])
+        self.assertFalse(stem_claims_anchored(invalid, q.question))
+        with patch.dict(os.environ, {"QUIZ_QUALITY_ARBITER_MODE": "on"}), patch(
+            "tagging.quality_skill.arbiter.LLMClient"
+        ) as llm:
+            llm.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(invalid.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            allowed, report, reason = arbitrate(
+                q, language="Russian", category="History",
+                requested_difficulty=15, shadow=None,
+                deadline=perf_counter()+20, timeout_seconds=12,
+            )
+        self.assertFalse(allowed)
+        self.assertIsNone(report)
+        self.assertEqual(reason, "invalid_stem_anchor")
+        self.assertEqual(llm.return_value.responses.create.call_count, 1)
+
     def test_savarin_rome_river_origin_and_calvados_signals(self):
         scenarios = [
             ("Какой автор связан с блюдом саварен и книгой о вкусе?",
