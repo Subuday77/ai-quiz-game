@@ -122,6 +122,8 @@ export class AppComponent implements OnInit, OnDestroy {
   correctAnswers = 0;
 
   selectedLanguage = 'English';
+  private gameLanguage = '';
+  languageSaving = false;
   screen: Screen = 'setup';
   gameId = '';
   resumeAvailable = false;
@@ -179,6 +181,56 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get currentQuestionTotal(): number {
     return this.current?.bonus ? 16 : 15;
+  }
+
+  get canEditPregameLanguage(): boolean {
+    return this.screen === 'setup' && (
+      !this.gameId || this.resumeAvailable ||
+      (this.progress === 0 && this.categoryInfo?.current === null)
+    );
+  }
+
+  // An excluded-category payment already allocated a game. Update its
+  // language in PostgreSQL, not just the dropdown, before Q1 is offered.
+  changeQuestionLanguage(language: string): void {
+    if (!this.languages.includes(language)) return;
+    if (!this.gameId || this.resumeAvailable) {
+      this.selectedLanguage = language;
+      return;
+    }
+    if (!this.canEditPregameLanguage || !this.account || this.loading ||
+        this.languageSaving || this.perksBusy || this.categoryLoading) {
+      this.selectedLanguage = this.gameLanguage;
+      return;
+    }
+    if (language === this.gameLanguage) {
+      this.selectedLanguage = language;
+      return;
+    }
+    const gameId = this.gameId;
+    const accountId = this.account.id;
+    this.languageSaving = true;
+    this.selectedLanguage = language;
+    this.error = '';
+    this.subscriptions.add(this.http.patch<GameInfo>(
+      GAME_API + '/' + gameId + '/language', { language },
+    ).pipe(timeout(10000), finalize(() => {
+      if (this.gameId === gameId) this.languageSaving = false;
+    })).subscribe({
+      next: (game) => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        this.gameLanguage = game.language;
+        this.selectedLanguage = game.language;
+      },
+      error: (err: unknown) => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else {
+          this.selectedLanguage = this.gameLanguage;
+          this.error = 'game.languageUpdateFailed';
+        }
+      },
+    }));
   }
 
   get setupButtonLabelKey(): string {
@@ -454,7 +506,7 @@ export class AppComponent implements OnInit, OnDestroy {
   startGame(): void {
     if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.categoriesToExclude.length > 0) return;
+        this.languageSaving || this.categoriesToExclude.length > 0) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -463,6 +515,7 @@ export class AppComponent implements OnInit, OnDestroy {
       const run = this.resumeCandidate;
       this.resumeCandidate = null;
       this.gameId = run.game_id;
+      this.gameLanguage = run.language;
       this.selectedLanguage = run.language;
       this.progress = run.main_question_index ?? run.correct_main_answers;
       this.gameCorrectAnswers = run.correct_main_answers;
@@ -499,13 +552,14 @@ export class AppComponent implements OnInit, OnDestroy {
     // If POST /games fails the player can still choose Resume.
     if (!this.resumeAvailable || !this.account || this.loading || this.perksBusy ||
         this.configLoading || this.authLoading || this.authBusy || this.restoringGame ||
-        this.categoryLoading) return;
+        this.categoryLoading || this.languageSaving) return;
     this.createGame(false);
   }
 
   openCategoryExclusions(): void {
     if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
-        this.authBusy || this.restoringGame || this.categoryLoading) return;
+        this.authBusy || this.restoringGame || this.categoryLoading ||
+        this.languageSaving) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -529,6 +583,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.resumeRunLanguage = '';
@@ -1159,6 +1214,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.duplicateExhausted = false;
     this.longWait = false;
     this.gameId = '';
+    this.gameLanguage = '';
+    this.languageSaving = false;
     this.resumeAvailable = false;
     this.resumeCandidate = null;
     this.resumeRunLanguage = '';
