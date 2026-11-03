@@ -1,4 +1,8 @@
-"""Offline PostgreSQL-contract tests for unlimited Q16 topic recovery."""
+"""Offline regression tests for system-owned automatic Q16 topic rotation.
+
+All generated questions are mocked; no network, paid provider or PostgreSQL
+connection is required. The SQLite transaction contract mirrors GameRun.
+"""
 import os
 import unittest
 from unittest.mock import patch
@@ -6,18 +10,17 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from api import app
-from question_schema import QuizQuestion
 from consts import QUESTION_CATEGORIES
 from persistence.database import get_db
 from persistence.game_routes import _category_for_round
 from persistence.models import Base, GameRun, QuestionAttempt
 from persistence.seed_topics import seed_topics
-from sqlalchemy import func, select
+from question_schema import QuizQuestion
 
 
 class BonusTopicRotationTests(unittest.TestCase):
@@ -66,111 +69,120 @@ class BonusTopicRotationTests(unittest.TestCase):
             run.correct_main_answers = 15
             db.commit()
 
-    def failed_generation(self):
+    def get_state(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(self.game_id))
+            return (run.status, run.correct_main_answers,
+                    run.bonus_topic_index, run.bonus_topic_change_unlocked,
+                    db.scalar(select(func.count(QuestionAttempt.id))))
+
+    def failed_generation(self, status=503, client=None):
         with patch("api.generate_valid_question", side_effect=HTTPException(
-            status_code=503, detail="Test generator unavailable"
+            status_code=status, detail="Test generator unavailable",
         )) as gen:
-            failed = self.client.get(self.base + "/question")
-        self.assertEqual(failed.status_code, 503, failed.text)
+            failed = (client or self.client).get(self.base + "/question")
+        self.assertEqual(failed.status_code, status, failed.text)
         gen.assert_called_once()
+        return gen.call_args.args[2]
 
-    def test_main_cannot_change_topic_even_after_failure(self):
-        self.assertEqual(self.client.post(self.base + "/bonus/change-topic").status_code, 409)
-        self.failed_generation()
-        self.assertEqual(self.client.post(self.base + "/bonus/change-topic").status_code, 409)
-        with Session(self.engine) as db:
-            run = db.get(GameRun, UUID(self.game_id))
-            self.assertFalse(run.bonus_topic_change_unlocked)
+    def test_main_failure_does_not_rotate_any_topic(self):
+        old = self.get_state()
+        original = _category_for_round(UUID(self.game_id), 1)
+        self.assertEqual(self.failed_generation(), original)
+        self.assertEqual(self.get_state(), old)
+        self.assertEqual(self.client.post(self.base + "/bonus/change-topic").status_code, 404)
 
-    def test_bonus_can_change_every_category_and_cycle_without_resetting_progress(self):
+    def test_every_failed_bonus_generation_auto_rotates_without_player_action(self):
         self.set_bonus()
-        self.assertEqual(self.client.post(self.base + "/bonus/change-topic").status_code, 409)
-        self.failed_generation()
-        with Session(self.engine) as db:
-            self.assertTrue(db.get(GameRun, UUID(self.game_id)).bonus_topic_change_unlocked)
-        originals = []
-        for i in range(1, len(QUESTION_CATEGORIES) + 1):
-            response = self.client.post(self.base + "/bonus/change-topic")
-            self.assertEqual(response.status_code, 200, response.text)
-            data = response.json()
-            self.assertEqual(data["topic_index"], i % len(QUESTION_CATEGORIES))
-            self.assertEqual(data["cycle_reset"], i == len(QUESTION_CATEGORIES))
-            self.assertEqual(data["category"], _category_for_round(
-                UUID(self.game_id), 16, i
+        original = _category_for_round(UUID(self.game_id), 16)
+        initial = self.get_state()
+        self.assertEqual(initial[2], 0)
+        visited = []
+        for i in range(1, len(QUESTION_CATEGORIES) + 2):
+            generated_for = self.failed_generation(status=502)
+            visited.append(generated_for)
+            self.assertEqual(generated_for, _category_for_round(
+                UUID(self.game_id), 16, i - 1
             ))
-            originals.append(data["category"])
-        self.assertEqual(len(set(originals)), len(QUESTION_CATEGORIES))
-        self.assertEqual(originals[-1], _category_for_round(UUID(self.game_id), 16))
-        with Session(self.engine) as db:
-            run = db.get(GameRun, UUID(self.game_id))
-            self.assertEqual(run.status, "bonus")
-            self.assertEqual(run.correct_main_answers, 15)
-            self.assertEqual(run.bonus_topic_index, 0)
-            self.assertTrue(run.bonus_topic_change_unlocked)
-            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 0)
+            state = self.get_state()
+            self.assertEqual(state[0:2], ("bonus", 15))
+            self.assertEqual(state[2], i % len(QUESTION_CATEGORIES))
+            self.assertTrue(state[3])
+            self.assertEqual(state[4], 0)
+        self.assertEqual(len(set(visited[:-1])), len(QUESTION_CATEGORIES))
+        self.assertEqual(visited[-1], original)
+        # The user has NO public API to pick a topic; the server may later
+        # expose a separate explicit *star perk*.
+        self.assertEqual(self.client.post(self.base + "/bonus/change-topic").status_code, 404)
 
-    def test_rotation_survives_reload_and_success_blocks_further_changes(self):
+    def test_auto_rotation_survives_restart_and_success_finishes_recovery(self):
         self.set_bonus()
-        self.failed_generation()
-        changed = self.client.post(self.base + "/bonus/change-topic")
-        self.assertEqual(changed.status_code, 200)
+        first = self.failed_generation()
+        self.assertEqual(first, _category_for_round(UUID(self.game_id), 16))
         with TestClient(app) as reopened:
             reopened.cookies.update(self.client.cookies)
             self.assertEqual(reopened.get(self.base).json()["phase"], "bonus")
-            generated = {
+            generated = QuizQuestion.model_validate({
                 "difficulty": 15,
                 "question": "What is an unusual but verifiable historical fact?",
                 "answers": {"A": "Value A", "B": "Value B",
                             "C": "Value C", "D": "Value D"},
                 "correct_answer": "B",
-            }
-            with patch("api.generate_valid_question", return_value=QuizQuestion.model_validate(generated)) as gen:
+            })
+            with patch("api.generate_valid_question", return_value=generated) as gen:
                 response = reopened.get(self.base + "/question")
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["number"], 16)
             self.assertTrue(response.json()["bonus"])
-            self.assertEqual(gen.call_args.args[2], changed.json()["category"])
+            self.assertEqual(gen.call_args.args[2], _category_for_round(
+                UUID(self.game_id), 16, 1
+            ))
+            # Subsequent GET must reuse the same issued question.
+            self.assertEqual(reopened.get(
+                self.base + "/question").json(), response.json())
             self.assertEqual(reopened.post(
-                self.base + "/bonus/change-topic").status_code, 409)
-        with Session(self.engine) as db:
-            run = db.get(GameRun, UUID(self.game_id))
-            self.assertFalse(run.bonus_topic_change_unlocked)
-            self.assertEqual(run.correct_main_answers, 15)
-            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+                self.base + "/bonus/change-topic").status_code, 404)
+        self.assertEqual(self.get_state(), ("bonus", 15, 1, False, 1))
 
     def test_tagged_bonus_empty_pool_does_not_publish_too_easy_reserve(self):
-        """A failed bonus remains retryable despite an enabled reserve flag."""
         self.set_bonus()
         with patch.dict(os.environ, {
             "AI_TAG_DEDUP_ENABLED": "true",
             "QUIZ_QUESTION_POOL_FALLBACK_ENABLED": "true",
             "QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED": "true",
         }), patch("api.generate_valid_question", side_effect=HTTPException(
-            status_code=502, detail="No acceptable bonus candidate"
+            status_code=502, detail="No acceptable bonus candidate",
         )) as gen:
             result = self.client.get(self.base + "/question")
         self.assertEqual(result.status_code, 502, result.text)
         gen.assert_called_once()
-        with Session(self.engine) as db:
-            run = db.get(GameRun, UUID(self.game_id))
-            self.assertTrue(run.bonus_topic_change_unlocked)
-            self.assertEqual(run.status, "bonus")
-            self.assertEqual(run.correct_main_answers, 15)
-            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 0)
-        self.assertEqual(self.client.post(
-            self.base + "/bonus/change-topic"
-        ).status_code, 200)
+        self.assertEqual(self.get_state(), ("bonus", 15, 1, True, 0))
 
-    def test_bonus_change_respects_origin_and_authentication(self):
+    def test_concurrent_failures_cannot_rotate_the_same_topic_twice(self):
+        from persistence.game_routes import _advance_bonus_topic_after_failure
+
         self.set_bonus()
-        self.failed_generation()
+        self.failed_generation(status=502)
+        with Session(self.engine) as db:
+            _advance_bonus_topic_after_failure(
+                db, run_id=UUID(self.game_id),
+                user_id=self._user_id(db), expected_topic_index=0,
+                failure_status=502,
+            )
+        self.assertEqual(self.get_state(), ("bonus", 15, 1, True, 0))
+
+    def _user_id(self, db):
+        return db.get(GameRun, UUID(self.game_id)).user_id
+
+    def test_only_real_generator_failures_rotate_not_client_requests(self):
+        self.set_bonus()
+        with TestClient(app) as outsider:
+            self.assertEqual(outsider.get(self.base + "/question").status_code, 401)
         self.assertEqual(self.client.post(
             self.base + "/bonus/change-topic",
-            headers={"Origin": "https://not-our-site.invalid"}
-        ).status_code, 403)
-        with TestClient(app) as outsider:
-            self.assertEqual(outsider.post(
-                self.base + "/bonus/change-topic").status_code, 401)
+            headers={"Origin": "https://untrusted.example"},
+        ).status_code, 404)
+        self.assertEqual(self.get_state(), ("bonus", 15, 0, False, 0))
 
 
 if __name__ == "__main__":
