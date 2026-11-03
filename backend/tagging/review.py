@@ -16,7 +16,10 @@ from generation_policy import is_transient, provider_timeout, retry_after_second
 from output_contracts import OutputContract
 from provider_result import ProviderCompletionError, completed_text
 from quality_configuration import ReviewerSettings
-from quality_errors import QualityConfigurationError, QualityRegenerationError, QualityReviewFailure
+from quality_errors import (
+    QualityArbitrationUnavailable, QualityConfigurationError,
+    QualityRegenerationError, QualityReviewFailure,
+)
 from quality_schema import IssueCode, QualityMode
 from quality_schema_v2 import CheckStatus, DifficultyRating
 from quality_schema_v3 import QualityReviewV3, audit_score
@@ -458,6 +461,13 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         if arbitration is not None:
             question._review_report["details"]["arbitration"] = arbitration
         if not allowed:
+            if arbitration is None:
+                # No actual negative quality verdict exists (timeout, budget,
+                # invalid model output). Do NOT re-generate/re-review blindly.
+                question._review_report["decision"] = "arbitration_unavailable"
+                event("quality_arbitration_unavailable", reason=reason,
+                      requested_difficulty=requested_difficulty)
+                raise QualityArbitrationUnavailable(reason)
             question._review_report["decision"] = "reject"
             event("quality_arbitration_rejected", reason=reason,
                   requested_difficulty=requested_difficulty)
