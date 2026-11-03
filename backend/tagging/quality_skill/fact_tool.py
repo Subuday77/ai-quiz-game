@@ -26,11 +26,21 @@ _PATTERNS = (
     ("superlative_comparison", 3, 0.68, (
         r"\b(?:меньше\s+всего|больше\s+всего|среди\s+всех|наименьш\w*|"
         r"наибольш\w*|сам\w*\s+высок\w*|fewest|least|most\s+points|"
-        r"among\s+all|highest|lowest)\b")),
+        r"among\\s+all|highest|lowest|сам\\w*\\s+южн\\w*|"
+        r"сам\\w*\\s+северн\\w*|сам\\w*\\s+стар\\w*)\\b")),
     ("exclusive_claim", 3, 0.68, (
         r"\b(?:единственн\w*|исключительн\w*|only|sole|unique)\b")),
     ("first_or_last_claim", 2, 0.62, (
         r"\b(?:перв\w*|последн\w*|first|last|earliest)\b")),
+    # These signals flag independent secondary claims omitted from the
+    # generator's fact triple; they do not themselves assert a falsehood.
+    ("named_river_location", 3, 0.73, (
+        r"\\b(?:на\\s+берегах\\s+реки|у\\s+реки|on\\s+the\\s+river)\\s+[\\w-]+\\b")),
+    ("named_airport_attribution", 2, 0.70, (
+        r"\\b(?:аэропорт|аэродром|airport|airfield)\\b")),
+    ("historical_derivation_claim", 3, 0.70, (
+        r"\\b(?:происходящ\\w*\\s+из|произош\\w*\\s+от|"
+        r"derived\\s+from|originat\\w*\\s+from)\\b")),
     ("compound_historical_claim", 2, 0.60, (
         r"\b(?:разделив\w*\s+(?:награду|преми\w*)|совместно\s+получив\w*|"
         r"shared\s+(?:an?\s+)?(?:award|prize))\b")),
@@ -109,6 +119,23 @@ def inspect(question, settings) -> list[Finding]:
                 "note": "confirm year, recipient and stated rationale independently",
             },
         ))
+
+    # Explicitly known source-backed possibility: calvados can use pear
+    # eau-de-vie in addition to apples. The presence of *both options* is a
+    # review trigger, never an automatic claim that one answer is incorrect.
+    # https://www.inao.gouv.fr/en/node/6896
+    if ("кальвадос" in stem or "calvados" in stem):
+        values = {key: _normalized(value) for key, value in question.answers.items()}
+        pear = [key for key, value in values.items() if "груш" in value or "pear" in value]
+        apple = [key for key, value in values.items() if "яблок" in value or "apple" in value]
+        if pear and apple:
+            findings.append(Finding(
+                tool="fact", code="possible_multiple_correct:calvados_fruit",
+                severity=3, confidence=0.9,
+                evidence={"apple_options": apple, "pear_options": pear,
+                          "verification": "independent_review_required",
+                          "source": "https://www.inao.gouv.fr/en/node/6896"},
+            ))
 
     verified = known_false_fact(question)
     if verified is not None:
