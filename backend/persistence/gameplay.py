@@ -105,6 +105,7 @@ def offer_question(
     provider: str, model: str,
     prompt_version: str = "v1", schema_version: str = "question_v1",
     dedup_enforce: bool = False,
+    expected_bonus_topic_index: int | None = None,
 ) -> tuple[QuestionAttempt, Question]:
     """Store one already-validated candidate, or return the cached pending one.
 
@@ -124,6 +125,11 @@ def offer_question(
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
+        # A topic switch may happen while the old AI request is in flight.
+        # Discard its late result rather than present a wrong-category bonus.
+        if (run.status == "bonus" and expected_bonus_topic_index is not None
+                and run.bonus_topic_index != expected_bonus_topic_index):
+            raise GameConflict("Bonus topic changed during generation")
         cached = pending_question(db, run_id=run.id)
         if cached:
             db.commit()
@@ -186,6 +192,8 @@ def offer_question(
             requested_difficulty=expected_difficulty,
         )
         db.add(attempt)
+        if run.status == "bonus":
+            run.bonus_topic_change_unlocked = False
         db.commit()
         db.refresh(attempt)
         return attempt, stored
