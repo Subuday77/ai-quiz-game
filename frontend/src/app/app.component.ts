@@ -52,6 +52,17 @@ interface PublicQuestion {
   bonus: boolean;
   hidden_count: number;
 }
+interface CategoryInfo {
+  allowed: string[];
+  current: string | null;
+  alternatives: string[];
+  changes_used: number;
+  manual_used: number;
+  can_change: boolean;
+  can_choose: boolean;
+  can_exclude: boolean;
+  minimum_allowed: number;
+}
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -139,6 +150,10 @@ export class AppComponent implements OnInit, OnDestroy {
   exchangeSource: ConvertibleTier = 'bronze';
   exchangeTarget: ConvertibleTier = 'silver';
   exchangeAmount = 10;
+  categoryInfo: CategoryInfo | null = null;
+  categoriesToExclude: string[] = [];
+  chosenCategory = '';
+  categoryLoading = false;
 
   constructor(private readonly http: HttpClient) {
     this.locale = new LocalizationStore(http);
@@ -288,7 +303,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get correctAnswerText(): string {
     return this.feedback && this.current
-      ? this.current.answers[this.feedback.correct_answer]
+      ? (this.current.answers[this.feedback.correct_answer] ?? '')
       : '';
   }
   get gameEnded(): boolean {
@@ -440,7 +455,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
-        this.loadQuestion();
+        this.screen = 'setup';
+        this.loadCategoryInfo(); // Optional paid exclusions before Q1.
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -475,6 +491,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
+        this.loadCategoryInfo();
       },
       error: (error: unknown) => {
         if (this.isUnauthorized(error)) {
@@ -611,6 +628,104 @@ export class AppComponent implements OnInit, OnDestroy {
     this.clearAccount();
     this.error = 'account.sessionExpired';
     this.loading = false;
+  }
+
+  get exclusionCost(): number { return this.categoriesToExclude.length * 5; }
+
+  private loadCategoryInfo(): void {
+    if (!this.account || !this.gameId) return;
+    const gameId = this.gameId;
+    this.categoryLoading = true;
+    this.subscriptions.add(this.http.get<CategoryInfo>(
+      GAME_API + '/' + gameId + '/categories',
+    ).pipe(timeout(10000), finalize(() => { this.categoryLoading = false; }))
+      .subscribe({
+        next: (info) => {
+          if (this.gameId !== gameId) return;
+          this.categoryInfo = info;
+          if (!info.alternatives.includes(this.chosenCategory))
+            this.chosenCategory = info.alternatives[0] ?? '';
+          this.categoriesToExclude = this.categoriesToExclude.filter(
+            value => info.allowed.includes(value),
+          );
+        },
+        error: (err: unknown) => {
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.perksError = 'perks.categoriesUnavailable';
+        },
+      }));
+  }
+
+  async excludeCategories(): Promise<void> {
+    const info = this.categoryInfo;
+    if (!info?.can_exclude || !this.account || !this.gameId ||
+        !this.categoriesToExclude.length || this.perksBusy || this.loading ||
+        this.exclusionCost > this.spendableStars.silver ||
+        info.allowed.length - this.categoriesToExclude.length < 16) return;
+    const { default: Swal } = await import('sweetalert2');
+    const decision = await Swal.fire({
+      titleText: this.locale.t('perks.excludeTitle'),
+      text: this.locale.format('perks.excludeConfirm', {
+        count: this.categoriesToExclude.length, price: this.exclusionCost,
+      }),
+      showCancelButton: true,
+      confirmButtonText: this.locale.t('perks.confirm'),
+      cancelButtonText: this.locale.t('auth.cancel'),
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+    });
+    if (!decision.isConfirmed || this.perksBusy || !this.gameId) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    const gameId = this.gameId;
+    this.subscriptions.add(this.http.post<CategoryInfo>(
+      GAME_API + '/' + gameId + '/categories/exclude',
+      { categories: [...this.categoriesToExclude], request_id: crypto.randomUUID() },
+    ).pipe(timeout(15000), finalize(() => { this.perksBusy = false; }))
+      .subscribe({
+        next: (state) => {
+          if (this.gameId !== gameId) return;
+          this.categoryInfo = state;
+          this.categoriesToExclude = [];
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.perksError = 'perks.actionFailed';
+        },
+      }));
+  }
+
+  changeCategory(mode: 'random' | 'manual'): void {
+    const current = this.current, state = this.categoryInfo;
+    if (!this.account || !current || current.bonus || !state ||
+        this.screen !== 'question' || this.loading || this.perksBusy ||
+        !state.can_change || (mode === 'manual' && !state.can_choose)) return;
+    if (mode === 'manual' && !state.alternatives.includes(this.chosenCategory)) return;
+    const cost = mode === 'manual' ? 2 : 1;
+    if (this.spendableStars.silver < cost) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    const gameId = this.gameId;
+    this.subscriptions.add(this.http.post<PublicQuestion>(
+      GAME_API + '/' + gameId + '/categories/change',
+      { question_id: current.question_id, mode,
+        category: mode === 'manual' ? this.chosenCategory : null,
+        request_id: crypto.randomUUID() },
+    ).pipe(timeout(this.requestTimeoutMs),
+           finalize(() => { this.perksBusy = false; }))
+      .subscribe({
+        next: (question) => {
+          if (this.gameId !== gameId || this.current?.question_id !== current.question_id) return;
+          this.current = question;
+          this.loadCategoryInfo();
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.perksError = 'perks.categoryFailed';
+        },
+      }));
   }
 
   private refreshSpendableStars(): void {
@@ -759,6 +874,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.current = null;
         this.feedback = null;
         this.screen = 'setup';
+        this.loadCategoryInfo();
         this.currentStars = {
           bronze: run.correct_main_answers >= 5 ? 1 : 0,
           silver: run.correct_main_answers >= 10 ? 1 : 0,
@@ -825,6 +941,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameCorrectAnswers = 0;
     this.stars = [];
     this.currentStars = emptyStars();
+    this.categoryInfo = null;
+    this.categoriesToExclude = [];
+    this.chosenCategory = '';
     this.screen = 'setup';
   }
 
