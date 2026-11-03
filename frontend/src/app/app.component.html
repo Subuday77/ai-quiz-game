@@ -125,7 +125,8 @@
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
       <div class="question-actions">
-        <button class="primary" type="button" (click)="continue()" [disabled]="loading">
+        <button class="primary" type="button" (click)="continue()" 
+                *ngIf="!canRetryQuestion && !duplicateExhausted" [disabled]="loading">
           {{ locale.t(feedbackButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
@@ -147,6 +148,10 @@
         <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
           {{ locale.t('game.duplicateRetry') }}
         </button>
+        <button class="outline-button" type="button" (click)="changeBonusTopic()"
+                *ngIf="canChangeBonusTopic" [disabled]="loading">
+          {{ locale.t('game.changeBonusTopic') }}
+        </button>
         <button class="outline-button" type="button" (click)="returnToMenuAfterDuplicate()" [disabled]="loading">
           {{ locale.t('game.returnToMenu') }}
         </button>
@@ -154,8 +159,15 @@
     </div>
     <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
-    <button class="primary" type="button" *ngIf="canRetryQuestion && !duplicateExhausted"
-            (click)="retryQuestion()" [disabled]="loading">{{ locale.t('game.retry') }}</button>
+    <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
+      <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
+        {{ locale.t('game.retry') }}
+      </button>
+      <button class="outline-button" type="button" (click)="changeBonusTopic()"
+              *ngIf="canChangeBonusTopic" [disabled]="loading">
+        {{ locale.t('game.changeBonusTopic') }}
+      </button>
+    </div>
   </section>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>
