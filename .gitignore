@@ -12,6 +12,7 @@ dist/
 coverage/
 *.log
 .idea
+backend/logs/
 
 # Local generated calibration reports (may contain candidate questions/answers)
 answer_check_*.jsonl
