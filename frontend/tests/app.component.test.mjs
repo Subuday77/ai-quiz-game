@@ -743,10 +743,43 @@ test('template exposes both choices and does not disable language for a saved ca
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startFreshGame\(\)"/);
   assert.match(html, /\*ngIf="resumeAvailable" class="outline-button"[^>]*\(click\)="startGame\(\)"/);
-  assert.match(html, /\[disabled\]="loading \|\| !!gameId \|\| authLoading \|\| restoringGame"/);
+  assert.match(html, /\[disabled\]="loading \|\| \(!!gameId && !resumeAvailable\) \|\| authLoading \|\| restoringGame"/);
   assert.match(html, /locale\.t\('game\.startNew'\)/);
   assert.equal(english['game.startNew'], 'Start a new game →');
   assert.match(english['hero.resumed'], /continue it or start a new game/i);
+});
+
+test('recoverable in-memory game also lets the player select a new language', () => {
+  const { app, requests, posts, scheduler } = setup();
+  app.screen = 'question';
+  app.selectedLanguage = 'English';
+  app.progress = 3;
+  app.returnToMenuAfterDuplicate(); // No duplicate flag; no change.
+  app.duplicateExhausted = true;
+  app.returnToMenuAfterDuplicate();
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(app.gameId, 'existing-game');
+  app.selectedLanguage = 'Italian';
+  scheduler.run(() => {
+    app.startGame(); // Resume must keep original English questions.
+    assert.equal(app.selectedLanguage, 'English');
+    assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
+    succeed(requests[0]);
+  });
+
+  app.screen = 'setup';
+  app.resumeAvailable = true;
+  app.selectedLanguage = 'German';
+  scheduler.run(() => {
+    app.openCategoryExclusions(); // Exclusions must belong to a NEW run.
+    assert.equal(posts[0].url, '/api/v2/games');
+    assert.equal(posts[0].body.language, 'German');
+    succeed(posts[0], { game_id: 'new-game-id', language: 'German',
+      phase: 'main', correct_main_answers: 0 });
+  });
+  assert.equal(app.gameId, 'new-game-id');
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.showCategoryExclusions, true);
 });
 
 test('setup and answer requests have timeouts without automatic POST retries', () => {

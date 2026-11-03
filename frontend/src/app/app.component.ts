@@ -128,6 +128,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // A saved round is only an offer, not the selected game. Keeping it
   // separate lets the player choose a new question language and new game.
   resumeCandidate: GameInfo | null = null;
+  private resumeRunLanguage = '';
   current: PublicQuestion | null = null;
   feedback: AnswerFeedback | null = null;
   loading = false;
@@ -479,6 +480,11 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     if (this.gameId) {
+      // A recovered round might be shown alongside an editable new-game
+      // language selector. Resume always restores the original run language.
+      if (this.resumeAvailable && this.resumeRunLanguage)
+        this.selectedLanguage = this.resumeRunLanguage;
+      this.resumeRunLanguage = '';
       this.showCategoryExclusions = false;
       this.resumeAvailable = false;
       this.generatingNextQuestion = this.progress > 0;
@@ -504,7 +510,7 @@ export class AppComponent implements OnInit, OnDestroy {
       void this.openAuthDialog('login');
       return;
     }
-    if (!this.gameId) {
+    if (!this.gameId || this.resumeAvailable) {
       // Allocate an empty game before taking payment. No question is issued
       // until the player explicitly presses Start questions.
       this.createGame(true);
@@ -525,6 +531,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = game.game_id;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
+        this.resumeRunLanguage = '';
         this.categoryInfo = null;
         this.categoriesToExclude = [];
         this.chosenCategory = '';
@@ -629,6 +636,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // round without losing progress or opening a new game in PostgreSQL.
     this.screen = 'setup';
     this.resumeAvailable = !!this.gameId;
+    this.resumeRunLanguage = this.selectedLanguage;
     this.current = null;
     this.feedback = null;
     this.canRetryQuestion = false;
@@ -1081,6 +1089,7 @@ export class AppComponent implements OnInit, OnDestroy {
         // The backend confirmed the saved run is still open. Don't bind it to
         // the UI as the active run until the player explicitly chooses Resume.
         this.resumeCandidate = run;
+        this.resumeRunLanguage = run.language;
         this.resumeAvailable = true;
         this.current = null;
         this.feedback = null;
@@ -1124,6 +1133,7 @@ export class AppComponent implements OnInit, OnDestroy {
           this.finishedPhase = null;
           this.screen = 'setup';
           this.resumeAvailable = true;
+          this.resumeRunLanguage = run.language;
         }
         this.error = 'game.answerAlreadyRecorded';
       },
@@ -1138,6 +1148,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameId = '';
     this.resumeAvailable = false;
     this.resumeCandidate = null;
+    this.resumeRunLanguage = '';
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;

@@ -132,10 +132,10 @@
 
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
-      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || !!gameId || authLoading || restoringGame">
+      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || (!!gameId && !resumeAvailable) || authLoading || restoringGame">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
-      <div class="category-pregame-action" *ngIf="account && (!gameId || categoryInfo?.can_exclude)">
+      <div class="category-pregame-action" *ngIf="account && (!gameId || resumeAvailable || categoryInfo?.can_exclude)">
         <button class="outline-button" type="button" (click)="openCategoryExclusions()"
                 [disabled]="loading || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
           {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
