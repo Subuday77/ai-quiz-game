@@ -162,6 +162,14 @@ class GameRun(Base):
     round_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hints_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     bonus_correct: Mapped[bool | None] = mapped_column(Boolean)
+    # Persist the bonus topic rotation and eligibility across logout/restart.
+    # Advance only after a failed question generation, never after an answer.
+    bonus_topic_index: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0
+    )
+    bonus_topic_change_unlocked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     started_at = datetime_column()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active_duration_ms: Mapped[int | None] = mapped_column(Integer)
