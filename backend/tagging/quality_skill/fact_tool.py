@@ -137,6 +137,26 @@ def inspect(question, settings) -> list[Finding]:
                           "source": "https://www.inao.gouv.fr/en/node/6896"},
             ))
 
+    # P2 QA: both cotton and bamboo can be used to make paper.
+    # "What plant is usually used for paper?" has two viable options;
+    # have Terra adjudicate the *actual wording*, not generic option names.
+    if "бумаг" in stem or "paper" in stem:
+        values = {key: _normalized(value) for key, value in question.answers.items()}
+        cotton = [k for k, v in values.items()
+                  if "хлоп" in v or "cotton" in v]
+        bamboo = [k for k, v in values.items()
+                  if "бамбук" in v or "bamboo" in v]
+        if cotton and bamboo:
+            findings.append(Finding(
+                tool="fact", code="possible_multiple_correct:paper_fiber",
+                severity=3, confidence=0.90,
+                evidence={
+                    "cotton_options": cotton, "bamboo_options": bamboo,
+                    "verification": "independent_review_required",
+                    "note": "Both are paper feedstocks; stem must distinguish them",
+                },
+            ))
+
     verified = known_false_fact(question)
     if verified is not None:
         findings.append(Finding(
