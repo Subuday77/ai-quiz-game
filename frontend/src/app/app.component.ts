@@ -846,7 +846,9 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs),
            finalize(() => {
              warning.unsubscribe();
-             if (this.gameId !== gameId || this.account?.id !== accountId) return;
+             // Session expiry clears the account and game, but must still
+             // release the pending UI flags for the next login.
+             if (this.account && (this.gameId !== gameId || this.account.id !== accountId)) return;
              this.perksBusy = false;
              this.loading = false;
              this.questionLoading = false;
