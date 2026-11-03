@@ -25,7 +25,9 @@ from generation_policy import (GenerationPolicy, InvalidQuestionError, client_se
                                is_transient, provider_timeout, retry_after_seconds)  # noqa: E402
 from diagnostics import elapsed_ms, event, generation_attempt, request_id, timed_stage  # noqa: E402
 from quality_checker import check_quality, quality_mode_from_env  # noqa: E402
-from quality_errors import QualityConfigurationError, QualityRegenerationError  # noqa: E402
+from quality_errors import (QualityArbitrationUnavailable,
+                            QualityConfigurationError,
+                            QualityRegenerationError)  # noqa: E402
 from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
 from persistence.auth import router as auth_router  # noqa: E402
@@ -295,6 +297,20 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             debug_accepted_candidate(question)
             event("generation_attempt_completed", outcome="success")
             break
+        except QualityArbitrationUnavailable as exc:
+            # A provider timeout/invalid arbiter response is NOT a failed
+            # quality judgment. Re-running generator and critic on a new
+            # question only wastes tokens and repeats the same outage.
+            rejection_reason = "arbitration_unavailable"
+            rejection_error_type = type(exc).__name__
+            event("generation_attempt_completed",
+                  outcome="arbitration_unavailable", reason=exc.reason)
+            event("generation_terminated",
+                  reason="arbiter_unavailable_no_regeneration",
+                  attempts=attempt)
+            raise HTTPException(
+                status_code=503, detail="Question validation temporarily unavailable"
+            ) from None
         except (DuplicateQuestionError, SemanticDuplicateError) as exc:
             retry_feedback = None
             rejection_reason = "duplicate_rejected"
