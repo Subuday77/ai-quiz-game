@@ -310,7 +310,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
                          requested_difficulty: int, category: str,
                          neighbors: list[dict], mode: QualityMode,
                          deadline: float, timeout_seconds: float,
-                         clock=perf_counter) -> None:
+                         clock=perf_counter, shadow: dict | None = None) -> None:
     """Raises to trigger the shared bounded generation retry loop.
 
     Metadata validation and semantic duplicates are hard failures in EVERY
@@ -396,6 +396,15 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         mode == QualityMode.ENFORCE
         and assessment["total"] >= assessment["score_threshold"]
     )
+    # Bonus difficulty is a HARD gate, not just a weighted editorial score.
+    # Do not publish an easily guessed bonus even when 2.5 < threshold 3.25.
+    bonus_too_easy = (
+        mode == QualityMode.ENFORCE and requested_difficulty == 15
+        and verdict.difficulty == DifficultyRating.TOO_EASY
+    )
+    if bonus_too_easy:
+        event("bonus_too_easy_rejected", requested_difficulty=15,
+              score=assessment["total"], threshold=assessment["score_threshold"])
     # In AUDIT/OFF, the critic's factual, option, language and leakage
     # judgments are diagnostic only. The established hard gates protect
     # fact/tag metadata and user-specific duplicate history in all modes.
@@ -405,6 +414,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
         or score_rejection
+        or bonus_too_easy
     )
     # The private report is carried to the later PostgreSQL transaction.
     # No DB connection is kept open during the model request.
@@ -435,6 +445,24 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         "duration_ms": max(0, round((clock() - review_start) * 1000)),
     }
 
+    # Arbitration can only make the gate stricter: it cannot overturn a
+    # rejecting primary critic or a local safeguard. It is a real second
+    # provider call when configured, not merely would_arbitrate telemetry.
+    if not review_rejected and mode == QualityMode.ENFORCE:
+        from tagging.quality_skill.arbiter import arbitrate
+        allowed, arbitration, reason = arbitrate(
+            question, language=language, category=category,
+            requested_difficulty=requested_difficulty, shadow=shadow,
+            deadline=deadline, timeout_seconds=timeout_seconds, clock=clock,
+        )
+        if arbitration is not None:
+            question._review_report["details"]["arbitration"] = arbitration
+        if not allowed:
+            question._review_report["decision"] = "reject"
+            event("quality_arbitration_rejected", reason=reason,
+                  requested_difficulty=requested_difficulty)
+            raise QualityRegenerationError()
+
     if verdict.tags_valid != CheckStatus.PASS or verdict.fact_valid != CheckStatus.PASS:
         raise QualityRegenerationError()
     if verdict.semantic_duplicate:
@@ -442,7 +470,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     # Audit keeps critic-only quality findings diagnostic (even critical ones).
     # In enforce, critical faults OR a high weighted score trigger retry.
     if mode == QualityMode.ENFORCE and (
-        assessment["critical"] != "none" or score_rejection
+        assessment["critical"] != "none" or score_rejection or bonus_too_easy
     ):
         raise QualityRegenerationError()
 
@@ -466,6 +494,8 @@ def is_strict_too_easy_reserve(question: TaggedQuestion) -> bool:
     options = details.get("option_diagnostics")
     if not all(isinstance(item, dict) for item in (verdict, assessment, options)):
         return False
+    if details.get("requested_difficulty") == 15:
+        return False  # Bonus never uses the too-easy emergency reserve.
     if verdict.get("difficulty") != "too_easy":
         return False
     if verdict.get("issue_codes") != ["difficulty_mismatch"]:
