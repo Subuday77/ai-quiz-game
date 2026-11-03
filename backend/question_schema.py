@@ -52,3 +52,4 @@ class PublicQuestion(BaseModel):
     question: str
     answers: dict[Choice, str]
     bonus: bool
+    hidden_count: int = Field(default=0, ge=0, le=2)
