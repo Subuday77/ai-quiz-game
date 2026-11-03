@@ -522,7 +522,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   answer(choice: Choice): void {
-    if (this.loading || !this.current || this.screen !== 'question' || !this.account) return;
+    if (this.loading || this.perksBusy || !this.current || this.screen !== 'question' || !this.account) return;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
@@ -576,7 +576,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private signedIn(account: Account): void {
-    if (this.account?.id !== account.id) this.resetGameView();
+    if (this.account?.id !== account.id) {
+      this.resetGameView();
+      this.spendableStars = emptyStars();
+    }
     this.account = account;
     this.authLoading = false;
     this.locale.load(account.ui_language || 'en');
@@ -586,7 +589,6 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
-    this.refreshSpendableStars();
     this.restoreActiveGame();
   }
 
@@ -657,13 +659,12 @@ export class AppComponent implements OnInit, OnDestroy {
       GAME_API + '/' + this.gameId + '/skip',
       { question_id: current.question_id, request_id: crypto.randomUUID() },
     ).pipe(timeout(this.requestTimeoutMs),
-           finalize(() => { this.perksBusy = false; this.loading = false; }))
+           finalize(() => { this.perksBusy = false; }))
      .subscribe({
       next: (game) => {
         this.progress = Math.min(15, current.number);
         this.gameCorrectAnswers = game.correct_main_answers;
         this.current = null;
-        this.refreshSpendableStars();
         this.refreshStats();
         if (game.phase === 'completed') {
           this.finishedPhase = 'completed';
@@ -676,12 +677,9 @@ export class AppComponent implements OnInit, OnDestroy {
         }
       },
       error: (err: unknown) => {
+        this.loading = false;
         if (this.isUnauthorized(err)) this.sessionExpired();
-        else if (err instanceof HttpErrorResponse && err.status === 409) {
-          this.perksError = 'perks.actionFailed';
-        } else {
-          this.perksError = 'perks.actionFailed';
-        }
+        else this.perksError = 'perks.actionFailed';
       },
     }));
   }
@@ -825,7 +823,6 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
     this.progress = 0;
     this.gameCorrectAnswers = 0;
-    this.spendableStars = emptyStars();
     this.stars = [];
     this.currentStars = emptyStars();
     this.screen = 'setup';
