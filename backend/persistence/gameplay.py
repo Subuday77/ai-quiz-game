@@ -279,3 +279,63 @@ def record_answer(
     except Exception:
         db.rollback()
         raise
+
+
+def skip_main_question(
+    db: Session, *, run_id: UUID, user_id: UUID,
+    question_id: UUID, request_id: UUID,
+) -> GameState:
+    """Buy one gold skip; debit and question advancement commit together.
+
+    The attempt is marked completed with no selected key/correctness. A
+    deterministic idempotency key prevents a repeated HTTP request from
+    accidentally skipping the following question.
+    """
+    from persistence.models import WalletTransaction
+    from persistence.star_economy import lock_user_stars, spend_star
+    from star_perks import PerkUnavailable
+
+    operation_key = f"star:{user_id}:{request_id}:skip"
+    try:
+        # Consistent global lock order: user first, then game.
+        lock_user_stars(db, user_id)
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        existing = db.scalar(select(WalletTransaction).where(
+            WalletTransaction.idempotency_key == operation_key
+        ))
+        if existing is not None:
+            if (existing.user_id != user_id or existing.run_id != run_id
+                    or existing.reason != "star/gold/skip-question"
+                    or existing.amount != -1):
+                raise PerkUnavailable("Idempotency key reused")
+            result = game_state(run, db)
+            db.commit()
+            return result
+        if run.status != "main":
+            raise GameConflict("Question skip is not available outside main rounds")
+        cached = pending_question(db, run_id=run.id)
+        if cached is None:
+            raise GameConflict("No pending question to skip")
+        attempt, _ = cached
+        if attempt.question_id != question_id:
+            raise GameConflict("Question has changed")
+
+        spend_star(
+            db, user_id=user_id, run_id=run_id, tier="gold", amount=1,
+            action="skip-question", operation_key=operation_key,
+        )
+        state = game_state(run, db)
+        state.skip_main_question()
+        now = _now()
+        attempt.answered_at = now
+        attempt.selected_key = None
+        attempt.is_correct = None
+        run.hints_used = state.hints_used
+        run.status = state.phase
+        if state.phase == "completed":
+            run.finished_at = now
+        db.commit()
+        return state
+    except Exception:
+        db.rollback()
+        raise
