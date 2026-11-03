@@ -163,6 +163,20 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // A game ID is allocated before the first question arrives. While that
   // request is pending, the setup button must not claim the game is resumable.
+  get currentQuestionNumber(): number {
+    // progress tracks answered/skipped slots, not the number on screen.
+    // While Q1 is being generated progress is 0, but the current slot is 1.
+    // On the results screen retain the final question's number.
+    if (this.current) return this.current.number;
+    return this.screen === 'done'
+      ? Math.max(1, this.progress)
+      : Math.min(15, this.progress + 1);
+  }
+
+  get currentQuestionTotal(): number {
+    return this.current?.bonus ? 16 : 15;
+  }
+
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
