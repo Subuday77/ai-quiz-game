@@ -334,5 +334,111 @@ class GlobalPoolTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
 
 
+    def _seed_bonus_candidate(self, *, legacy=False, critic_too_easy=False,
+                              arbitration_version="arbitration_v2"):
+        """Create another user's actual Q16, preserving the same Question id."""
+        from persistence.models import GameRun
+
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            alice = db.get(GameRun, self.run_id)
+            alice.status = "bonus"
+            alice.correct_main_answers = 15
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.status = "bonus"
+            bob_run.correct_main_answers = 15
+            db.commit()
+            q = candidate(difficulty=15)
+            report = review_report()
+            if not legacy:
+                report["details"] = {
+                    "verdict": {
+                        "difficulty": "too_easy" if critic_too_easy else "appropriate",
+                        "tags_valid": "pass", "fact_valid": "pass", "facts": "pass",
+                        "options": "pass", "leakage": "pass",
+                        "semantic_duplicate": False,
+                    },
+                    "assessment": {
+                        "critical": "none", "total": 0.0, "score_threshold": 3.25,
+                    },
+                    "arbitration": {
+                        "checker_type": "ai_terra_arbiter",
+                        "provider": "openai", "model": "gpt-6.1-terra",
+                        "contract_version": arbitration_version,
+                        "decision": "accept",
+                        "details": {
+                            "premise": "valid",
+                            "choices": {k: "yes" if k == "B" else "no"
+                                        for k in "ABCD"},
+                            "difficulty": "appropriate",
+                            "answer_leak": False,
+                            "stem_claims": [{
+                                "claim": "Albert Einstein is the subject",
+                                "anchor": "Albert Einstein",
+                                "verdict": "supported",
+                                "reason": "Named in the question",
+                            }],
+                            "rationale": "All conditions verified.",
+                        },
+                    },
+                }
+            q._review_report = report
+            _, stored = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=q,
+                category=self.category, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            return stored.id
+
+    def test_old_bonus_approval_cannot_bypass_new_terra_gate(self):
+        old_question_id = self._seed_bonus_candidate(legacy=True)
+        with Session(self.engine) as db:
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category, expected_bonus_topic_index=0,
+            ))
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+            self.assertEqual(db.get(Question, old_question_id).status, "approved")
+
+    def test_new_terra_v2_bonus_can_be_reused_and_linked_to_user(self):
+        existing_id = self._seed_bonus_candidate()
+        with Session(self.engine) as db:
+            attempt, saved = offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category, expected_bonus_topic_index=0,
+            )
+            self.assertEqual(saved.id, existing_id)
+            self.assertEqual(attempt.number, 16)
+            self.assertEqual(attempt.question_id, existing_id)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+            # A second user-level exposure is prevented by QuestionAttempt.
+            self.assertEqual(db.get(Question, existing_id).status, "approved")
+
+    def test_bonus_pool_blocks_too_easy_critic_even_with_terra_accept(self):
+        self._seed_bonus_candidate(critic_too_easy=True)
+        with Session(self.engine) as db:
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category, expected_bonus_topic_index=0,
+            ))
+
+    def test_bonus_pool_rejects_obsolete_terra_v1(self):
+        self._seed_bonus_candidate(arbitration_version="arbitration_v1")
+        with Session(self.engine) as db:
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category, expected_bonus_topic_index=0,
+            ))
+
+    def test_bonus_pool_rejects_stale_topic_index(self):
+        from persistence.gameplay import GameConflict
+
+        self._seed_bonus_candidate()
+        with Session(self.engine) as db:
+            with self.assertRaises(GameConflict):
+                offer_approved_pool_question(
+                    db, run_id=self.run_id, user_id=self.alice,
+                    category=self.category, expected_bonus_topic_index=1,
+                )
+
 if __name__ == "__main__":
     unittest.main()
