@@ -146,7 +146,7 @@
         <h3>{{ locale.t('perks.excludeTitle') }}</h3>
         <p>{{ locale.t('perks.excludeHelp') }}</p>
         <div class="category-exclusion-list" role="group" aria-label="Excluded categories">
-          <label *ngFor="let category of categoryInfo!.allowed">
+          <label *ngFor="let category of sortedAllowedCategories">
             <input type="checkbox" [checked]="categoriesToExclude.includes(category)"
                    [disabled]="loading || perksBusy"
                    (change)="toggleExcludedCategory(category, $any($event.target).checked)" />

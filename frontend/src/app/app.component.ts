@@ -739,6 +739,19 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get exclusionCost(): number { return this.categoriesToExclude.length * 5; }
 
+  // Sort what the player actually sees, not the canonical English API values.
+  // Return a copy: the backend order and category identifiers stay unchanged.
+  sortCategoryLabels(categories: readonly string[]): string[] {
+    const collator = new Intl.Collator(this.locale.code, { sensitivity: 'base' });
+    return [...categories].sort((a, b) =>
+      collator.compare(this.locale.t('category.' + a), this.locale.t('category.' + b)) ||
+      a.localeCompare(b, 'en'));
+  }
+
+  get sortedAllowedCategories(): string[] {
+    return this.sortCategoryLabels(this.categoryInfo?.allowed ?? []);
+  }
+
   toggleExcludedCategory(category: string, checked: boolean): void {
     if (this.perksBusy || !this.categoryInfo?.can_exclude) return;
     if (checked && !this.categoriesToExclude.includes(category))
@@ -759,7 +772,7 @@ export class AppComponent implements OnInit, OnDestroy {
           if (this.gameId !== gameId) return;
           this.categoryInfo = info;
           if (!info.alternatives.includes(this.chosenCategory))
-            this.chosenCategory = info.alternatives[0] ?? '';
+            this.chosenCategory = this.sortCategoryLabels(info.alternatives)[0] ?? '';
           this.categoriesToExclude = this.categoriesToExclude.filter(
             value => info.allowed.includes(value),
           );
@@ -845,7 +858,7 @@ export class AppComponent implements OnInit, OnDestroy {
         return;
       }
       if (choice.isDenied) {
-        const alternatives = this.categoryInfo?.alternatives ?? [];
+        const alternatives = this.sortCategoryLabels(this.categoryInfo?.alternatives ?? []);
         const selected = await Swal.fire({
           titleText: this.locale.t('perks.chooseCategory'),
           input: 'select',

@@ -1337,6 +1337,39 @@ test('all category labels use the shared translated UI dictionary but API identi
 });
 
 
+test('pregame and dialog categories sort alphabetically by displayed localized names', () => {
+  const { app } = setup();
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const original = ['Ancient history', 'Physics', 'Biology'];
+  app.categoryInfo = {
+    allowed: original, current: null, alternatives: original,
+    changes_used: 0, manual_used: 0,
+    can_change: true, can_choose: true, can_exclude: true,
+    minimum_allowed: 16,
+  };
+  assert.deepEqual(app.sortedAllowedCategories,
+    ['Ancient history', 'Biology', 'Physics']);
+  assert.deepEqual(original, ['Ancient history', 'Physics', 'Biology']);
+  assert.match(html, /\*ngFor="let category of sortedAllowedCategories"/);
+  assert.ok(source.includes('const alternatives = this.sortCategoryLabels(this.categoryInfo?.alternatives ?? [])'));
+
+  // The canonical API slugs remain unchanged; only visible, translated text
+  // determines the order. This order also updates when UI language changes.
+  app.locale.load('ru');
+  const translate = app.locale.t.bind(app.locale);
+  const russianLabels = {
+    'category.Ancient history': 'Языки',
+    'category.Physics': 'Астрономия',
+    'category.Biology': 'Биология',
+  };
+  app.locale.t = key => russianLabels[key] ?? translate(key);
+  assert.deepEqual(app.sortedAllowedCategories,
+    ['Physics', 'Biology', 'Ancient history']);
+  assert.deepEqual(app.sortCategoryLabels(original),
+    ['Physics', 'Biology', 'Ancient history']);
+  assert.deepEqual(original, ['Ancient history', 'Physics', 'Biology']);
+});
+
 test('gold skip shows next-question loading, updates persisted counts and keeps progress separate', () => {
   const { app, posts, requests, scheduler } = setup();
   app.screen = 'question';
