@@ -111,7 +111,7 @@
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
-    <h1 *ngIf="screen === 'question'">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
+    <h1 *ngIf="screen === 'question' && (current || questionLoading)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
     <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
