@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from api import app
+from question_schema import QuizQuestion
 from consts import QUESTION_CATEGORIES
 from persistence.database import get_db
 from persistence.game_routes import _category_for_round
@@ -123,7 +124,7 @@ class BonusTopicRotationTests(unittest.TestCase):
                             "C": "Value C", "D": "Value D"},
                 "correct_answer": "B",
             }
-            with patch("api.generate_valid_question", return_value=generated) as gen:
+            with patch("api.generate_valid_question", return_value=QuizQuestion.model_validate(generated)) as gen:
                 response = reopened.get(self.base + "/question")
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["number"], 16)
