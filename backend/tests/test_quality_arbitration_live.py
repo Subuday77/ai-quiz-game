@@ -313,6 +313,10 @@ class ArbitrationPolicyTests(unittest.TestCase):
              {"A":"Из груши","B":"Из яблока",
               "C":"Из сливы","D":"Из абрикоса"}, "B",
              "possible_multiple_correct:calvados_fruit"),
+            ("Какое растение обычно используют для изготовления бумаги?",
+             {"A": "Хлопок", "B": "Бамбук",
+              "C": "Подсолнечник", "D": "Картофель"},
+             "B", "possible_multiple_correct:paper_fiber"),
         ]
         with patch.dict(os.environ, {"QUIZ_QUALITY_SKILL_MODE": "shadow"}):
             for stem, answers, correct, expected in scenarios:
