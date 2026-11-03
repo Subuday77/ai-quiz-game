@@ -146,10 +146,7 @@ export class AppComponent implements OnInit, OnDestroy {
   gameCorrectAnswers = 0;
   perksBusy = false;
   perksError = '';
-  readonly exchangeTiers: ConvertibleTier[] = ['bronze', 'silver', 'gold'];
-  exchangeSource: ConvertibleTier = 'bronze';
-  exchangeTarget: ConvertibleTier = 'silver';
-  exchangeAmount = 10;
+  showCategoryExclusions = false;
   categoryInfo: CategoryInfo | null = null;
   categoriesToExclude: string[] = [];
   chosenCategory = '';
@@ -432,16 +429,41 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
+    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+        this.authBusy || this.restoringGame || this.categoryLoading ||
+        this.categoriesToExclude.length > 0) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
     }
     if (this.gameId) {
+      this.showCategoryExclusions = false;
       this.resumeAvailable = false;
       this.loadQuestion();
       return;
     }
+    this.createGame(false);
+  }
+
+  openCategoryExclusions(): void {
+    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+        this.authBusy || this.restoringGame || this.categoryLoading) return;
+    if (!this.account) {
+      void this.openAuthDialog('login');
+      return;
+    }
+    if (!this.gameId) {
+      // Allocate an empty game before taking payment. No question is issued
+      // until the player explicitly presses Start questions.
+      this.createGame(true);
+      return;
+    }
+    if (this.categoryInfo && !this.categoryInfo.can_exclude) return;
+    this.showCategoryExclusions = !this.showCategoryExclusions;
+    if (this.showCategoryExclusions && !this.categoryInfo) this.loadCategoryInfo();
+  }
+
+  private createGame(forExclusions: boolean): void {
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
@@ -458,7 +480,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.resumeAvailable = false;
         this.loading = false;
         this.screen = 'setup';
-        this.loadCategoryInfo(); // Optional paid exclusions before Q1.
+        this.showCategoryExclusions = forExclusions;
+        if (forExclusions) this.loadCategoryInfo();
+        else this.loadQuestion();
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -697,6 +721,7 @@ export class AppComponent implements OnInit, OnDestroy {
           if (this.gameId !== gameId) return;
           this.categoryInfo = state;
           this.categoriesToExclude = [];
+          this.showCategoryExclusions = false;
           this.refreshSpendableStars();
         },
         error: (err: unknown) => {
@@ -809,15 +834,18 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  exchangeStars(): void {
-    const amount = Number(this.exchangeAmount);
-    if (!this.account || this.perksBusy || this.exchangeSource === this.exchangeTarget ||
-        !Number.isSafeInteger(amount) || amount <= 0) return;
+  exchangeBetween(source: ConvertibleTier, target: ConvertibleTier): void {
+    const upward = (source === 'bronze' && target === 'silver') ||
+                   (source === 'silver' && target === 'gold');
+    const downward = (source === 'silver' && target === 'bronze') ||
+                     (source === 'gold' && target === 'silver');
+    if (!this.account || this.perksBusy || this.loading || (!upward && !downward)) return;
+    const amount = upward ? 10 : 1; // One click = one adjacent-tier exchange.
+    if (this.spendableStars[source] < amount) return;
     this.perksBusy = true;
     this.perksError = '';
     this.subscriptions.add(this.http.post<StarCounts>(STARS_API + '/exchange', {
-      source: this.exchangeSource, target: this.exchangeTarget,
-      amount, request_id: crypto.randomUUID(),
+      source, target, amount, request_id: crypto.randomUUID(),
     }).pipe(timeout(15000), finalize(() => { this.perksBusy = false; }))
      .subscribe({
       next: (balances) => { this.spendableStars = balances; },
@@ -954,6 +982,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.categoryInfo = null;
     this.categoriesToExclude = [];
     this.chosenCategory = '';
+    this.showCategoryExclusions = false;
     this.screen = 'setup';
   }
 
