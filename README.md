@@ -156,6 +156,7 @@ the existing project-root `.env` before running the backend:
 AI_TAG_DEDUP_ENABLED=true
 AI_QUALITY_MODE=enforce
 AI_GENERATION_DEBUG=true
+QUIZ_QUALITY_SKILL_MODE=shadow
 QUIZ_QUALITY_ARBITER_MODE=on
 QUIZ_QUALITY_ARBITER_MODEL_ID=gpt-6.1-terra
 QUIZ_QUALITY_ARBITER_TIMEOUT_SECONDS=10
@@ -167,15 +168,22 @@ actual OpenAI account; offline tests mock the provider and do not establish
 real API access. In active mode, Terra independently reviews **every bonus
 candidate** and any normal candidate that triggers a shadow `would_arbitrate`
 signal. It may veto but never override a failing primary critic.
-The strict output captures separate A/B/C/D judgments and an array of
-independent assertions from the FULL stem (including secondary river names,
-years, and claims not represented in the fact triple).
+The **Terra v2** structured output separates the four A/B/C/D judgments
+from `stem_claims[]` about the *actual question stem*. Each stem claim
+must carry a verbatim anchor taken from that stem. False distractor
+statements are NOT false question premises. The full stem, including
+secondary river names and dates omitted from the fact triple, remains subject
+to independent review.
 
 **This is LLM arbitration, not independent web/source verification.** The
 arbiter has no search access. If it cannot substantiate an assertion, its
 contract explicitly requires `uncertain` and the question is not accepted.
-Arbitration failures also fail closed for the candidate. Routine INFO logs
-contain model ID, decision, elapsed duration and reason; the **full verdict,
+Arbitration failures fail closed for the candidate. Unlike a genuine negative
+quality verdict, an **unavailable or timed-out arbiter immediately stops**
+the current paid generator/critic retry cycle with HTTP 503. The existing
+global-bank fallback may still return a *previously verified* suitable
+question; no automatic second AI generation is spent on that request.
+Routine INFO logs contain model ID, decision, elapsed duration and reason; the **full verdict,
 claims and options** are present only in the existing opt-in `DEBUG:`
 `quality_arbitration_debug` event. DEBUG logs include candidate content and
 correct answers: never expose these logs to public clients.
@@ -183,8 +191,12 @@ correct answers: never expose these logs to public clients.
 Previously approved questions identified by the 3-Nov browser QA report
 (calvados ambiguity, Savarin surname leak, Roman/Rome name leak, alleged
 Hua Rong Dao derivative, misnamed Puerto Williams airport, unsupported Thimphu
-river) are excluded from **shared-pool reuse by exact stem + keyed-answer
-matching**. This is a conservative safety hold, not a database deletion or
+river, ambiguous cotton/bamboo paper, incomplete Mandelbrot description,
+Oersted answer paraphrase, and disputed Third Man attribution) are excluded
+from **shared-pool reuse by exact stem + keyed-answer matching**. An exact
+known-bad wording is also rejected before paid critic review if a generator
+proposes it again. Separately, the local Fact Tool flags the paper
+cotton/bamboo ambiguity for independent Terra checking. This is a conservative safety hold, not a database deletion or
 an automatic factual claim about other questions. Original game history and
 awards remain intact. A later user-report workflow can adjudicate these records.
 
@@ -192,8 +204,14 @@ At difficulty **15 (bonus)** a primary-critic `too_easy` verdict rejects the
 question regardless of its total weighted score. The `too_easy_only` emergency
 reserve is disabled for the bonus. Approved global-pool fallback still requires
 matching language, difficulty, category, a previously accepted v5 review, and
-user-specific fact dedup. If no valid question is available, the game preserves
-the 15/15 progress and offers **Retry**.
+user-specific fact dedup. **For Q16, it now ALSO requires a stored accepted
+Terra `arbitration_v2` verdict, valid anchored stem claims, correct unique
+answer, acceptable primary-critic score and no `too_easy` verdict.** Old
+approved bonus questions (including "Call me Ishmael") cannot be recycled
+solely on historical v5 acceptance. The fallback does not incur extra Terra
+API calls; unverified old questions remain stored but are ineligible for Q16.
+If no verified question is available, the game preserves 15/15 and offers
+Retry; the topic automatically rotates as described below.
 
 After an unsuccessful bonus generation (after any configured approved-pool
 fallback is exhausted), the **server automatically rotates** to the next
@@ -218,7 +236,9 @@ only Retry after failure and never both Retry and Next question.
 Run offline tests from `backend/` using
 `python -m unittest discover -s tests -v`; Angular in `frontend/`:
 `npm test` and `npm run build`. GitHub Actions now includes both suites
-and an Angular build. A browser/PgSQL smoke run is still needed before merging.
+and an Angular build. A browser/PgSQL smoke run with **actual Terra** is still needed before
+merging. No cost-bearing model tests are run by CI; limit live retries and
+compare HTTP failures with server-side `quality_arbitration` events.
 
 ## P1: bounded tagged metadata recovery (2 Nov 2026)
 
