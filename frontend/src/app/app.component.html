@@ -132,12 +132,16 @@
 
     <div *ngIf="screen === 'setup'" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
-      <select id="language" [(ngModel)]="selectedLanguage" [disabled]="loading || (!!gameId && !resumeAvailable) || authLoading || restoringGame">
+      <select id="language" [(ngModel)]="selectedLanguage"
+              (ngModelChange)="changeQuestionLanguage($event)"
+              [disabled]="loading || languageSaving || perksBusy || categoryLoading || !canEditPregameLanguage || authLoading || restoringGame">
         <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
       </select>
+      <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
+      <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
       <div class="category-pregame-action" *ngIf="account && (!gameId || resumeAvailable || categoryInfo?.can_exclude)">
         <button class="outline-button" type="button" (click)="openCategoryExclusions()"
-                [disabled]="loading || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
+                [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
           {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
         </button>
         <span class="perk-counter">{{ locale.t('perks.exclusionPriceShort') }}</span>
@@ -168,15 +172,15 @@
       </div>
       <div class="question-actions">
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
-                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
         <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startFreshGame()"
-                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
           {{ locale.t('game.startNew') }}
         </button>
         <button *ngIf="resumeAvailable" class="outline-button" type="button" (click)="startGame()"
-                [disabled]="loading || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
