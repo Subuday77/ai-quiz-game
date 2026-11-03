@@ -103,7 +103,7 @@ def retry_after_seconds(exc: Exception) -> float | None:
 
 
 def client_settings() -> dict[str, int]:
-    warning = env_number("QUIZ_LONG_WAIT_WARNING_SECONDS", 8)
+    warning = env_number("QUIZ_LONG_WAIT_WARNING_SECONDS", 15)
     timeout = env_number("QUIZ_HTTP_TIMEOUT_SECONDS", 45)
     if not 0 < warning < timeout <= 2_147_483.647:
         raise ValueError("Invalid browser timing settings")

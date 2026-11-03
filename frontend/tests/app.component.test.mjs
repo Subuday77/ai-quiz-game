@@ -48,7 +48,7 @@ const question = {
   bonus: false,
 };
 
-function setup({ warning = 8000, timeout = 45000, settingsError = false,
+function setup({ warning = 15000, timeout = 45000, settingsError = false,
                   signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false } = {}) {
   const requests = [];
   const posts = [];
@@ -150,13 +150,13 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(posts.length, 0);
 });
 
-test('long-wait warning appears at 8 seconds and clears on success', () => {
+test('long-wait warning appears at 15 seconds and clears on success', () => {
   const { app, requests, scheduler } = setup();
   scheduler.run(() => {
     app.loadQuestion();
-    scheduler.schedule(() => assert.equal(app.longWait, false), 7999);
-    scheduler.schedule(() => assert.equal(app.longWait, true), 8001);
-    scheduler.schedule(() => succeed(requests[0]), 9000);
+    scheduler.schedule(() => assert.equal(app.longWait, false), 14999);
+    scheduler.schedule(() => assert.equal(app.longWait, true), 15001);
+    scheduler.schedule(() => succeed(requests[0]), 16000);
   });
   assert.equal(app.current.question_id, question.question_id);
   assert.equal(app.loading, false);
@@ -1505,10 +1505,11 @@ test('confirmed category change immediately hides the old question and shows loa
     assert.equal(app.generatingNextQuestion, true);
     app.changeCategory('random'); // One pending purchase at a time.
     assert.equal(posts.length, 1);
-    scheduler.schedule(() => assert.equal(app.longWait, true), 8001);
+    scheduler.schedule(() => assert.equal(app.longWait, false), 14999);
+    scheduler.schedule(() => assert.equal(app.longWait, true), 15001);
     scheduler.schedule(() => succeed(posts[0], {
       ...question, question_id: 'changed-question', question: 'New category question',
-    }), 8100);
+    }), 15100);
   });
   assert.equal(app.current.question_id, 'changed-question');
   assert.equal(app.loading, false);

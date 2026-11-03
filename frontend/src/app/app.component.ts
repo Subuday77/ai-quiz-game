@@ -140,7 +140,7 @@ export class AppComponent implements OnInit, OnDestroy {
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
-  private warningMs = 8000;
+  private warningMs = 15000;
   private requestTimeoutMs = 45000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;

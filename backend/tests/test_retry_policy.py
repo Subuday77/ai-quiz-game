@@ -215,6 +215,13 @@ class RetryTests(unittest.TestCase):
             }):
                 self.assertEqual(self.client.get("/api/client-config").status_code, 503)
 
+    def test_default_long_wait_warning_is_fifteen_seconds(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("QUIZ_LONG_WAIT_WARNING_SECONDS", None)
+            from generation_policy import client_settings
+            result = client_settings()
+        self.assertEqual(result["long_wait_warning_ms"], 15000)
+
     def test_public_config_exposes_only_validated_timing_settings(self):
         with patch.dict("os.environ", {"QUIZ_LONG_WAIT_WARNING_SECONDS": "4",
                                        "QUIZ_HTTP_TIMEOUT_SECONDS": "20"}):
