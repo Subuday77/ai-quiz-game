@@ -335,7 +335,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
                 input=json.dumps({
                     "requested_difficulty": requested_difficulty,
                     "language": language, "category": category,
-                    "candidate": question.model_dump(),
+                    "candidate": question.model_dump(exclude={"plausibility"}),
                     "prior_user_questions": neighbors,
                 }, ensure_ascii=False),
                 # 4 short option explanations are now required by tagged v5.
