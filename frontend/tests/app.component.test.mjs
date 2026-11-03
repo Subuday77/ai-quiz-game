@@ -399,51 +399,74 @@ test('results button keeps results label and does not generate a new question', 
   assert.equal(requests.length, 0);
 });
 
-test('new round offers pregame category exclusions before generating Q1', () => {
+test('normal Start game immediately requests Q1 without requiring a second click', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
   scheduler.run(() => {
     app.startGame();
     assert.equal(app.loading, true);
     assert.equal(posts[0].url, '/api/v2/games');
-    succeed(posts[0], { game_id: 'created-game', language: 'English', phase: 'main',
-      correct_main_answers: 0 });
-    assert.equal(app.loading, false);
-    assert.equal(app.screen, 'setup');
-    assert.equal(app.categoryInfo.can_exclude, true);
-    assert.equal(requests.length, 0);
-    app.startGame();
-    assert.equal(app.loading, true);
+    succeed(posts[0], { game_id: 'created-game', language: 'English',
+      phase: 'main', correct_main_answers: 0 });
+    assert.equal(app.gameId, 'created-game');
+    assert.equal(app.showCategoryExclusions, false);
     assert.equal(requests[0].url, '/api/v2/games/created-game/question');
-    requests[0].subject.error(new Error('offline'));
-    app.retryQuestion();
-    succeed(requests[1]);
+    assert.equal(app.loading, true);
+    succeed(requests[0]);
   });
   assert.equal(posts.length, 1);
   assert.equal(app.loading, false);
   assert.equal(app.gameId, 'created-game');
+  assert.equal(app.screen, 'question');
 });
 
-test('setup shows Start questions while pregame exclusions are offered', () => {
+test('visible pregame exclusion button creates empty round and defers Q1 until Start questions', () => {
   const { app, requests, posts, scheduler } = setup();
   app.gameId = '';
   assert.equal(app.setupButtonLabelKey, 'game.start');
   scheduler.run(() => {
-    app.startGame();
-    assert.equal(app.setupButtonLabelKey, 'game.loading');
-    succeed(posts[0], { game_id: 'created-game', language: 'English', phase: 'main',
-      correct_main_answers: 0 });
+    app.openCategoryExclusions();
+    assert.equal(app.loading, true);
+    assert.equal(posts[0].url, '/api/v2/games');
+    succeed(posts[0], { game_id: 'created-game', language: 'English',
+      phase: 'main', correct_main_answers: 0 });
     assert.equal(app.gameId, 'created-game');
     assert.equal(app.loading, false);
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.showCategoryExclusions, true);
+    assert.equal(app.categoryInfo.can_exclude, true);
     assert.equal(app.setupButtonLabelKey, 'perks.startQuestions');
+    assert.equal(requests.length, 0);
     app.startGame();
+    assert.equal(app.showCategoryExclusions, false);
     assert.equal(app.loading, true);
-    assert.equal(app.setupButtonLabelKey, 'game.loading');
+    assert.equal(requests[0].url, '/api/v2/games/created-game/question');
     succeed(requests[0]);
   });
-  assert.equal(app.screen, 'question');
+  assert.equal(posts.length, 1);
   assert.equal(app.loading, false);
-  assert.equal(app.setupButtonLabelKey, 'game.resume');
+  assert.equal(app.screen, 'question');
+});
+
+test('adjacent star arrows exchange exactly one bundle in either direction', () => {
+  const { app, posts } = setup();
+  app.spendableStars = { bronze: 10, silver: 1, gold: 0, platinum: 0 };
+  app.exchangeBetween('bronze', 'silver');
+  assert.equal(posts[0].url, '/api/v2/stars/exchange');
+  assert.deepEqual({ source: posts[0].body.source, target: posts[0].body.target,
+    amount: posts[0].body.amount },
+    { source: 'bronze', target: 'silver', amount: 10 });
+  succeed(posts[0], { bronze: 0, silver: 2, gold: 0, platinum: 0 });
+  assert.equal(app.perksBusy, false);
+  assert.equal(app.spendableStars.silver, 2);
+  app.exchangeBetween('silver', 'bronze');
+  assert.deepEqual({ source: posts[1].body.source, target: posts[1].body.target,
+    amount: posts[1].body.amount },
+    { source: 'silver', target: 'bronze', amount: 1 });
+  succeed(posts[1], { bronze: 10, silver: 1, gold: 0, platinum: 0 });
+  assert.equal(app.spendableStars.bronze, 10);
+  app.exchangeBetween('bronze', 'gold'); // Non-adjacent exchanges are forbidden in UI.
+  assert.equal(posts.length, 2);
 });
 
 test('setup button shows loading during resume and start again after failed creation', () => {
@@ -520,7 +543,11 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
   assert.match(template, /locale\.t\(feedbackButtonLabelKey\)/);
-  assert.match(template, /stars\.allTime/);
+  assert.match(template, /locale\.t\('perks\.balance'\)/);
+  assert.match(template, /exchangeBetween\('bronze', 'silver'\)/);
+  assert.match(template, /exchangeBetween\('gold', 'silver'\)/);
+  assert.doesNotMatch(template, /class="spendable-star-panel"/);
+  assert.match(template, /openCategoryExclusions\(\)/);
   assert.doesNotMatch(source, /local-star-totals|storeStars|readStoredStars/);
   assert.match(source, /\/api\/profile\/me\/stats/);
 });
@@ -1035,4 +1062,15 @@ test('duplicate recovery shows two accessible translated actions, not generic re
   for (const key of ['game.duplicateExhausted', 'game.duplicateRetry', 'game.returnToMenu']) {
     assert.ok(english[key], key + ' must be in the AI localization source');
   }
+});
+
+test('all category labels use the shared translated UI dictionary but API identifiers stay canonical', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const categories = Object.keys(english).filter(key => key.startsWith('category.'));
+  assert.equal(categories.length, 50);
+  for (const key of categories) assert.equal(english[key], key.slice('category.'.length));
+  assert.match(template, /locale\.t\('category\.' \+ category\)/);
+  assert.match(template, /locale\.t\('category\.' \+ categoryInfo\?\.current\)/);
+  assert.match(template, /\[value\]="category"/);
+  assert.doesNotMatch(template, /\{\{ category \}\}/);
 });
