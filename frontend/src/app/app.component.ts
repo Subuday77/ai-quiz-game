@@ -164,6 +164,8 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
+    if (this.gameId && this.categoryInfo && this.categoryInfo.current === null && this.progress === 0)
+      return 'perks.startQuestions';
     return this.gameId ? 'game.resume' : 'game.start';
   }
 
@@ -631,6 +633,14 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get exclusionCost(): number { return this.categoriesToExclude.length * 5; }
+
+  toggleExcludedCategory(category: string, checked: boolean): void {
+    if (this.perksBusy || !this.categoryInfo?.can_exclude) return;
+    if (checked && !this.categoriesToExclude.includes(category))
+      this.categoriesToExclude = [...this.categoriesToExclude, category];
+    else if (!checked)
+      this.categoriesToExclude = this.categoriesToExclude.filter(value => value !== category);
+  }
 
   private loadCategoryInfo(): void {
     if (!this.account || !this.gameId) return;
