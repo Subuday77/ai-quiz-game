@@ -40,6 +40,7 @@ interface GameInfo {
   language: string;
   phase: string;
   correct_main_answers: number;
+  bonus_decision_available?: boolean;
 }
 interface PublicQuestion {
   question_id: string;
@@ -106,6 +107,7 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'platinum', label: 'Platinum' },
   ];
 
+  bonusDecisionAvailable = false;
   helperCard: HelperCard | null = null;
   helperProfessions: string[] = [];
   selectedHelperProfession = '';
@@ -434,6 +436,7 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     if (this.gameId) {
+      if (this.bonusDecisionAvailable) return;
       this.resumeAvailable = false;
       this.loadQuestion();
       return;
@@ -445,6 +448,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.bonusDecisionAvailable = false;
         this.rememberActiveGame(game.game_id);
         this.stars = [];
         this.currentStars = emptyStars();
@@ -548,6 +552,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        this.bonusDecisionAvailable = result.phase === 'bonus';
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
@@ -589,6 +594,38 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.loading) return;
     this.forgetActiveGame();
     this.resetGameView();
+  }
+
+  playBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading) return;
+    this.bonusDecisionAvailable = false;
+    this.loadQuestion();
+  }
+
+  declineBonus(): void {
+    if (!this.bonusDecisionAvailable || !this.gameId || this.loading) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/decline', {},
+    ).pipe(timeout(10000), finalize(() => { this.loading = false; })).subscribe({
+      next: () => {
+        this.bonusDecisionAvailable = false;
+        this.finishedPhase = 'completed';
+        this.screen = 'done';
+        this.current = null;
+        this.feedback = null;
+        this.forgetActiveGame();
+        this.refreshStats();
+        this.loadHelperCard();
+      },
+      error: () => {
+        this.error = 'helper.bonusDeclineFailed';
+        // A network timeout may have completed the decline on the server;
+        // recover the authoritative state rather than guessing.
+        this.recoverGameAfterConflict();
+      },
+    }));
   }
 
   private loadHelperProfessions(): void {
@@ -745,6 +782,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = run.game_id;
         this.loadHelperCard();
         this.resumeAvailable = true;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
         this.selectedLanguage = run.language;
         this.progress = run.correct_main_answers;
         this.current = null;
@@ -782,6 +820,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.canRetryQuestion = false;
         this.progress = run.correct_main_answers;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
         if (run.phase === 'completed' || run.phase === 'lost') {
           this.forgetActiveGame();
           this.feedback = null;
@@ -811,6 +850,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.bonusDecisionAvailable = false;
     this.helperCard = null;
     this.helperDetailsVisible = false;
     this.helperReply = '';
