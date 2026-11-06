@@ -58,12 +58,20 @@ def personal_statistics(user: User = Depends(authenticated_user),
         select(func.coalesce(func.sum(PlatinumStarMovement.amount), 0))
         .where(PlatinumStarMovement.user_id == user.id)
     ) or 0
-    star_awards["platinum"] = max(0, int(star_awards.get("platinum", 0)) + int(platinum_delta))
+    platinum_balance = max(0, int(star_awards.get("platinum", 0)) + int(platinum_delta))
+    if platinum_balance:
+        star_awards["platinum"] = platinum_balance
+    else:
+        star_awards.pop("platinum", None)
     gold_delta = db.scalar(
         select(func.coalesce(func.sum(GoldStarMovement.amount), 0))
         .where(GoldStarMovement.user_id == user.id)
     ) or 0
-    star_awards["gold"] = max(0, int(star_awards.get("gold", 0)) + int(gold_delta))
+    gold_balance = max(0, int(star_awards.get("gold", 0)) + int(gold_delta))
+    if gold_balance:
+        star_awards["gold"] = gold_balance
+    else:
+        star_awards.pop("gold", None)
     achievements = list(db.scalars(
         select(UserAchievement.achievement_code)
         .where(UserAchievement.user_id == user.id)
