@@ -163,8 +163,8 @@
       </div>
       <div class="helper-call" *ngIf="helperCard && !question.bonus">
         <button class="outline-button" type="button" (click)="consultHelper()"
-                [disabled]="helperBusy || loading || !!helperReply || helperCard.consultations_remaining === 0">
-          {{ locale.t('helper.call') }}
+                [disabled]="helperBusy || loading || !!helperReply || (helperCard.consultations_remaining === 0 && !helperCallKey)">
+          {{ locale.t(helperCallKey ? 'helper.repeatCall' : 'helper.call') }}
         </button>
         <p *ngIf="helperBusy" role="status">{{ locale.t('helper.calling') }}</p>
         <p *ngIf="helperReply" class="helper-speech">{{ helperReply }}</p>
