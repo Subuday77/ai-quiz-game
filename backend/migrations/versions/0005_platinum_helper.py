@@ -61,8 +61,22 @@ def upgrade():
     )
     op.create_index("ix_platinum_star_movements_user_id", "platinum_star_movements", ["user_id"])
 
+    op.create_table(
+        "gold_star_movements",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("run_id", sa.Uuid(), sa.ForeignKey("game_runs.id", ondelete="RESTRICT"), nullable=False, unique=True),
+        sa.Column("amount", sa.SmallInteger(), nullable=False),
+        sa.Column("reason", sa.String(20), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("amount = -1 AND reason = 'bonus_lost'", name="ck_gold_bonus_loss"),
+    )
+    op.create_index("ix_gold_star_movements_user_id", "gold_star_movements", ["user_id"])
+
 
 def downgrade():
+    op.drop_index("ix_gold_star_movements_user_id", "gold_star_movements")
+    op.drop_table("gold_star_movements")
     op.drop_index("ix_platinum_star_movements_user_id", "platinum_star_movements")
     op.drop_table("platinum_star_movements")
     op.drop_index("ix_platinum_helper_calls_purchase_id", "platinum_helper_calls")
