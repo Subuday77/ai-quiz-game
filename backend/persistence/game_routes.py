@@ -23,6 +23,7 @@ from persistence.gameplay import (
 )
 from persistence.models import Topic, User
 from persistence.seed_topics import category_slug
+from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
 
 router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"])
@@ -43,6 +44,7 @@ class GameInfo(BaseModel):
     phase: str
     correct_main_answers: int
     bonus_decision_available: bool = False
+    helper: dict | None = None
 
 
 class AnswerFeedback(BaseModel):
@@ -153,11 +155,13 @@ def new_game(payload: NewGame, request: Request,
 def game_info(run_id: UUID, user: User = Depends(authenticated_user),
               db: Session = Depends(get_db)):
     run = _lookup(db, run_id, user.id)
+    purchased = get_purchase(db, run_id)
     return GameInfo(
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
         bonus_decision_available=(run.status == "bonus" and
                                   pending_question(db, run_id=run.id) is None),
+        helper=helper_card(purchased) if purchased else None,
     )
 
 
