@@ -133,11 +133,11 @@
       </div>
     </div>
 
-    <div class="helper-shop" *ngIf="screen === 'setup' && gameId && progress === 0 && !helperCard && !resumeAvailable">
+    <div class="helper-shop" *ngIf="screen === 'setup' && progress === 0 && !helperCard && !resumeAvailable">
       <h2>{{ locale.t('helper.shopTitle') }}</h2>
       <p>{{ locale.t('helper.shopDescription') }}</p>
       <label for="helper-profession">{{ locale.t('helper.chooseProfession') }}</label>
-      <select id="helper-profession" [(ngModel)]="selectedHelperProfession" [disabled]="helperBusy">
+      <select id="helper-profession" [(ngModel)]="selectedHelperProfession" (focus)="loadHelperProfessions()" [disabled]="helperBusy">
         <option value="">{{ locale.t('helper.randomCost') }}</option>
         <option *ngFor="let profession of helperProfessions" [value]="profession">
           {{ locale.t('helper.profession.' + profession) }} · {{ locale.t('helper.chosenCost') }}
