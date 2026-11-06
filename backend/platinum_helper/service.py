@@ -37,8 +37,8 @@ def card(purchase: PlatinumHelperPurchase) -> dict:
         "name": p["name"],
         "profession": purchase.profession,
         "erudition": p["erudition"],
-        "strong_topics": p["featured_high"],
-        "weak_topics": p["featured_low"],
+        "strong_topics": list(p["featured_high"]),
+        "weak_topics": list(p["featured_low"]),
         "tagline": p["tagline"],
         "consultations_remaining": MAX_CONSULTATIONS - purchase.consultations_used,
         "consultations_total": MAX_CONSULTATIONS,
@@ -103,7 +103,8 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             PlatinumHelperCall.request_key == request_key
         ))
         if old:
-            if old.question_attempt_id != question_id:
+            original_attempt = db.get(QuestionAttempt, old.question_attempt_id)
+            if original_attempt is None or original_attempt.question_id != question_id:
                 raise GameConflict("Request key is assigned to another question")
             if old.status == "completed":
                 result = (old.response_text, card(purchase), True, None)
