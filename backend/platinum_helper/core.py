@@ -1,0 +1,238 @@
+"""Platinum Helper domain rules. No provider calls, HTTP, or database access.
+
+A purchased helper profile is generated once and must be persisted by its caller.
+Consultation attempts are identified by a stable idempotency key so HTTP retries
+cannot reroll the outcome or spend multiple calls.
+"""
+from dataclasses import dataclass, field
+from random import Random
+from typing import Literal
+from uuid import uuid4
+
+Skill = Literal["HIGH", "MEDIUM", "LOW"]
+Outcome = Literal["KNOW", "MISTAKEN", "UNSURE"]
+
+TOPICS = (
+    "Physics", "Mathematics", "Chemistry", "Biology", "Medicine",
+    "History", "Geography", "Literature", "Art", "Music", "Cinema",
+    "Mythology", "Sports", "Technology", "Astronomy", "Meteorology",
+    "Fire Safety", "Engineering", "Agriculture", "Comics",
+)
+PROFESSIONAL_SKILLS: dict[str, tuple[str, ...]] = {
+    "Firefighter": ("Fire Safety",),
+    "Physicist": ("Physics", "Mathematics"),
+    "Mathematician": ("Mathematics",),
+    "Plumber": ("Engineering",),
+    "Doctor": ("Medicine", "Biology"),
+    "Historian": ("History",),
+    "Chef": ("Agriculture", "Chemistry"),
+    "Musician": ("Music",),
+    "Astronomer": ("Astronomy", "Physics"),
+    "Engineer": ("Engineering", "Technology"),
+    "Librarian": ("Literature",),
+    "Athlete": ("Sports",),
+}
+
+# The actual game uses about 50 fine-grained categories. Each maps to exactly
+# one of the twenty broad profile areas; never trust a client-supplied topic.
+CATEGORY_TOPICS = {
+    "Ancient history": "History",
+    "Medieval history": "History",
+    "Modern history": "History",
+    "World geography": "Geography",
+    "Countries and capitals": "Geography",
+    "Cities and landmarks": "Geography",
+    "Oceans, rivers, and lakes": "Geography",
+    "Mountains and natural landscapes": "Geography",
+    "Astronomy and space": "Astronomy",
+    "Physics": "Physics",
+    "Chemistry": "Chemistry",
+    "Biology": "Biology",
+    "Human anatomy": "Medicine",
+    "Medicine and health": "Medicine",
+    "Animals": "Biology",
+    "Plants and botany": "Agriculture",
+    "Earth science and geology": "Geography",
+    "Weather and climate": "Meteorology",
+    "Mathematics": "Mathematics",
+    "Computer science": "Technology",
+    "Technology": "Technology",
+    "Inventions and discoveries": "Technology",
+    "Engineering": "Engineering",
+    "Literature": "Literature",
+    "Poetry": "Literature",
+    "Authors and books": "Literature",
+    "Languages and linguistics": "Literature",
+    "Mythology": "Mythology",
+    "Religion and world beliefs": "Mythology",
+    "Philosophy": "Literature",
+    "Psychology": "Medicine",
+    "Visual arts": "Art",
+    "Architecture": "Engineering",
+    "Classical music": "Music",
+    "Popular music": "Music",
+    "Musical instruments": "Music",
+    "Cinema": "Cinema",
+    "Television": "Cinema",
+    "Theater": "Art",
+    "Comics and graphic novels": "Comics",
+    "Video games": "Technology",
+    "Board games and puzzles": "Mathematics",
+    "Sports": "Sports",
+    "Olympic Games": "Sports",
+    "Food and cooking": "Chemistry",
+    "Drinks and culinary traditions": "Chemistry",
+    "Fashion and clothing": "Art",
+    "Transportation": "Engineering",
+    "Everyday objects and household knowledge": "Engineering",
+    "Traditions, customs, and world culture": "History",
+}
+OUTCOME_WEIGHTS = {
+    "HIGH": (90, 8, 2),
+    "MEDIUM": (45, 30, 25),
+    "LOW": (5, 15, 80),
+}
+MAX_CONSULTATIONS = 3
+
+
+@dataclass(frozen=True)
+class HelperProfile:
+    id: str
+    name: str
+    profession: str
+    erudition: int
+    skills: dict[str, Skill]
+    featured_high: tuple[str, ...]
+    featured_low: tuple[str, ...]
+    tagline: str
+
+    def public_card(self, remaining: int) -> dict:
+        """Never expose the private complete skill map to the client."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "profession": self.profession,
+            "erudition": self.erudition,
+            "strong_topics": list(self.featured_high),
+            "weak_topics": list(self.featured_low),
+            "tagline": self.tagline,
+            "consultations_remaining": remaining,
+            "consultations_total": MAX_CONSULTATIONS,
+        }
+
+
+def generate_profile(
+    profession: str = "Firefighter",
+    *,
+    name: str = "Alex",
+    tagline: str = "",
+    rng: Random | None = None,
+) -> HelperProfile:
+    rng = rng or Random()
+    if profession not in PROFESSIONAL_SKILLS:
+        raise ValueError("Unsupported helper profession")
+    erudition = round(max(0, min(100, rng.gauss(50, 15))))
+    locked = set(PROFESSIONAL_SKILLS[profession])
+    # Step 1: a Gaussian erudition score defines the number of extra HIGH areas.
+    # Step 2: pick their identities independently of profession.
+    high_bands = (
+        (20, 0, 1),
+        (40, 2, 3),
+        (60, 4, 6),
+        (80, 7, 9),
+        (100, 10, 12),
+    )
+    extra_high_count = next(
+        rng.randint(low, high)
+        for limit, low, high in high_bands
+        if erudition <= limit
+    )
+    candidates = [topic for topic in TOPICS if topic not in locked]
+    high_topics_set = locked | set(rng.sample(
+        candidates, min(extra_high_count, len(candidates))
+    ))
+    # As erudition increases, the remaining non-HIGH skills shift LOW -> MEDIUM.
+    medium_probability = 0.15 + 0.70 * (erudition / 100)
+    skills: dict[str, Skill] = {
+        topic: ("HIGH" if topic in high_topics_set else
+                "MEDIUM" if rng.random() < medium_probability else "LOW")
+        for topic in TOPICS
+    }
+    high_topics = [topic for topic, level in skills.items() if level == "HIGH"]
+    low_topics = [topic for topic, level in skills.items() if level == "LOW"]
+    featured_high = tuple(rng.sample(high_topics, min(len(high_topics), rng.choice((2, 3)))))
+    featured_low = tuple(rng.sample(low_topics, min(len(low_topics), rng.choice((2, 3)))))
+    return HelperProfile(
+        id=str(uuid4()), name=name, profession=profession, erudition=erudition,
+        skills=skills, featured_high=featured_high, featured_low=featured_low,
+        tagline=tagline or (
+            f"Ask me about {featured_high[0] if featured_high else profession}! "
+            f"But {featured_low[0] if featured_low else 'everything else'} might stump me."
+        ),
+    )
+
+
+def choose_outcome(skill: Skill, rng: Random) -> Outcome:
+    weights = OUTCOME_WEIGHTS[skill]
+    draw = rng.randrange(sum(weights))
+    if draw < weights[0]:
+        return "KNOW"
+    if draw < weights[0] + weights[1]:
+        return "MISTAKEN"
+    return "UNSURE"
+
+
+@dataclass
+class Consultation:
+    request_id: str
+    question_id: str
+    topic: str
+    outcome: Outcome
+    suggested_answer: str | None
+    response: str | None = None
+    charged: bool = False
+
+
+@dataclass
+class HelperService:
+    """Pure state holder; persist and lock per user/purchase in the API layer."""
+
+    profile: HelperProfile
+    remaining: int = MAX_CONSULTATIONS
+    consultations: dict[str, Consultation] = field(default_factory=dict)
+
+    def start(self, request_id: str, question_id: str, topic: str,
+              options: tuple[str, ...], correct: str, *, rng: Random | None = None) -> Consultation:
+        if not request_id or not question_id:
+            raise ValueError("Missing idempotency or question ID")
+        previous = self.consultations.get(request_id)
+        if previous:
+            if previous.question_id != question_id or previous.topic != topic:
+                raise ValueError("Idempotency key reused for another question")
+            return previous
+        if self.remaining <= 0:
+            raise ValueError("No consultations remaining")
+        if topic not in self.profile.skills:
+            raise ValueError("Unsupported topic")
+        if len(options) != 4 or len(set(options)) != 4 or correct not in options:
+            raise ValueError("Invalid question options")
+        rng = rng or Random()
+        outcome = choose_outcome(self.profile.skills[topic], rng)
+        wrong = rng.choice([option for option in options if option != correct]) if outcome == "MISTAKEN" else None
+        consultation = Consultation(request_id, question_id, topic, outcome, wrong)
+        self.consultations[request_id] = consultation
+        return consultation
+
+    def complete(self, request_id: str, response: str, *, verified: bool) -> Consultation:
+        consultation = self.consultations[request_id]
+        if consultation.charged:
+            return consultation
+        if not verified or not response.strip():
+            # A technical error does not consume a call; retry the same request ID.
+            return consultation
+        if self.remaining <= 0:
+            raise ValueError("No consultations remaining")
+        self.remaining -= 1
+        consultation.response = response
+        consultation.charged = True
+        return consultation
