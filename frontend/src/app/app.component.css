@@ -352,3 +352,6 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .helper-shop label { font-size: 13px; }
 .helper-call { margin-top: 20px; }
 .helper-speech { background: #343159; padding: 15px 18px; border-radius: 12px; color: #e9e4ff; line-height: 1.5; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 18px; }
+.bonus-decision p { flex: 0 0 100%; color: #f1d18a; line-height: 1.5; }
