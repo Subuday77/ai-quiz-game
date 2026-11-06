@@ -92,5 +92,21 @@
   "questionLanguage.Italian": "Italian",
   "game.duplicateExhausted": "We couldn't find a new unique question this time. The candidates were too similar to questions you've already seen. Would you like to try again?",
   "game.duplicateRetry": "Try again",
-  "game.returnToMenu": "Back to menu"
+  "game.returnToMenu": "Back to menu",
+  "helper.shopTitle": "Platinum Helper",
+  "helper.shopDescription": "Optional: hire a helper before question one. A random profession costs 1 platinum star; choosing a profession costs 2. You can call three times in questions 1–15. Unused helpers are refunded when you finish all 15 questions.",
+  "helper.chooseProfession": "Choose your helper",
+  "helper.randomCost": "Surprise me — 1 platinum ★",
+  "helper.chosenCost": "2 platinum ★",
+  "helper.buy": "Hire helper",
+  "helper.remaining": "Calls left: {{remaining}} / 3",
+  "helper.erudition": "Erudition: {{score}} / 100",
+  "helper.strong": "Knows a lot about",
+  "helper.weak": "Not very good at",
+  "helper.close": "Close",
+  "helper.call": "Call your helper",
+  "helper.calling": "Calling your helper…",
+  "helper.callFailed": "The call failed. Retry for free.",
+  "helper.purchaseFailed": "Could not purchase the helper. Check your platinum balance and game state.",
+  "helper.startQuestions": "Start questions"
 }
