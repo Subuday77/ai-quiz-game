@@ -59,11 +59,11 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
     """Buy once before the FIRST question is issued, with an atomic star debit."""
     try:
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
-        if run.status != "main" or run.correct_main_answers or pending_question(db, run_id=run_id):
-            raise GameConflict("A helper must be bought before the first question")
         prior = get_purchase(db, run_id)
         if prior:
             return card(prior)  # An HTTP retry never charges again.
+        if run.status != "main" or run.correct_main_answers or pending_question(db, run_id=run_id):
+            raise GameConflict("A helper must be bought before the first question")
         rng = rng or Random()
         if profession is not None and profession not in PROFESSIONAL_SKILLS:
             raise ValueError("Unsupported helper profession")
@@ -125,7 +125,8 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             PlatinumHelperCall.purchase_id == purchase.id,
             PlatinumHelperCall.status == "pending",
         )) or 0
-        if purchase.consultations_used + in_flight >= MAX_CONSULTATIONS and old is None:
+        if purchase.consultations_used >= MAX_CONSULTATIONS or (
+                purchase.consultations_used + in_flight >= MAX_CONSULTATIONS and old is None):
             raise GameConflict("No helper consultations remaining")
         # Authoritative category comes from the stored question topic, never the client.
         topic = db.get(Topic, question.topic_id)
