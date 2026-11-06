@@ -19,7 +19,7 @@ TOPICS = (
     "Fire Safety", "Engineering", "Agriculture", "Comics",
 )
 PROFESSIONAL_SKILLS: dict[str, tuple[str, ...]] = {
-    "Firefighter": ("Fire Safety", "Technology"),
+    "Firefighter": ("Fire Safety",),
 }
 OUTCOME_WEIGHTS = {
     "HIGH": (90, 8, 2),
@@ -67,16 +67,31 @@ def generate_profile(
         raise ValueError("Unsupported helper profession")
     erudition = round(max(0, min(100, rng.gauss(50, 15))))
     locked = set(PROFESSIONAL_SKILLS[profession])
-    skills: dict[str, Skill] = {}
-    for topic in TOPICS:
-        if topic in locked:
-            skills[topic] = "HIGH"
-            continue
-        # Smoothly shift LOW to HIGH as erudition rises; MEDIUM peaks near 50.
-        high = 0.04 + 0.62 * (erudition / 100) ** 1.5
-        medium = 0.18 + 0.23 * (1 - abs(erudition - 50) / 50)
-        draw = rng.random()
-        skills[topic] = "HIGH" if draw < high else "MEDIUM" if draw < high + medium else "LOW"
+    # Step 1: a Gaussian erudition score defines the number of extra HIGH areas.
+    # Step 2: pick their identities independently of profession.
+    high_bands = (
+        (20, 0, 1),
+        (40, 2, 3),
+        (60, 4, 6),
+        (80, 7, 9),
+        (100, 10, 12),
+    )
+    extra_high_count = next(
+        rng.randint(low, high)
+        for limit, low, high in high_bands
+        if erudition <= limit
+    )
+    candidates = [topic for topic in TOPICS if topic not in locked]
+    high_topics_set = locked | set(rng.sample(
+        candidates, min(extra_high_count, len(candidates))
+    ))
+    # As erudition increases, the remaining non-HIGH skills shift LOW -> MEDIUM.
+    medium_probability = 0.15 + 0.70 * (erudition / 100)
+    skills: dict[str, Skill] = {
+        topic: ("HIGH" if topic in high_topics_set else
+                "MEDIUM" if rng.random() < medium_probability else "LOW")
+        for topic in TOPICS
+    }
     high_topics = [topic for topic, level in skills.items() if level == "HIGH"]
     low_topics = [topic for topic, level in skills.items() if level == "LOW"]
     featured_high = tuple(rng.sample(high_topics, min(len(high_topics), rng.choice((2, 3)))))
