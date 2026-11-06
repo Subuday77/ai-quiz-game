@@ -49,6 +49,20 @@ interface PublicQuestion {
   answers: Record<Choice, string>;
   bonus: boolean;
 }
+interface HelperCard {
+  id: string;
+  name: string;
+  profession: string;
+  erudition: number;
+  strong_topics: string[];
+  weak_topics: string[];
+  tagline: string;
+  consultations_remaining: number;
+  consultations_total: number;
+  refunded: boolean;
+  price: number;
+}
+interface HelperReply { text: string; helper: HelperCard; }
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -91,6 +105,16 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'gold', label: 'Gold' },
     { key: 'platinum', label: 'Platinum' },
   ];
+
+  helperCard: HelperCard | null = null;
+  helperProfessions: string[] = [];
+  selectedHelperProfession = '';
+  helperBusy = false;
+  helperDetailsVisible = false;
+  helperReply = '';
+  helperError = '';
+  private helperCallKey = '';
+  private helperCallQuestionId = '';
 
   account: Account | null = null;
   authLoading = true;
@@ -428,7 +452,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
-        this.loadQuestion();
+        // Stay on setup: the optional helper must be bought before Q1 appears.
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -459,6 +483,10 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = '';
+        this.helperCallQuestionId = '';
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
@@ -532,6 +560,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
+        this.loadHelperCard();
+
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -561,6 +591,75 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resetGameView();
   }
 
+  private loadHelperProfessions(): void {
+    if (!this.account) return;
+    this.subscriptions.add(this.http.get<{ professions: string[] }>(
+      GAME_API + '/helper/professions',
+    ).pipe(timeout(10000)).subscribe({
+      next: (result) => { this.helperProfessions = result.professions; },
+      error: () => { this.helperProfessions = []; },
+    }));
+  }
+
+  loadHelperCard(): void {
+    if (!this.account || !this.gameId) return;
+    const gameId = this.gameId;
+    this.subscriptions.add(this.http.get<HelperCard>(
+      GAME_API + '/' + gameId + '/helper',
+    ).pipe(timeout(10000)).subscribe({
+      next: (card) => { if (this.gameId === gameId) this.helperCard = card; },
+      error: (err: unknown) => {
+        if (this.gameId === gameId && err instanceof HttpErrorResponse && err.status === 404) {
+          this.helperCard = null;
+        }
+      },
+    }));
+  }
+
+  buyHelper(): void {
+    if (!this.account || !this.gameId || this.helperCard || this.helperBusy
+        || this.progress !== 0 || this.screen !== 'setup') return;
+    this.helperBusy = true;
+    this.helperError = '';
+    this.subscriptions.add(this.http.post<HelperCard>(
+      GAME_API + '/' + this.gameId + '/helper/purchase',
+      { profession: this.selectedHelperProfession || null },
+    ).pipe(timeout(12000), finalize(() => { this.helperBusy = false; })).subscribe({
+      next: (card) => { this.helperCard = card; this.refreshStats(); },
+      error: () => { this.helperError = 'Unable to purchase helper. Check your platinum balance.'; },
+    }));
+  }
+
+  consultHelper(): void {
+    if (!this.account || !this.gameId || !this.current || this.current.bonus
+        || this.screen !== 'question' || !this.helperCard || this.helperBusy
+        || this.helperCard.consultations_remaining < 1) return;
+    this.helperBusy = true;
+    this.helperError = '';
+    if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
+      this.helperCallKey = crypto.randomUUID();
+      this.helperCallQuestionId = this.current.question_id;
+    }
+    const gameId = this.gameId;
+    const questionId = this.current.question_id;
+    this.subscriptions.add(this.http.post<HelperReply>(
+      GAME_API + '/' + gameId + '/helper/call',
+      { question_id: questionId, request_key: this.helperCallKey },
+    ).pipe(timeout(22000), finalize(() => { this.helperBusy = false; })).subscribe({
+      next: (result) => {
+        if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
+        this.helperReply = result.text;
+        this.helperCard = result.helper;
+        this.helperCallKey = '';
+      },
+      error: () => {
+        if (this.gameId === gameId && this.current?.question_id === questionId) {
+          this.helperError = 'Could not reach your helper. Retry free of charge.';
+        }
+      },
+    }));
+  }
+
   private signedIn(account: Account): void {
     if (this.account?.id !== account.id) this.resetGameView();
     this.account = account;
@@ -572,6 +671,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
+    this.loadHelperProfessions();
     this.restoreActiveGame();
   }
 
@@ -643,6 +743,7 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.gameId = run.game_id;
+        this.loadHelperCard();
         this.resumeAvailable = true;
         this.selectedLanguage = run.language;
         this.progress = run.correct_main_answers;
@@ -710,6 +811,13 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.helperCard = null;
+    this.helperDetailsVisible = false;
+    this.helperReply = '';
+    this.helperError = '';
+    this.helperCallKey = '';
+    this.helperCallQuestionId = '';
+    this.selectedHelperProfession = '';
     this.error = '';
     this.progress = 0;
     this.stars = [];
