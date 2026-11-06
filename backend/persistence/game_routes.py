@@ -29,6 +29,7 @@ from persistence.categories import (
 )
 from persistence.models import Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
+from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
 from star_perks import PerkUnavailable
 
@@ -100,6 +101,7 @@ def _game_info(db: Session, run) -> GameInfo:
     Both counts come from persisted attempts and survive page reloads.
     """
     state = game_state(run, db)
+    purchase = get_purchase(db, run.id)
     skipped = db.scalar(select(func.count(QuestionAttempt.id)).where(
         QuestionAttempt.run_id == run.id,
         QuestionAttempt.number <= 15,
@@ -113,9 +115,7 @@ def _game_info(db: Session, run) -> GameInfo:
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
         bonus_decision_available=(run.status == "bonus" and pending_question(db, run_id=run.id) is None),
-        helper=(lambda p: __import__("platinum_helper.service", fromlist=["card"]).card(p) if p else None)(
-            __import__("platinum_helper.service", fromlist=["get_purchase"]).get_purchase(db, run.id)
-        ),
+        helper=helper_card(purchase) if purchase else None,
     )
 
 
