@@ -9,7 +9,6 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from consts import QUESTION_CATEGORIES
 from persistence.gameplay import GameConflict, owned_game, pending_question
 from persistence.models import (
     GameRun, PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
@@ -23,13 +22,8 @@ from platinum_helper.core import (
 
 
 def available_platinum(db: Session, user_id: UUID) -> int:
-    earned = db.scalar(select(func.count(StarAward.id)).where(
-        StarAward.user_id == user_id, StarAward.tier == "platinum"
-    )) or 0
-    movements = db.scalar(select(func.coalesce(func.sum(PlatinumStarMovement.amount), 0))
-                          .where(PlatinumStarMovement.user_id == user_id)) or 0
-    return int(earned + movements)
-
+    """Use the existing star-perks ledger, not a parallel balance system."""
+    return star_balance(db, user_id, "platinum")
 
 def card(purchase: PlatinumHelperPurchase) -> dict:
     p = purchase.profile
@@ -59,18 +53,19 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
         rng: Random | None = None) -> dict:
     """Buy once before the FIRST question is issued, with an atomic star debit."""
     try:
+        lock_user_stars(db, user_id)
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         prior = get_purchase(db, run_id)
         if prior:
             return card(prior)  # An HTTP retry never charges again.
-        if run.status != "main" or run.correct_main_answers or pending_question(db, run_id=run_id):
+        issued = db.scalar(select(func.count(QuestionAttempt.id)).where(QuestionAttempt.run_id == run_id)) or 0
+        if run.status != "main" or issued:
             raise GameConflict("A helper must be bought before the first question")
         rng = rng or Random()
         if profession is not None and profession not in PROFESSIONAL_SKILLS:
             raise ValueError("Unsupported helper profession")
         price = 2 if profession else 1
         chosen = profession or rng.choice(list(PROFESSIONAL_SKILLS))
-        db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         if available_platinum(db, user_id) < price:
             raise GameConflict("Insufficient platinum stars")
         profile = generate_profile(chosen, name=name, tagline=tagline, rng=rng)
@@ -80,8 +75,11 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
         )
         db.add(purchase)
         db.flush()
-        db.add(PlatinumStarMovement(user_id=user_id, purchase_id=purchase.id,
-                                    amount=-price, reason="purchase"))
+        db.add(WalletTransaction(
+            user_id=user_id, run_id=run_id,
+            idempotency_key=f"helper:{purchase.id}:purchase",
+            amount=-price, reason="star/platinum/helper-purchase",
+        ))
         db.commit()
         return card(purchase)
     except Exception:
@@ -209,8 +207,9 @@ def refund_if_earned(db: Session, run: GameRun) -> bool:
     if purchase is None or purchase.consultations_used > 0 or purchase.refunded:
         return False
     purchase.refunded = True
-    db.add(PlatinumStarMovement(
-        user_id=run.user_id, purchase_id=purchase.id,
-        amount=purchase.price, reason="refund",
+    db.add(WalletTransaction(
+        user_id=run.user_id, run_id=run.id,
+        idempotency_key=f"helper:{purchase.id}:refund",
+        amount=purchase.price, reason="star/platinum/helper-refund",
     ))
     return True
