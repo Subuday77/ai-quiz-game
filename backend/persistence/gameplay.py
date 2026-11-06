@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from game_logic import AnswerResult, GameState
-from persistence.models import GameRun, Question, QuestionAttempt, QuestionReview, StarAward, Topic, User
+from persistence.models import GameRun, Question, QuestionAttempt, QuestionReview, StarAward, GoldStarMovement, Topic, User
 from persistence.seed_topics import category_slug
 from question_schema import Choice, QuizQuestion
 
@@ -224,6 +224,7 @@ def record_answer(
             raise GameConflict("No matching unanswered question")
 
         now = _now()
+        was_bonus = run.status == "bonus"
         state = game_state(run)
         is_correct = selected == question.correct_key
         result = state.submit_answer(is_correct)
@@ -244,8 +245,36 @@ def record_answer(
             db.add(StarAward(
                 user_id=user_id, run_id=run.id, tier=result.achievement
             ))
+        if was_bonus and not is_correct:
+            # Earned gold stays in the audit history but is forfeited as risk.
+            db.add(GoldStarMovement(
+                user_id=user_id, run_id=run.id,
+                amount=-1, reason="bonus_lost",
+            ))
+        # Unused helper cost is returned on finishing Q15, irrespective
+        # of whether the player later wins or loses the bonus.
+        if run.correct_main_answers == 15:
+            from platinum_helper.service import refund_if_earned
+            refund_if_earned(db, run)
         db.commit()
         return result, question.correct_key
+    except Exception:
+        db.rollback()
+        raise
+
+
+def decline_bonus(db: Session, *, run_id: UUID, user_id: UUID) -> GameRun:
+    """Keep the Q15 gold without risking it; do not issue Q16."""
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status != "bonus" or run.correct_main_answers != 15:
+            raise GameConflict("Bonus decision is not available")
+        if pending_question(db, run_id=run_id) is not None:
+            raise GameConflict("Cannot decline an already issued bonus question")
+        run.status = "completed"
+        run.finished_at = _now()
+        db.commit()
+        return run
     except Exception:
         db.rollback()
         raise

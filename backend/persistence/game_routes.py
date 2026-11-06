@@ -19,10 +19,11 @@ from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
 from persistence.gameplay import (
     GameConflict, GameNotFound, TopicsNotSeeded, create_game, game_state,
-    offer_question, owned_game, pending_question, record_answer,
+    offer_question, owned_game, pending_question, record_answer, decline_bonus,
 )
 from persistence.models import Topic, User
 from persistence.seed_topics import category_slug
+from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
 
 router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"])
@@ -42,6 +43,8 @@ class GameInfo(BaseModel):
     language: str
     phase: str
     correct_main_answers: int
+    bonus_decision_available: bool = False
+    helper: dict | None = None
 
 
 class AnswerFeedback(BaseModel):
@@ -143,6 +146,8 @@ def new_game(payload: NewGame, request: Request,
     return GameInfo(
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        bonus_decision_available=(run.status == "bonus" and
+                                  pending_question(db, run_id=run.id) is None),
     )
 
 
@@ -150,9 +155,13 @@ def new_game(payload: NewGame, request: Request,
 def game_info(run_id: UUID, user: User = Depends(authenticated_user),
               db: Session = Depends(get_db)):
     run = _lookup(db, run_id, user.id)
+    purchased = get_purchase(db, run_id)
     return GameInfo(
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        bonus_decision_available=(run.status == "bonus" and
+                                  pending_question(db, run_id=run.id) is None),
+        helper=helper_card(purchased) if purchased else None,
     )
 
 
@@ -332,4 +341,22 @@ def answer(run_id: UUID, payload: AnswerInput, request: Request,
         correct=result.correct, correct_answer=correct_key,
         phase=result.phase, correct_main_answers=run.correct_main_answers,
         achievement=result.achievement,
+    )
+
+
+@router.post("/{run_id}/bonus/decline", response_model=GameInfo)
+def decline_optional_bonus(run_id: UUID, request: Request,
+                           user: User = Depends(authenticated_user),
+                           db: Session = Depends(get_db)):
+    validate_origin(request)
+    try:
+        run = decline_bonus(db, run_id=run_id, user_id=user.id)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except GameConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    return GameInfo(
+        game_id=run.id, language=run.language,
+        phase=run.status, correct_main_answers=run.correct_main_answers,
+        bonus_decision_available=False,
     )

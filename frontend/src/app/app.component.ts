@@ -14,6 +14,7 @@ type AuthMode = 'login' | 'register';
 
 const GAME_API = '/api/v2/games';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const HELPER_CALL_KEY = 'ai-quiz-game:platinum-call:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
@@ -40,6 +41,8 @@ interface GameInfo {
   language: string;
   phase: string;
   correct_main_answers: number;
+  bonus_decision_available?: boolean;
+  helper?: HelperCard | null;
 }
 interface PublicQuestion {
   question_id: string;
@@ -49,6 +52,20 @@ interface PublicQuestion {
   answers: Record<Choice, string>;
   bonus: boolean;
 }
+interface HelperCard {
+  id: string;
+  name: string;
+  profession: string;
+  erudition: number;
+  strong_topics: string[];
+  weak_topics: string[];
+  tagline: string;
+  consultations_remaining: number;
+  consultations_total: number;
+  refunded: boolean;
+  price: number;
+}
+interface HelperReply { text: string; helper: HelperCard; }
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -91,6 +108,18 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'gold', label: 'Gold' },
     { key: 'platinum', label: 'Platinum' },
   ];
+
+  bonusDecisionAvailable = false;
+  helperCard: HelperCard | null = null;
+  helperProfessions: string[] = [];
+  helperProfessionsLoading = false;
+  selectedHelperProfession = '';
+  helperBusy = false;
+  helperDetailsVisible = false;
+  helperReply = '';
+  helperError = '';
+  helperCallKey = '';
+  private helperCallQuestionId = '';
 
   account: Account | null = null;
   authLoading = true;
@@ -138,7 +167,7 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    return this.gameId ? 'game.resume' : 'game.start';
+    return this.gameId && this.helperCard && !this.resumeAvailable && this.progress === 0 ? 'helper.startQuestions' : this.gameId ? 'game.resume' : 'game.start';
   }
 
   ngOnInit(): void {
@@ -404,12 +433,13 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
+    if (this.loading || this.helperBusy || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
     }
     if (this.gameId) {
+      if (this.bonusDecisionAvailable) return;
       this.resumeAvailable = false;
       this.loadQuestion();
       return;
@@ -421,6 +451,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.bonusDecisionAvailable = false;
         this.rememberActiveGame(game.game_id);
         this.stars = [];
         this.currentStars = emptyStars();
@@ -428,7 +459,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
-        this.loadQuestion();
+        this.loadQuestion(); // The ordinary Start flow is unchanged.
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -459,6 +490,10 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = this.loadPersistedHelperCallKey(question.question_id);
+        this.helperCallQuestionId = question.question_id;
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
@@ -520,6 +555,11 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        if (this.current?.bonus && !result.correct) {
+          this.currentStars.gold = 0;
+          this.stars = this.stars.filter(tier => tier !== 'gold');
+        }
+        this.bonusDecisionAvailable = result.phase === 'bonus';
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = result.correct_main_answers;
         if (result.achievement && this.isStarTier(result.achievement)) {
@@ -532,6 +572,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
+
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -559,6 +600,125 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.loading) return;
     this.forgetActiveGame();
     this.resetGameView();
+  }
+
+  playBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading) return;
+    this.bonusDecisionAvailable = false;
+    this.loadQuestion();
+  }
+
+  declineBonus(): void {
+    if (!this.bonusDecisionAvailable || !this.gameId || this.loading) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/decline', {},
+    ).pipe(timeout(10000), finalize(() => { this.loading = false; })).subscribe({
+      next: () => {
+        this.bonusDecisionAvailable = false;
+        this.finishedPhase = 'completed';
+        this.screen = 'done';
+        this.current = null;
+        this.feedback = null;
+        this.forgetActiveGame();
+        this.refreshStats();
+      },
+      error: () => {
+        this.error = 'helper.bonusDeclineFailed';
+        // A network timeout may have completed the decline on the server;
+        // recover the authoritative state rather than guessing.
+        this.recoverGameAfterConflict();
+      },
+    }));
+  }
+
+  loadHelperProfessions(): void {
+    if (!this.account || this.helperProfessionsLoading || this.helperProfessions.length) return;
+    this.helperProfessionsLoading = true;
+    this.subscriptions.add(this.http.get<{ professions: string[] }>(
+      GAME_API + '/helper/professions',
+    ).pipe(timeout(10000), finalize(() => { this.helperProfessionsLoading = false; })).subscribe({
+      next: (result) => { this.helperProfessions = result.professions; },
+      error: () => { this.helperProfessions = []; },
+    }));
+  }
+
+  loadHelperCard(): void {
+    if (!this.account || !this.gameId) return;
+    const gameId = this.gameId;
+    this.subscriptions.add(this.http.get<HelperCard>(
+      GAME_API + '/' + gameId + '/helper',
+    ).pipe(timeout(10000)).subscribe({
+      next: (card) => { if (this.gameId === gameId) this.helperCard = card; },
+      error: (err: unknown) => {
+        if (this.gameId === gameId && err instanceof HttpErrorResponse && err.status === 404) {
+          this.helperCard = null;
+        }
+      },
+    }));
+  }
+
+  async buyHelper(): Promise<void> {
+    if (!this.account || this.helperCard || this.helperBusy || this.loading
+        || this.restoringGame || this.resumeAvailable
+        || this.progress !== 0 || this.screen !== 'setup') return;
+    this.helperBusy = true;
+    this.helperError = '';
+    try {
+      // Only a player requesting a helper pre-creates the game. Ordinary Start
+      // still creates a game and immediately generates Q1 as before.
+      if (!this.gameId) {
+        const game = await firstValueFrom(this.http.post<GameInfo>(
+          GAME_API, { language: this.selectedLanguage },
+        ).pipe(timeout(this.requestTimeoutMs)));
+        this.gameId = game.game_id;
+        this.rememberActiveGame(game.game_id);
+      }
+      this.helperCard = await firstValueFrom(this.http.post<HelperCard>(
+        GAME_API + '/' + this.gameId + '/helper/purchase',
+        { profession: this.selectedHelperProfession || null },
+      ).pipe(timeout(12000)));
+      this.refreshStats();
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else this.helperError = 'helper.purchaseFailed';
+    } finally {
+      this.helperBusy = false;
+    }
+  }
+
+  consultHelper(): void {
+    if (!this.account || !this.gameId || !this.current || this.current.bonus
+        || this.screen !== 'question' || !this.helperCard || this.helperBusy
+        || (this.helperCard.consultations_remaining < 1 && !this.helperCallKey)) return;
+    this.helperBusy = true;
+    this.helperError = '';
+    if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
+      this.helperCallKey = crypto.randomUUID();
+      this.helperCallQuestionId = this.current.question_id;
+      this.persistHelperCallKey(this.current.question_id, this.helperCallKey);
+    }
+    const gameId = this.gameId;
+    const questionId = this.current.question_id;
+    this.subscriptions.add(this.http.post<HelperReply>(
+      GAME_API + '/' + gameId + '/helper/call',
+      { question_id: questionId, request_key: this.helperCallKey },
+    ).pipe(timeout(22000), finalize(() => { this.helperBusy = false; })).subscribe({
+      next: (result) => {
+        if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
+        this.helperReply = result.text;
+        this.helperCard = result.helper;
+        // Retain the call key until the question changes. If the browser
+        // drops the response, retry retrieves the charged result without
+        // rerolling the outcome or deducting another call.
+      },
+      error: () => {
+        if (this.gameId === gameId && this.current?.question_id === questionId) {
+          this.helperError = 'helper.callFailed';
+        }
+      },
+    }));
   }
 
   private signedIn(account: Account): void {
@@ -643,7 +803,9 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.gameId = run.game_id;
+        this.helperCard = run.helper ?? null;
         this.resumeAvailable = true;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
         this.selectedLanguage = run.language;
         this.progress = run.correct_main_answers;
         this.current = null;
@@ -681,6 +843,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.canRetryQuestion = false;
         this.progress = run.correct_main_answers;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
         if (run.phase === 'completed' || run.phase === 'lost') {
           this.forgetActiveGame();
           this.feedback = null;
@@ -710,11 +873,29 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.bonusDecisionAvailable = false;
+    this.helperCard = null;
+    this.helperDetailsVisible = false;
+    this.helperReply = '';
+    this.helperError = '';
+    this.helperCallKey = '';
+    this.helperCallQuestionId = '';
+    this.selectedHelperProfession = '';
     this.error = '';
     this.progress = 0;
     this.stars = [];
     this.currentStars = emptyStars();
     this.screen = 'setup';
+  }
+
+  private persistHelperCallKey(questionId: string, requestKey: string): void {
+    try { localStorage.setItem(HELPER_CALL_KEY + this.gameId + ':' + questionId, requestKey); }
+    catch { /* private mode */ }
+  }
+
+  private loadPersistedHelperCallKey(questionId: string): string {
+    try { return localStorage.getItem(HELPER_CALL_KEY + this.gameId + ':' + questionId) || ''; }
+    catch { return ''; }
   }
 
   private rememberActiveGame(id: string): void {

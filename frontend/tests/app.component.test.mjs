@@ -324,7 +324,7 @@ test('failed question hides Next and offers one Retry without losing progress', 
   assert.equal(app.canRetryQuestion, false);
   assert.equal(app.progress, 10);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted"/);
+  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted && !bonusDecisionAvailable"/);
 });
 
 test('bonus failure keeps 15/15; only ordinary Retry is visible', () => {
@@ -1016,3 +1016,60 @@ test('duplicate recovery shows two accessible translated actions, not generic re
     assert.ok(english[key], key + ' must be in the AI localization source');
   }
 });
+
+test('helper purchase prepares a game before the first question', async () => {
+  const { app, posts } = setup({ starAwards: { platinum: 2 } });
+  app.gameId = '';
+  const buying = app.buyHelper();
+  assert.equal(posts[0].url, '/api/v2/games');
+  succeed(posts[0], { game_id: 'helper-game', language: 'English', phase: 'main',
+    correct_main_answers: 0 });
+  await Promise.resolve();
+  assert.equal(posts[1].url, '/api/v2/games/helper-game/helper/purchase');
+  assert.deepEqual(posts[1].body, { profession: null });
+  succeed(posts[1], { id: 'helper-id', name: 'Sam', profession: 'Firefighter',
+    erudition: 60, strong_topics: ['Fire Safety'], weak_topics: ['Comics'],
+    tagline: 'Try me!', consultations_remaining: 3, consultations_total: 3,
+    price: 1, refunded: false });
+  await buying;
+  assert.equal(app.helperCard.name, 'Sam');
+  assert.equal(app.gameId, 'helper-game');
+  assert.equal(app.helperBusy, false);
+});
+
+test('helper consultation retries with the same call key after a transient error', () => {
+  const { app, posts } = setup();
+  app.screen = 'question';
+  app.current = question;
+  app.helperCard = { id: 'helper-id', name: 'Sam', profession: 'Firefighter',
+    erudition: 50, strong_topics: [], weak_topics: [], tagline: 'Hello',
+    consultations_remaining: 3, consultations_total: 3, price: 1, refunded: false };
+  app.helperCallKey = 'fixed-request-001';
+  app.helperCallQuestionId = question.question_id;
+  app.consultHelper();
+  assert.equal(posts[0].body.request_key, 'fixed-request-001');
+  posts[0].subject.error(new HttpErrorResponse({ status: 503 }));
+  assert.equal(app.helperError, 'helper.callFailed');
+  app.consultHelper();
+  assert.equal(posts[1].body.request_key, 'fixed-request-001');
+  succeed(posts[1], { text: 'Maybe B.', helper: {
+    ...app.helperCard, consultations_remaining: 2,
+  } });
+  assert.equal(app.helperReply, 'Maybe B.');
+  assert.equal(app.helperCard.consultations_remaining, 2);
+});
+
+test('bonus decision offers a server-authoritative decline', () => {
+  const { app, posts } = setup();
+  app.bonusDecisionAvailable = true;
+  app.screen = 'feedback';
+  app.feedback = { phase: 'bonus', correct: true, correct_main_answers: 15 };
+  app.progress = 15;
+  app.declineBonus();
+  assert.equal(posts[0].url, '/api/v2/games/existing-game/bonus/decline');
+  succeed(posts[0], { game_id: 'existing-game', phase: 'completed',
+    correct_main_answers: 15 });
+  assert.equal(app.bonusDecisionAvailable, false);
+  assert.equal(app.screen, 'done');
+});
+
