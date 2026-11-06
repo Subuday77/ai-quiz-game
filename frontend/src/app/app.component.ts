@@ -14,6 +14,7 @@ type AuthMode = 'login' | 'register';
 
 const GAME_API = '/api/v2/games';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const HELPER_CALL_KEY = 'ai-quiz-game:platinum-call:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
@@ -489,8 +490,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.current = question;
         this.helperReply = '';
         this.helperError = '';
-        this.helperCallKey = '';
-        this.helperCallQuestionId = '';
+        this.helperCallKey = this.loadPersistedHelperCallKey(question.question_id);
+        this.helperCallQuestionId = question.question_id;
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
@@ -680,6 +681,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
       this.helperCallKey = crypto.randomUUID();
       this.helperCallQuestionId = this.current.question_id;
+      this.persistHelperCallKey(this.current.question_id, this.helperCallKey);
     }
     const gameId = this.gameId;
     const questionId = this.current.question_id;
@@ -691,7 +693,9 @@ export class AppComponent implements OnInit, OnDestroy {
         if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
         this.helperReply = result.text;
         this.helperCard = result.helper;
-        this.helperCallKey = '';
+        // Retain the call key until the question changes. If the browser
+        // drops the response, retry retrieves the charged result without
+        // rerolling the outcome or deducting another call.
       },
       error: () => {
         if (this.gameId === gameId && this.current?.question_id === questionId) {
@@ -867,6 +871,16 @@ export class AppComponent implements OnInit, OnDestroy {
     this.stars = [];
     this.currentStars = emptyStars();
     this.screen = 'setup';
+  }
+
+  private persistHelperCallKey(questionId: string, requestKey: string): void {
+    try { localStorage.setItem(HELPER_CALL_KEY + this.gameId + ':' + questionId, requestKey); }
+    catch { /* private mode */ }
+  }
+
+  private loadPersistedHelperCallKey(questionId: string): string {
+    try { return localStorage.getItem(HELPER_CALL_KEY + this.gameId + ':' + questionId) || ''; }
+    catch { return ''; }
   }
 
   private rememberActiveGame(id: string): void {
