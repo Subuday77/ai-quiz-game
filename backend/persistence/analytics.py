@@ -12,7 +12,7 @@ from persistence.auth import authenticated_user
 from persistence.database import get_db
 from persistence.models import (
     AchievementDefinition, GameRun, Question, QuestionAttempt, StarAward,
-    Topic, User, UserAchievement, WalletTransaction,
+    Topic, User, UserAchievement, WalletTransaction, PlatinumStarMovement,
 )
 
 router = APIRouter(prefix="/api/profile", tags=["Profile"])
@@ -54,6 +54,11 @@ def personal_statistics(user: User = Depends(authenticated_user),
                            .where(StarAward.user_id == user.id)
                            .group_by(StarAward.tier)).all()
     star_awards = {tier: count for tier, count in medal_rows}
+    platinum_delta = db.scalar(
+        select(func.coalesce(func.sum(PlatinumStarMovement.amount), 0))
+        .where(PlatinumStarMovement.user_id == user.id)
+    ) or 0
+    star_awards["platinum"] = max(0, int(star_awards.get("platinum", 0)) + int(platinum_delta))
     achievements = list(db.scalars(
         select(UserAchievement.achievement_code)
         .where(UserAchievement.user_id == user.id)
