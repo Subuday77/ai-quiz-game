@@ -75,7 +75,7 @@
   <section class="helper-tablet" *ngIf="helperCard as helper" aria-label="Your platinum helper">
     <button class="helper-tile" type="button" (click)="helperDetailsVisible = true">
       <span aria-hidden="true">☎</span>
-      <span><strong>{{ helper.name }} · {{ helper.profession }}</strong>
+      <span><strong>{{ helper.name }} · {{ locale.t('helper.profession.' + helper.profession) }}</strong>
         <small>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</small>
       </span>
       <span class="helper-open" aria-hidden="true">ⓘ</span>
@@ -85,12 +85,12 @@
     <section class="helper-modal" role="dialog" aria-modal="true" aria-label="Helper profile">
       <button type="button" class="helper-close" (click)="helperDetailsVisible = false" aria-label="Close">×</button>
       <h2>{{ helper.name }}</h2>
-      <p>{{ helper.profession }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
+      <p>{{ locale.t('helper.profession.' + helper.profession) }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
       <p class="helper-tagline">“{{ helper.tagline }}”</p>
       <h3>{{ locale.t('helper.strong') }}</h3>
-      <p>{{ helper.strong_topics.join(', ') || '—' }}</p>
+      <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
       <h3>{{ locale.t('helper.weak') }}</h3>
-      <p>{{ helper.weak_topics.join(', ') || '—' }}</p>
+      <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
       <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
       <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
     </section>
@@ -140,7 +140,7 @@
       <select id="helper-profession" [(ngModel)]="selectedHelperProfession" [disabled]="helperBusy">
         <option value="">{{ locale.t('helper.randomCost') }}</option>
         <option *ngFor="let profession of helperProfessions" [value]="profession">
-          {{ profession }} · {{ locale.t('helper.chosenCost') }}
+          {{ locale.t('helper.profession.' + profession) }} · {{ locale.t('helper.chosenCost') }}
         </option>
       </select>
       <button class="outline-button" type="button" (click)="buyHelper()" [disabled]="helperBusy">
