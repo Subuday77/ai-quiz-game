@@ -16,6 +16,7 @@ type AuthMode = 'login' | 'register';
 const GAME_API = '/api/v2/games';
 const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
@@ -44,6 +45,8 @@ interface GameInfo {
   correct_main_answers: number;
   main_question_index?: number;
   skipped_questions?: number;
+  helper?: HelperCard | null;
+  bonus_decision_available?: boolean;
 }
 interface PublicQuestion {
   question_id: string;
@@ -65,6 +68,20 @@ interface CategoryInfo {
   can_exclude: boolean;
   minimum_allowed: number;
 }
+interface HelperCard {
+  id: string;
+  name: string;
+  profession: string;
+  erudition: number;
+  strong_topics: string[];
+  weak_topics: string[];
+  tagline: string;
+  consultations_remaining: number;
+  consultations_total: number;
+  refunded: boolean;
+  price: number;
+}
+interface HelperReply { text: string; helper: HelperCard; }
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -107,6 +124,18 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'gold', label: 'Gold' },
     { key: 'platinum', label: 'Platinum' },
   ];
+
+  helperCard: HelperCard | null = null;
+  helperProfessions: string[] = [];
+  selectedHelperProfession = '';
+  helperBusy = false;
+  helperProfessionsLoading = false;
+  helperDetailsVisible = false;
+  helperReply = '';
+  helperError = '';
+  helperCallKey = '';
+  private helperCallQuestionId = '';
+  bonusDecisionAvailable = false;
 
   account: Account | null = null;
   authLoading = true;
@@ -504,7 +533,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+    if (this.loading || this.perksBusy || this.helperBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
         this.languageSaving || this.categoriesToExclude.length > 0) return;
     if (!this.account) {
@@ -515,6 +544,8 @@ export class AppComponent implements OnInit, OnDestroy {
       const run = this.resumeCandidate;
       this.resumeCandidate = null;
       this.gameId = run.game_id;
+      this.helperCard = run.helper ?? null;
+      this.bonusDecisionAvailable = run.bonus_decision_available === true;
       this.gameLanguage = run.language;
       this.selectedLanguage = run.language;
       this.progress = run.main_question_index ?? run.correct_main_answers;
@@ -644,6 +675,10 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = this.readHelperCallKey(question.question_id);
+        this.helperCallQuestionId = question.question_id;
         this.progress = Math.max(this.progress, Math.min(15, question.number - 1));
         this.feedback = null;
         this.screen = 'question';
@@ -711,6 +746,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        this.bonusDecisionAvailable = result.phase === 'bonus';
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
         this.gameCorrectAnswers = result.correct_main_answers;
@@ -752,6 +788,88 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.loading) return;
     this.forgetActiveGame();
     this.resetGameView();
+  }
+
+  loadHelperProfessions(): void {
+    if (!this.account || this.helperProfessionsLoading || this.helperProfessions.length) return;
+    this.helperProfessionsLoading = true;
+    this.subscriptions.add(this.http.get<{ professions: string[] }>(
+      GAME_API + '/helper/professions',
+    ).pipe(timeout(10000), finalize(() => { this.helperProfessionsLoading = false; })).subscribe({
+      next: data => { this.helperProfessions = data.professions; },
+      error: () => { this.helperProfessions = []; },
+    }));
+  }
+
+  async buyHelper(): Promise<void> {
+    if (!this.account || this.helperCard || this.helperBusy || this.loading ||
+        this.restoringGame || this.resumeAvailable || this.resumeCandidate ||
+        this.screen !== 'setup' || this.progress !== 0) return;
+    this.helperBusy = true;
+    this.helperError = '';
+    try {
+      if (!this.gameId) {
+        const game = await firstValueFrom(this.http.post<GameInfo>(
+          GAME_API, { language: this.selectedLanguage },
+        ).pipe(timeout(this.requestTimeoutMs)));
+        this.gameId = game.game_id;
+        this.gameLanguage = game.language;
+        this.rememberActiveGame(game.game_id);
+        this.resumeCandidate = null;
+        this.categoryInfo = null;
+      }
+      this.helperCard = await firstValueFrom(this.http.post<HelperCard>(
+        GAME_API + '/' + this.gameId + '/helper/purchase',
+        { profession: this.selectedHelperProfession || null },
+      ).pipe(timeout(12000)));
+      this.refreshStats();
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else this.helperError = 'helper.purchaseFailed';
+    } finally {
+      this.helperBusy = false;
+    }
+  }
+
+  private helperCallStorageKey(questionId: string): string {
+    return HELPER_CALL_KEY + this.account?.id + ':' + this.gameId + ':' + questionId;
+  }
+
+  private readHelperCallKey(questionId: string): string {
+    try { return localStorage.getItem(this.helperCallStorageKey(questionId)) || ''; }
+    catch { return ''; }
+  }
+
+  consultHelper(): void {
+    if (!this.account || !this.gameId || !this.current || this.current.bonus ||
+        this.screen !== 'question' || !this.helperCard || this.helperBusy || this.loading ||
+        (this.helperCard.consultations_remaining <= 0 && !this.helperCallKey) ||
+        !!this.helperReply) return;
+    if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
+      this.helperCallKey = crypto.randomUUID();
+      this.helperCallQuestionId = this.current.question_id;
+      try {
+        localStorage.setItem(this.helperCallStorageKey(this.current.question_id), this.helperCallKey);
+      } catch { /* private mode */ }
+    }
+    this.helperBusy = true;
+    this.helperError = '';
+    const gameId = this.gameId;
+    const questionId = this.current.question_id;
+    this.subscriptions.add(this.http.post<HelperReply>(
+      GAME_API + '/' + gameId + '/helper/call',
+      { question_id: questionId, request_key: this.helperCallKey },
+    ).pipe(timeout(22000), finalize(() => { this.helperBusy = false; })).subscribe({
+      next: result => {
+        if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
+        this.helperReply = result.text;
+        this.helperCard = result.helper;
+      },
+      error: () => {
+        if (this.gameId === gameId && this.current?.question_id === questionId)
+          this.helperError = 'helper.callFailed';
+      },
+    }));
   }
 
   private signedIn(account: Account): void {
@@ -1222,6 +1340,13 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.helperCard = null;
+    this.helperReply = '';
+    this.helperError = '';
+    this.helperCallKey = '';
+    this.helperCallQuestionId = '';
+    this.helperDetailsVisible = false;
+    this.bonusDecisionAvailable = false;
     this.error = '';
     this.progress = 0;
     this.gameCorrectAnswers = 0;
