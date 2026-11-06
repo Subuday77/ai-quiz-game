@@ -72,6 +72,30 @@
     </div>
   </section>
 
+  <section class="helper-tablet" *ngIf="helperCard as helper" aria-label="Your platinum helper">
+    <button class="helper-tile" type="button" (click)="helperDetailsVisible = true">
+      <span aria-hidden="true">☎</span>
+      <span><strong>{{ helper.name }} · {{ helper.profession }}</strong>
+        <small>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</small>
+      </span>
+      <span class="helper-open" aria-hidden="true">ⓘ</span>
+    </button>
+  </section>
+  <div class="helper-modal-backdrop" *ngIf="helperDetailsVisible && helperCard as helper" role="presentation">
+    <section class="helper-modal" role="dialog" aria-modal="true" aria-label="Helper profile">
+      <button type="button" class="helper-close" (click)="helperDetailsVisible = false" aria-label="Close">×</button>
+      <h2>{{ helper.name }}</h2>
+      <p>{{ helper.profession }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
+      <p class="helper-tagline">“{{ helper.tagline }}”</p>
+      <h3>{{ locale.t('helper.strong') }}</h3>
+      <p>{{ helper.strong_topics.join(', ') || '—' }}</p>
+      <h3>{{ locale.t('helper.weak') }}</h3>
+      <p>{{ helper.weak_topics.join(', ') || '—' }}</p>
+      <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
+      <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
+    </section>
+  </div>
+
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
@@ -104,6 +128,22 @@
       </div>
     </div>
 
+    <div class="helper-shop" *ngIf="screen === 'setup' && gameId && progress === 0 && !helperCard">
+      <h2>{{ locale.t('helper.shopTitle') }}</h2>
+      <p>{{ locale.t('helper.shopDescription') }}</p>
+      <label for="helper-profession">{{ locale.t('helper.chooseProfession') }}</label>
+      <select id="helper-profession" [(ngModel)]="selectedHelperProfession" [disabled]="helperBusy">
+        <option value="">{{ locale.t('helper.randomCost') }}</option>
+        <option *ngFor="let profession of helperProfessions" [value]="profession">
+          {{ profession }} · {{ locale.t('helper.chosenCost') }}
+        </option>
+      </select>
+      <button class="outline-button" type="button" (click)="buyHelper()" [disabled]="helperBusy">
+        {{ locale.t('helper.buy') }}
+      </button>
+      <p *ngIf="helperError" role="alert" class="error">{{ locale.t(helperError) }}</p>
+    </div>
+
     <div *ngIf="screen === 'question' && current as question" class="question"
          [attr.dir]="questionRtl ? 'rtl' : 'ltr'">
       <div class="question-label">
@@ -115,6 +155,15 @@
         <button *ngFor="let choice of choices" type="button" (click)="answer(choice)" [disabled]="loading">
           <span class="letter">{{ choice }}</span><span>{{ question.answers[choice] }}</span>
         </button>
+      </div>
+      <div class="helper-call" *ngIf="helperCard && !question.bonus">
+        <button class="outline-button" type="button" (click)="consultHelper()"
+                [disabled]="helperBusy || loading || !!helperReply || helperCard.consultations_remaining === 0">
+          {{ locale.t('helper.call') }}
+        </button>
+        <p *ngIf="helperBusy" role="status">{{ locale.t('helper.calling') }}</p>
+        <p *ngIf="helperReply" class="helper-speech">{{ helperReply }}</p>
+        <p *ngIf="helperError" role="alert" class="error">{{ locale.t(helperError) }}</p>
       </div>
     </div>
 
