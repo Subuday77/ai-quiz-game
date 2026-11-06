@@ -144,5 +144,6 @@
   "helper.profession.Astronomer": "Astronomer",
   "helper.profession.Engineer": "Engineer",
   "helper.profession.Librarian": "Librarian",
-  "helper.profession.Athlete": "Athlete"
+  "helper.profession.Athlete": "Athlete",
+  "helper.repeatCall": "Retrieve previous call"
 }
