@@ -112,6 +112,28 @@
     </div>
   </section>
 
+  <section class="helper-tablet" *ngIf="helperCard as helper" aria-label="Platinum Helper">
+    <button type="button" class="helper-tile" (click)="helperDetailsVisible = true">
+      <span aria-hidden="true">☎</span>
+      <span><strong>{{ helper.name }} · {{ locale.t('helper.profession.' + helper.profession) }}</strong>
+        <small>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</small>
+      </span><span class="helper-open" aria-hidden="true">ⓘ</span>
+    </button>
+  </section>
+  <div class="helper-modal-backdrop" *ngIf="helperDetailsVisible && helperCard as helper">
+    <section class="helper-modal" role="dialog" aria-modal="true" aria-label="Helper profile">
+      <button class="helper-close" type="button" (click)="helperDetailsVisible = false" aria-label="Close">×</button>
+      <h2>{{ helper.name }}</h2>
+      <p>{{ locale.t('helper.profession.' + helper.profession) }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
+      <p class="helper-tagline">“{{ helper.tagline }}”</p>
+      <h3>{{ locale.t('helper.strong') }}</h3>
+      <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <h3>{{ locale.t('helper.weak') }}</h3>
+      <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
+      <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
+    </section>
+  </div>
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
@@ -170,6 +192,23 @@
           {{ locale.t('perks.confirmExclusions') }}
         </button>
       </div>
+      <div class="helper-shop" *ngIf="account && !helperCard && !resumeAvailable && !resumeCandidate && progress === 0">
+        <h3>{{ locale.t('helper.shopTitle') }}</h3>
+        <p>{{ locale.t('helper.shopDescription') }}</p>
+        <label for="helper-profession">{{ locale.t('helper.chooseProfession') }}</label>
+        <select id="helper-profession" [(ngModel)]="selectedHelperProfession"
+                (focus)="loadHelperProfessions()" [disabled]="helperBusy">
+          <option value="">{{ locale.t('helper.randomCost') }}</option>
+          <option *ngFor="let profession of helperProfessions" [value]="profession">
+            {{ locale.t('helper.profession.' + profession) }} · {{ locale.t('helper.chosenCost') }}
+          </option>
+        </select>
+        <button type="button" class="outline-button" (click)="buyHelper()"
+                [disabled]="helperBusy || loading || languageSaving || spendableStars.platinum < (selectedHelperProfession ? 2 : 1)">
+          {{ locale.t('helper.buy') }}
+        </button>
+        <p class="error" role="alert" *ngIf="helperError">{{ locale.t(helperError) }}</p>
+      </div>
       <div class="question-actions">
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
@@ -210,6 +249,16 @@
                slides C into B's old position when a bronze hint removes B. -->
           <span *ngIf="!question.answers[choice]" class="hidden-answer-slot" aria-hidden="true"></span>
         </ng-container>
+      </div>
+      <div class="helper-call" *ngIf="helperCard && !question.bonus">
+        <button class="outline-button" type="button" (click)="consultHelper()"
+                [disabled]="loading || perksBusy || helperBusy || !!helperReply ||
+                  (helperCard.consultations_remaining < 1 && !helperCallKey)">
+          {{ locale.t(helperCallKey ? 'helper.repeatCall' : 'helper.call') }}
+        </button>
+        <p *ngIf="helperBusy" role="status">{{ locale.t('helper.calling') }}</p>
+        <p *ngIf="helperReply" class="helper-speech">{{ helperReply }}</p>
+        <p *ngIf="helperError" role="alert" class="error">{{ locale.t(helperError) }}</p>
       </div>
       <div class="perk-shop" *ngIf="!question.bonus">
         <button type="button" class="shop-toggle" (click)="shopOpen = !shopOpen"
