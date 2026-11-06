@@ -20,6 +20,72 @@ TOPICS = (
 )
 PROFESSIONAL_SKILLS: dict[str, tuple[str, ...]] = {
     "Firefighter": ("Fire Safety",),
+    "Physicist": ("Physics", "Mathematics"),
+    "Mathematician": ("Mathematics",),
+    "Plumber": ("Engineering",),
+    "Doctor": ("Medicine", "Biology"),
+    "Historian": ("History",),
+    "Chef": ("Agriculture", "Chemistry"),
+    "Musician": ("Music",),
+    "Astronomer": ("Astronomy", "Physics"),
+    "Engineer": ("Engineering", "Technology"),
+    "Librarian": ("Literature",),
+    "Athlete": ("Sports",),
+}
+
+# The actual game uses about 50 fine-grained categories. Each maps to exactly
+# one of the twenty broad profile areas; never trust a client-supplied topic.
+CATEGORY_TOPICS = {
+    "Ancient history": "History",
+    "Medieval history": "History",
+    "Modern history": "History",
+    "World geography": "Geography",
+    "Countries and capitals": "Geography",
+    "Cities and landmarks": "Geography",
+    "Oceans, rivers, and lakes": "Geography",
+    "Mountains and natural landscapes": "Geography",
+    "Astronomy and space": "Astronomy",
+    "Physics": "Physics",
+    "Chemistry": "Chemistry",
+    "Biology": "Biology",
+    "Human anatomy": "Medicine",
+    "Medicine and health": "Medicine",
+    "Animals": "Biology",
+    "Plants and botany": "Agriculture",
+    "Earth science and geology": "Geography",
+    "Weather and climate": "Meteorology",
+    "Mathematics": "Mathematics",
+    "Computer science": "Technology",
+    "Technology": "Technology",
+    "Inventions and discoveries": "Technology",
+    "Engineering": "Engineering",
+    "Literature": "Literature",
+    "Poetry": "Literature",
+    "Authors and books": "Literature",
+    "Languages and linguistics": "Literature",
+    "Mythology": "Mythology",
+    "Religion and world beliefs": "Mythology",
+    "Philosophy": "Literature",
+    "Psychology": "Medicine",
+    "Visual arts": "Art",
+    "Architecture": "Engineering",
+    "Classical music": "Music",
+    "Popular music": "Music",
+    "Musical instruments": "Music",
+    "Cinema": "Cinema",
+    "Television": "Cinema",
+    "Theater": "Art",
+    "Comics and graphic novels": "Comics",
+    "Video games": "Technology",
+    "Board games and puzzles": "Mathematics",
+    "Sports": "Sports",
+    "Olympic Games": "Sports",
+    "Food and cooking": "Chemistry",
+    "Drinks and culinary traditions": "Chemistry",
+    "Fashion and clothing": "Art",
+    "Transportation": "Engineering",
+    "Everyday objects and household knowledge": "Engineering",
+    "Traditions, customs, and world culture": "History",
 }
 OUTCOME_WEIGHTS = {
     "HIGH": (90, 8, 2),
@@ -59,7 +125,7 @@ def generate_profile(
     profession: str = "Firefighter",
     *,
     name: str = "Alex",
-    tagline: str = "I know a thing or two about fires. Ancient gods? Not so much.",
+    tagline: str = "",
     rng: Random | None = None,
 ) -> HelperProfile:
     rng = rng or Random()
@@ -99,7 +165,7 @@ def generate_profile(
     return HelperProfile(
         id=str(uuid4()), name=name, profession=profession, erudition=erudition,
         skills=skills, featured_high=featured_high, featured_low=featured_low,
-        tagline=tagline,
+        tagline=tagline or f"{name}: {profession}. Ask me what I know — I might surprise you.",
     )
 
 
