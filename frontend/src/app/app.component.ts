@@ -162,7 +162,7 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    return this.gameId ? 'game.resume' : 'game.start';
+    return this.gameId && !this.resumeAvailable && this.progress === 0 ? 'helper.startQuestions' : this.gameId ? 'game.resume' : 'game.start';
   }
 
   ngOnInit(): void {
@@ -626,7 +626,7 @@ export class AppComponent implements OnInit, OnDestroy {
       { profession: this.selectedHelperProfession || null },
     ).pipe(timeout(12000), finalize(() => { this.helperBusy = false; })).subscribe({
       next: (card) => { this.helperCard = card; this.refreshStats(); },
-      error: () => { this.helperError = 'Unable to purchase helper. Check your platinum balance.'; },
+      error: () => { this.helperError = 'helper.purchaseFailed'; },
     }));
   }
 
@@ -654,7 +654,7 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: () => {
         if (this.gameId === gameId && this.current?.question_id === questionId) {
-          this.helperError = 'Could not reach your helper. Retry free of charge.';
+          this.helperError = 'helper.callFailed';
         }
       },
     }));
