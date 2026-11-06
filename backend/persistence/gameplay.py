@@ -338,6 +338,9 @@ def record_answer(
             db.add(StarAward(
                 user_id=user_id, run_id=run.id, tier=result.achievement
             ))
+        if run.correct_main_answers == 15 and state.main_question_index == 15:
+            from platinum_helper.service import refund_if_earned
+            refund_if_earned(db, run)
         db.commit()
         return result, question.correct_key
     except Exception:
