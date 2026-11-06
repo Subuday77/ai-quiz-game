@@ -16,7 +16,7 @@ class PlatinumHelperTests(unittest.TestCase):
         self.assertEqual(len(self.profile.skills), 20)
         self.assertEqual(set(self.profile.skills), set(TOPICS))
         self.assertEqual(self.profile.skills["Fire Safety"], "HIGH")
-        self.assertEqual(self.profile.skills["Technology"], "HIGH")
+        self.assertTrue(0 <= self.profile.erudition <= 100)
         card = self.profile.public_card(3)
         self.assertNotIn("skills", card)
         self.assertTrue(set(card["strong_topics"]) <= {
@@ -50,6 +50,21 @@ class PlatinumHelperTests(unittest.TestCase):
         self.assertEqual(self.service.remaining, 0)
         with self.assertRaises(ValueError):
             self.service.start("call-4", "q-4", "Comics", self.options, "C")
+
+    def test_gaussian_coverage_and_professional_guarantees(self):
+        rng = Random(1977)
+        profiles = [generate_profile(rng=rng) for _ in range(1000)]
+        self.assertTrue(all(p.skills["Fire Safety"] == "HIGH" for p in profiles))
+        avg_erudition = sum(p.erudition for p in profiles) / len(profiles)
+        self.assertTrue(47 < avg_erudition < 53)
+        for profile in profiles:
+            extra = sum(s == "HIGH" for t, s in profile.skills.items() if t != "Fire Safety")
+            expected = (0, 1) if profile.erudition <= 20 else (
+                (2, 3) if profile.erudition <= 40 else
+                (4, 6) if profile.erudition <= 60 else
+                (7, 9) if profile.erudition <= 80 else (10, 12)
+            )
+            self.assertTrue(expected[0] <= extra <= expected[1])
 
     def test_conflicting_idempotency_key_rejected(self):
         self.service.start("same", "q1", "History", self.options, "C")
