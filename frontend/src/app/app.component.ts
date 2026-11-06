@@ -42,6 +42,7 @@ interface GameInfo {
   phase: string;
   correct_main_answers: number;
   bonus_decision_available?: boolean;
+  helper?: HelperCard | null;
 }
 interface PublicQuestion {
   question_id: string;
@@ -111,12 +112,13 @@ export class AppComponent implements OnInit, OnDestroy {
   bonusDecisionAvailable = false;
   helperCard: HelperCard | null = null;
   helperProfessions: string[] = [];
+  helperProfessionsLoading = false;
   selectedHelperProfession = '';
   helperBusy = false;
   helperDetailsVisible = false;
   helperReply = '';
   helperError = '';
-  private helperCallKey = '';
+  helperCallKey = '';
   private helperCallQuestionId = '';
 
   account: Account | null = null;
@@ -431,7 +433,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
+    if (this.loading || this.helperBusy || this.configLoading || this.authLoading || this.authBusy || this.restoringGame) return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -457,7 +459,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.resumeAvailable = false;
         this.loading = false;
-        // Stay on setup: the optional helper must be bought before Q1 appears.
+        this.loadQuestion(); // The ordinary Start flow is unchanged.
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -570,7 +572,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
-        this.loadHelperCard();
 
       },
       error: (err: unknown) => {
@@ -633,11 +634,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  private loadHelperProfessions(): void {
-    if (!this.account) return;
+  loadHelperProfessions(): void {
+    if (!this.account || this.helperProfessionsLoading || this.helperProfessions.length) return;
+    this.helperProfessionsLoading = true;
     this.subscriptions.add(this.http.get<{ professions: string[] }>(
       GAME_API + '/helper/professions',
-    ).pipe(timeout(10000)).subscribe({
+    ).pipe(timeout(10000), finalize(() => { this.helperProfessionsLoading = false; })).subscribe({
       next: (result) => { this.helperProfessions = result.professions; },
       error: () => { this.helperProfessions = []; },
     }));
@@ -658,18 +660,33 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  buyHelper(): void {
-    if (!this.account || !this.gameId || this.helperCard || this.helperBusy
+  async buyHelper(): Promise<void> {
+    if (!this.account || this.helperCard || this.helperBusy || this.loading
+        || this.restoringGame || this.resumeAvailable
         || this.progress !== 0 || this.screen !== 'setup') return;
     this.helperBusy = true;
     this.helperError = '';
-    this.subscriptions.add(this.http.post<HelperCard>(
-      GAME_API + '/' + this.gameId + '/helper/purchase',
-      { profession: this.selectedHelperProfession || null },
-    ).pipe(timeout(12000), finalize(() => { this.helperBusy = false; })).subscribe({
-      next: (card) => { this.helperCard = card; this.refreshStats(); },
-      error: () => { this.helperError = 'helper.purchaseFailed'; },
-    }));
+    try {
+      // Only a player requesting a helper pre-creates the game. Ordinary Start
+      // still creates a game and immediately generates Q1 as before.
+      if (!this.gameId) {
+        const game = await firstValueFrom(this.http.post<GameInfo>(
+          GAME_API, { language: this.selectedLanguage },
+        ).pipe(timeout(this.requestTimeoutMs)));
+        this.gameId = game.game_id;
+        this.rememberActiveGame(game.game_id);
+      }
+      this.helperCard = await firstValueFrom(this.http.post<HelperCard>(
+        GAME_API + '/' + this.gameId + '/helper/purchase',
+        { profession: this.selectedHelperProfession || null },
+      ).pipe(timeout(12000)));
+      this.refreshStats();
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else this.helperError = 'helper.purchaseFailed';
+    } finally {
+      this.helperBusy = false;
+    }
   }
 
   consultHelper(): void {
@@ -716,7 +733,6 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
-    this.loadHelperProfessions();
     this.restoreActiveGame();
   }
 
@@ -788,7 +804,7 @@ export class AppComponent implements OnInit, OnDestroy {
           return;
         }
         this.gameId = run.game_id;
-        this.loadHelperCard();
+        this.helperCard = run.helper ?? null;
         this.resumeAvailable = true;
         this.bonusDecisionAvailable = run.bonus_decision_available === true;
         this.selectedLanguage = run.language;
