@@ -165,7 +165,10 @@ def generate_profile(
     return HelperProfile(
         id=str(uuid4()), name=name, profession=profession, erudition=erudition,
         skills=skills, featured_high=featured_high, featured_low=featured_low,
-        tagline=tagline or f"{name}: {profession}. Ask me what I know — I might surprise you.",
+        tagline=tagline or (
+            f"Ask me about {featured_high[0] if featured_high else profession}! "
+            f"But {featured_low[0] if featured_low else 'everything else'} might stump me."
+        ),
     )
 
 
