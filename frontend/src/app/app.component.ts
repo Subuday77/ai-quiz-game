@@ -552,6 +552,10 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        if (this.current?.bonus && !result.correct) {
+          this.currentStars.gold = 0;
+          this.stars = this.stars.filter(tier => tier !== 'gold');
+        }
         this.bonusDecisionAvailable = result.phase === 'bonus';
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = result.correct_main_answers;
