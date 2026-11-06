@@ -167,7 +167,7 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    return this.gameId && !this.resumeAvailable && this.progress === 0 ? 'helper.startQuestions' : this.gameId ? 'game.resume' : 'game.start';
+    return this.gameId && this.helperCard && !this.resumeAvailable && this.progress === 0 ? 'helper.startQuestions' : this.gameId ? 'game.resume' : 'game.start';
   }
 
   ngOnInit(): void {
