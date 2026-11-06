@@ -81,9 +81,9 @@ def talk(data: dict, *, client=None) -> str:
     """Bounded retry; the frozen outcome and letter are shared by attempts."""
     instructions, prompt = _prompt(data)
     model = os.environ.get("QUIZ_HELPER_MODEL_ID", "gpt-6-luna")
-    sdk = client or OpenAI()
     for _ in range(2):
         try:
+            sdk = client or OpenAI()
             response = sdk.with_options(timeout=8.0, max_retries=0).responses.create(
                 model=model, instructions=instructions, input=prompt,
                 reasoning={"effort": "none"}, max_output_tokens=160,
