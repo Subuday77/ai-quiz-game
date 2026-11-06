@@ -5,6 +5,7 @@ Revises: 0004_bonus_topic_rotation
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0005_platinum_helper"
 down_revision = "0004_bonus_topic_rotation"
@@ -20,7 +21,7 @@ def upgrade():
         sa.Column("user_id", sa.Uuid(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("price", sa.SmallInteger(), nullable=False),
         sa.Column("profession", sa.String(80), nullable=False),
-        sa.Column("profile", sa.JSON().with_variant(sa.dialects.postgresql.JSONB(), "postgresql"), nullable=False),
+        sa.Column("profile", sa.JSON().with_variant(JSONB(), "postgresql"), nullable=False),
         sa.Column("consultations_used", sa.SmallInteger(), nullable=False, server_default="0"),
         sa.Column("refunded", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
