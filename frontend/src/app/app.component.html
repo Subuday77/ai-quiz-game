@@ -133,7 +133,7 @@
       </div>
     </div>
 
-    <div class="helper-shop" *ngIf="screen === 'setup' && gameId && progress === 0 && !helperCard">
+    <div class="helper-shop" *ngIf="screen === 'setup' && gameId && progress === 0 && !helperCard && !resumeAvailable">
       <h2>{{ locale.t('helper.shopTitle') }}</h2>
       <p>{{ locale.t('helper.shopDescription') }}</p>
       <label for="helper-profession">{{ locale.t('helper.chooseProfession') }}</label>
