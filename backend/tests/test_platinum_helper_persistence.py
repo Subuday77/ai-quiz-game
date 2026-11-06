@@ -6,9 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from consts import QUESTION_CATEGORIES
-from persistence.gameplay import GameConflict
+from persistence.gameplay import GameConflict, record_answer, decline_bonus
 from persistence.models import (
-    Base, GameRun, PlatinumHelperCall, PlatinumHelperPurchase, Question,
+    Base, GameRun, GoldStarMovement, PlatinumHelperCall, PlatinumHelperPurchase, Question,
     QuestionAttempt, StarAward, Topic, User,
 )
 from platinum_helper.core import CATEGORY_TOPICS, MAX_CONSULTATIONS, TOPICS
@@ -154,6 +154,68 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertTrue(cached)
         self.assertEqual(old, "A valid response")
         self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 1)
+
+    def test_real_q15_transition_refunds_platinum_and_opens_bonus(self):
+        self.purchase()
+        self.run.correct_main_answers = 14
+        self.run.status = "main"
+        topic = Topic(slug="final-topic", labels={"en": "History"})
+        self.db.add(topic)
+        self.db.flush()
+        q = Question(topic_id=topic.id, language="English", requested_difficulty=14,
+                     text="Final Q15?", choices={"A": "1", "B": "2", "C": "3", "D": "4"},
+                     correct_key="C", fingerprint="a" * 64, status="approved",
+                     generator_provider="test", generator_model="test",
+                     prompt_version="test", schema_version="test")
+        self.db.add(q)
+        self.db.flush()
+        self.db.add(QuestionAttempt(run_id=self.run.id, question_id=q.id,
+                                    number=15, requested_difficulty=14))
+        self.db.commit()
+        result, _ = record_answer(self.db, run_id=self.run.id, user_id=self.user.id,
+                                  question_id=q.id, selected="C")
+        self.assertEqual(result.phase, "bonus")
+        self.assertEqual(result.achievement, "gold")
+        self.assertEqual(available_platinum(self.db, self.user.id), 1)
+        self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 0)
+
+    def test_bonus_loss_forfeits_gold_not_refunded_platinum(self):
+        self.purchase()
+        self.run.correct_main_answers = 15
+        self.run.status = "bonus"
+        refund_if_earned(self.db, self.run)
+        self.db.add(StarAward(user_id=self.user.id, run_id=self.run.id, tier="gold"))
+        topic = Topic(slug="final-risk", labels={"en": "History"})
+        self.db.add(topic)
+        self.db.flush()
+        q = Question(topic_id=topic.id, language="English", requested_difficulty=15,
+                     text="Risk?", choices={"A": "1", "B": "2", "C": "3", "D": "4"},
+                     correct_key="C", fingerprint="b" * 64, status="approved",
+                     generator_provider="test", generator_model="test",
+                     prompt_version="test", schema_version="test")
+        self.db.add(q)
+        self.db.flush()
+        self.db.add(QuestionAttempt(run_id=self.run.id, question_id=q.id,
+                                    number=16, requested_difficulty=15))
+        self.db.commit()
+        result, _ = record_answer(self.db, run_id=self.run.id,
+                                  user_id=self.user.id, question_id=q.id, selected="A")
+        self.assertFalse(result.correct)
+        self.assertEqual(result.phase, "completed")
+        loss = self.db.query(GoldStarMovement).filter_by(run_id=self.run.id).one()
+        self.assertEqual(loss.amount, -1)
+        self.assertEqual(available_platinum(self.db, self.user.id), 1)
+
+    def test_declining_bonus_keeps_gold_and_refund(self):
+        self.purchase()
+        self.run.correct_main_answers = 15
+        self.run.status = "bonus"
+        refund_if_earned(self.db, self.run)
+        self.db.commit()
+        done = decline_bonus(self.db, run_id=self.run.id, user_id=self.user.id)
+        self.assertEqual(done.status, "completed")
+        self.assertEqual(available_platinum(self.db, self.user.id), 1)
+        self.assertFalse(self.db.query(GoldStarMovement).filter_by(run_id=self.run.id).count())
 
     def test_calls_not_allowed_in_bonus(self):
         self.purchase()
