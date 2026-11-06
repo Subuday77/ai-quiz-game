@@ -244,6 +244,11 @@ def record_answer(
             db.add(StarAward(
                 user_id=user_id, run_id=run.id, tier=result.achievement
             ))
+        # Unused helper cost is returned on finishing Q15, irrespective
+        # of whether the player later wins or loses the bonus.
+        if run.correct_main_answers == 15:
+            from platinum_helper.service import refund_if_earned
+            refund_if_earned(db, run)
         db.commit()
         return result, question.correct_key
     except Exception:
