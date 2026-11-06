@@ -108,5 +108,9 @@
   "helper.calling": "Calling your helper…",
   "helper.callFailed": "The call failed. Retry for free.",
   "helper.purchaseFailed": "Could not purchase the helper. Check your platinum balance and game state.",
-  "helper.startQuestions": "Start questions"
+  "helper.startQuestions": "Start questions",
+  "helper.bonusRisk": "Risk your gold star on the secret 16th question? Win to keep gold and earn platinum; lose and forfeit that gold. No hints or helper calls in this round.",
+  "helper.playBonus": "Play secret round",
+  "helper.keepGold": "Keep gold and finish",
+  "helper.bonusDeclineFailed": "Could not confirm your choice. Checking the game state…"
 }
