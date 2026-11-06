@@ -360,3 +360,17 @@ class PlatinumStarMovement(Base):
         CheckConstraint("amount <> 0", name="ck_platinum_movement_nonzero"),
         CheckConstraint("reason IN ('purchase','refund')", name="ck_platinum_movement_reason"),
     )
+
+
+class GoldStarMovement(Base):
+    """Historical gold risk loss on a failed optional bonus question."""
+    __tablename__ = "gold_star_movements"
+    id = id_column()
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    run_id = mapped_column(Uuid(as_uuid=True), ForeignKey("game_runs.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    amount: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    reason: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at = datetime_column()
+    __table_args__ = (
+        CheckConstraint("amount = -1 AND reason = 'bonus_lost'", name="ck_gold_bonus_loss"),
+    )
