@@ -623,7 +623,6 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.forgetActiveGame();
         this.refreshStats();
-        this.loadHelperCard();
       },
       error: () => {
         this.error = 'helper.bonusDeclineFailed';
