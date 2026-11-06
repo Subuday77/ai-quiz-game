@@ -74,6 +74,8 @@ class GameInfo(BaseModel):
     correct_main_answers: int
     main_question_index: int = 0
     skipped_questions: int = 0
+    bonus_decision_available: bool = False
+    helper: dict | None = None
 
 
 class AnswerFeedback(BaseModel):
@@ -110,6 +112,10 @@ def _game_info(db: Session, run) -> GameInfo:
         correct_main_answers=run.correct_main_answers,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
+        bonus_decision_available=(run.status == "bonus" and pending_question(db, run_id=run.id) is None),
+        helper=(lambda p: __import__("platinum_helper.service", fromlist=["card"]).card(p) if p else None)(
+            __import__("platinum_helper.service", fromlist=["get_purchase"]).get_purchase(db, run.id)
+        ),
     )
 
 
