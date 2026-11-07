@@ -968,6 +968,66 @@ test('reload restores a paid helper before Q1 without buying another or allocati
   }
 });
 
+
+test('Play Again after a loss checks DB for older active runs before another purchase', () => {
+  const { app, requests, posts, patches } = setup({ activeLookupPendingOnRetry: true });
+  const oldHelper = {
+    id: 'old-helper', name: 'Old previous helper', profession: 'Historian',
+    strong_topics: [], weak_topics: [], erudition: 50,
+    consultations_remaining: 0, consultations_total: 3, refunded: false, price: 1,
+  };
+  const recoveredHelper = {
+    id: 'recovered-helper', name: 'Luiz Gustavo Pacheco', profession: 'Doctor',
+    strong_topics: ['Medicine'], weak_topics: ['Geography'], erudition: 60,
+    consultations_remaining: 3, consultations_total: 3, refunded: false, price: 1,
+  };
+  app.screen = 'done';
+  app.finishedPhase = 'lost';
+  app.helperCard = oldHelper;
+  app.selectedLanguage = 'English';
+  app.restart();
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.helperCard, null);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/v2/games/active');
+  assert.equal(posts.length, 0); // No new game or helper purchase on replay.
+  succeed(requests[0], {
+    game_id: 'older-open-game', language: 'Russian', phase: 'main',
+    correct_main_answers: 0, main_question_index: 0,
+    question_issued: true, helper: recoveredHelper,
+  });
+  assert.equal(app.restoringGame, false);
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(app.gameId, '');
+  assert.equal(app.selectedLanguage, 'Russian'); // Never show account default English.
+  assert.equal(app.canEditPregameLanguage, false);
+  assert.equal(app.displayedHelperCard, recoveredHelper); // From same DB run.
+  app.changeQuestionLanguage('English');
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(patches.length, 0);
+  app.startGame();
+  assert.equal(app.helperCard, recoveredHelper);
+  assert.equal(requests[1].url, '/api/v2/games/older-open-game/question');
+  succeed(requests[1], { ...question, question: 'Какой океан?', number: 1 });
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(app.gameQuestionIssued, true);
+  assert.equal(posts.length, 0); // No extra platinum charge.
+});
+
+test('Play Again after terminal result leaves clean setup if DB has no active run', () => {
+  const { app, requests, posts } = setup({ activeLookupPendingOnRetry: true });
+  app.screen = 'done';
+  app.finishedPhase = 'lost';
+  app.restart();
+  assert.equal(requests[0].url, '/api/v2/games/active');
+  succeed(requests[0], null);
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.gameId, '');
+  assert.equal(app.resumeCandidate, null);
+  assert.equal(app.resumeAvailable, false);
+  assert.equal(posts.length, 0);
+});
+
 test('saved game with issued question previews paid helper before Resume', () => {
   const previous = globalThis.localStorage;
   const key = 'ai-quiz-game:active-round:v2:user-1';
@@ -1058,7 +1118,7 @@ test('new-round cancellation and failed POST preserve purchases; success opens c
   assert.equal(requests.length, 0); // Must not issue Q1 automatically.
 });
 
-test('offers a saved round without locking language and resumes only on choice', () => {
+test('saved round shows its real question language and resumes only on choice', () => {
   const previous = globalThis.localStorage;
   const saved = new Map([['ai-quiz-game:active-round:v2:user-1', 'saved-game-id']]);
   globalThis.localStorage = {
@@ -1083,7 +1143,10 @@ test('offers a saved round without locking language and resumes only on choice',
     assert.equal(app.progress, 0);
     assert.equal(app.currentStars.bronze, 0);
     assert.equal(app.setupButtonLabelKey, 'game.resume');
-    app.selectedLanguage = 'Spanish'; // Available for a fresh game.
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, false);
+    app.changeQuestionLanguage('Spanish'); // Saved language cannot be changed.
+    assert.equal(app.selectedLanguage, 'German');
     app.startGame();
     assert.equal(app.gameId, 'saved-game-id');
     assert.equal(app.selectedLanguage, 'German'); // Resume uses saved run language.
@@ -1107,7 +1170,7 @@ test('saved started round replacement requires warning and opens unstarted setup
     removeItem: k => saved.delete(k),
   };
   try {
-    const { app, requests, posts, scheduler } = setup();
+    const { app, requests, posts, patches, scheduler } = setup();
     app.gameId = '';
     succeed(requests[0], {
       game_id: 'saved-game-id', language: 'German', phase: 'main',
@@ -1115,7 +1178,8 @@ test('saved started round replacement requires warning and opens unstarted setup
     });
     assert.equal(app.resumeAvailable, true);
     assert.equal(saved.get(key), 'saved-game-id');
-    app.selectedLanguage = 'Hebrew';
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, false);
     app.startFreshGame();
     assert.equal(app.showAbandonConfirm, true);
     assert.equal(posts.length, 0);
@@ -1127,10 +1191,10 @@ test('saved started round replacement requires warning and opens unstarted setup
       app.confirmNewGame();
       assert.equal(posts.length, 1);
       assert.equal(posts[0].url, '/api/v2/games/saved-game-id/replace');
-      assert.equal(posts[0].body.language, 'Hebrew');
+      assert.equal(posts[0].body.language, 'German');
       assert.equal(saved.get(key), 'saved-game-id');
       succeed(posts[0], {
-        game_id: 'new-game-id', language: 'Hebrew',
+        game_id: 'new-game-id', language: 'German',
         phase: 'main', correct_main_answers: 0, question_issued: false,
       });
     });
@@ -1138,6 +1202,14 @@ test('saved started round replacement requires warning and opens unstarted setup
     assert.equal(saved.get(key), 'new-game-id');
     assert.equal(app.resumeAvailable, false);
     assert.equal(app.resumeCandidate, null);
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, true);
+    // New unstarted run can now choose a different language in PostgreSQL.
+    app.changeQuestionLanguage('Hebrew');
+    assert.equal(patches[0].url, '/api/v2/games/new-game-id/language');
+    assert.deepEqual(patches[0].body, { language: 'Hebrew' });
+    succeed(patches[0], { game_id: 'new-game-id', language: 'Hebrew',
+      phase: 'main', correct_main_answers: 0, question_issued: false });
     assert.equal(app.selectedLanguage, 'Hebrew');
     assert.equal(app.progress, 0);
     assert.equal(app.screen, 'setup');
