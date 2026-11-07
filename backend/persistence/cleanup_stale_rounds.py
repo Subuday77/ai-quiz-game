@@ -70,8 +70,15 @@ def cleanup(db: Session, *, username: str, older_than_days: int, apply: bool) ->
 
 
 def load_backend_environment() -> None:
-    """Load the same backend/.env used by FastAPI, without overriding shell ENV."""
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    """Load the root .env used by Alembic, then optional backend/.env.
+
+    An explicitly set environment variable always wins. Reading the root
+    first matches migrations/env.py and avoids using a stale backend copy.
+    """
+    here = Path(__file__).resolve()
+    for path in (here.parents[2] / ".env", here.parents[1] / ".env"):
+        if path.is_file():
+            load_dotenv(path, override=False)
 
 
 def main() -> None:
