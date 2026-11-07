@@ -111,6 +111,18 @@ class HelperLiveQATests(unittest.TestCase):
             self.assertEqual(result["guard_rejections"], 2)
             self.assertFalse(result["literal_correct_leak"])
 
+    def test_script_loads_the_existing_root_env(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(qa, "approved_questions", return_value=self.questions), patch.object(
+                qa, "load_dotenv"
+            ) as mocked_env:
+                self.assertEqual(qa.main([
+                    "--target", "10", "--limit", "3", "--output-dir", temp,
+                ]), 0)
+                mocked_env.assert_called_once_with(
+                    qa.BACKEND.parent / ".env", override=False,
+                )
+
     def test_preview_never_creates_provider_or_calls_api(self):
         with tempfile.TemporaryDirectory() as temp:
             with patch.object(qa, "approved_questions", return_value=self.questions), patch.object(
