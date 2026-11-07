@@ -45,6 +45,7 @@ interface GameInfo {
   correct_main_answers: number;
   main_question_index?: number;
   skipped_questions?: number;
+  question_issued?: boolean;
   helper?: HelperCard | null;
   bonus_decision_available?: boolean;
 }
@@ -76,6 +77,11 @@ interface HelperCard {
   strong_topics: string[];
   weak_topics: string[];
   tagline: string;
+  tagline_id?: number;
+  tagline_high?: string;
+  tagline_low?: string;
+  gender?: string;
+  nationality?: string;
   consultations_remaining: number;
   consultations_total: number;
   refunded: boolean;
@@ -126,6 +132,9 @@ export class AppComponent implements OnInit, OnDestroy {
   ];
 
   helperCard: HelperCard | null = null;
+  helperHireOpen = false;
+  helperChooseProfession = false;
+  gameQuestionIssued = false;
   helperProfessions: string[] = [];
   selectedHelperProfession = '';
   helperBusy = false;
@@ -265,9 +274,52 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    if (this.gameId && this.categoryInfo && this.categoryInfo.current === null && this.progress === 0)
-      return 'perks.startQuestions';
-    return this.gameId || this.resumeCandidate ? 'game.resume' : 'game.start';
+    // Buying a helper (or excluding categories) allocates a game ID before Q1.
+    // The first question, not the database row, defines the start of play.
+    if (this.resumeCandidate) {
+      return this.resumeCandidate.question_issued ? 'game.resume' : 'game.start';
+    }
+    return this.gameQuestionIssued ? 'game.resume' : 'game.start';
+  }
+
+  helperProfessionLabel(helper: HelperCard): string {
+    const prefix = helper.gender === 'female' ? 'helper.professionFemale.' : 'helper.profession.';
+    return this.locale.t(prefix + helper.profession);
+  }
+
+  helperTagline(helper: HelperCard): string {
+    const high = helper.tagline_high || helper.strong_topics[0] || '';
+    const low = helper.tagline_low || helper.weak_topics[0] || '';
+    const id = Math.min(4, Math.max(1, helper.tagline_id || 1));
+    const kind = low ? 'balanced' : 'strong';
+    return this.locale.format('helper.phrase.' + id + '.' + kind, {
+      strong: this.locale.t('helper.topic.' + high),
+      weak: this.locale.t('helper.topic.' + low),
+    });
+  }
+
+  get helperCallButtonKey(): string {
+    if (this.helperError) return 'helper.repeatCall';
+    return this.helperCallKey ? 'helper.recoverCall' : 'helper.call';
+  }
+
+  showHelperHire(): void {
+    this.helperHireOpen = !this.helperHireOpen;
+    this.helperChooseProfession = false;
+    this.selectedHelperProfession = '';
+    this.helperError = '';
+  }
+
+  selectRandomHelper(): void {
+    this.helperChooseProfession = false;
+    this.selectedHelperProfession = '';
+    void this.buyHelper();
+  }
+
+  showChooseHelper(): void {
+    this.helperChooseProfession = true;
+    this.selectedHelperProfession = '';
+    this.loadHelperProfessions();
   }
 
   ngOnInit(): void {
@@ -544,6 +596,7 @@ export class AppComponent implements OnInit, OnDestroy {
       const run = this.resumeCandidate;
       this.resumeCandidate = null;
       this.gameId = run.game_id;
+      this.gameQuestionIssued = run.question_issued ?? (run.main_question_index ?? 0) > 0;
       this.helperCard = run.helper ?? null;
       this.bonusDecisionAvailable = run.bonus_decision_available === true;
       this.gameLanguage = run.language;
@@ -614,6 +667,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
@@ -675,6 +729,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.gameQuestionIssued = true;
         this.helperReply = '';
         this.helperError = '';
         this.helperCallKey = this.readHelperCallKey(question.question_id);
@@ -813,6 +868,7 @@ export class AppComponent implements OnInit, OnDestroy {
           GAME_API, { language: this.selectedLanguage },
         ).pipe(timeout(this.requestTimeoutMs)));
         this.gameId = game.game_id;
+        this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
@@ -822,6 +878,8 @@ export class AppComponent implements OnInit, OnDestroy {
         GAME_API + '/' + this.gameId + '/helper/purchase',
         { profession: this.selectedHelperProfession || null },
       ).pipe(timeout(12000)));
+      this.helperHireOpen = false;
+      this.helperChooseProfession = false;
       this.refreshStats();
     } catch (error) {
       if (this.isUnauthorized(error)) this.sessionExpired();
@@ -1345,6 +1403,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.helperError = '';
     this.helperCallKey = '';
     this.helperCallQuestionId = '';
+    this.helperHireOpen = false;
+    this.helperChooseProfession = false;
+    this.gameQuestionIssued = false;
     this.helperDetailsVisible = false;
     this.bonusDecisionAvailable = false;
     this.error = '';
