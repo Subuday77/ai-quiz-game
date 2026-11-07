@@ -42,12 +42,23 @@ class CleanupStaleRoundsTests(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def test_cli_loads_backend_dotenv_before_database_connection(self):
+    def test_cli_prefers_root_dotenv_but_supports_backend_dotenv(self):
         from persistence import cleanup_stale_rounds as cli
-        expected = Path(cli.__file__).resolve().parents[1] / ".env"
-        with patch("persistence.cleanup_stale_rounds.load_dotenv") as mocked:
+        here = Path(cli.__file__).resolve()
+        root_env = here.parents[2] / ".env"
+        backend_env = here.parents[1] / ".env"
+        with patch.object(Path, "is_file", return_value=True), \
+                patch("persistence.cleanup_stale_rounds.load_dotenv") as mocked:
             load_backend_environment()
-        mocked.assert_called_once_with(expected, override=False)
+        self.assertEqual(
+            mocked.call_args_list,
+            [unittest.mock.call(root_env, override=False),
+             unittest.mock.call(backend_env, override=False)],
+        )
+        with patch.object(Path, "is_file", side_effect=[True, False]), \
+                patch("persistence.cleanup_stale_rounds.load_dotenv") as mocked:
+            load_backend_environment()
+        mocked.assert_called_once_with(root_env, override=False)
 
     def test_dry_run_no_mutation_and_apply_preserves_paid_round(self):
         result = cleanup(self.db, username="Alice", older_than_days=2, apply=False)
