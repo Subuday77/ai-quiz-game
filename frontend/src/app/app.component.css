@@ -485,3 +485,11 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 
 .bonus-decision { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 18px; }
 .bonus-decision p { flex: 0 0 100%; color: #f1d18a; line-height: 1.5; }
+
+.helper-avatar { flex: none; width: 26px; height: 26px; display: block; }
+.helper-hire-options { display: flex; flex-direction: column; gap: 10px; width: min(100%, 430px); margin-top: 10px; }
+.helper-hire-options > button { text-align: center; }
+.helper-hire-toggle { max-width: 260px; }
+.helper-profession-picker { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #45476f; border-radius: 12px; }
+.helper-profession-picker select { width: 100%; }
+.helper-refund-note { font-size: 13px; line-height: 1.55; opacity: .88; margin: 6px 0 0; }
