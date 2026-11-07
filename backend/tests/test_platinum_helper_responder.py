@@ -1,69 +1,149 @@
+"""No paid API: regression tests for GPT-5.4 helper speech boundary."""
 import unittest
 from types import SimpleNamespace
-from platinum_helper.responder import _validate, _prompt, talk, HelperUnavailable
+from unittest.mock import patch
+
+from platinum_helper.responder import (
+    HelperUnavailable, _fallback, _prompt, _validate, talk,
+)
+
 
 def sample(outcome="MISTAKEN"):
-    return dict(name="Sam", profession="Firefighter", language="Russian",
-                topic="History", outcome=outcome, delivery_style="CONFIDENT",
-                letter="A" if outcome == "MISTAKEN" else "C",
-                question_text="В каком году?",
-                choices={"A":"395","B":"410","C":"476","D":"527"},
-                correct_option_text="476")
+    return dict(
+        name="Sam", profession="Historian", language="Russian",
+        topic="History", outcome=outcome, delivery_style="CONFIDENT",
+        letter="A" if outcome == "MISTAKEN" else "C",
+        question_text="В каком году?",
+        choices={"A": "395", "B": "410", "C": "476", "D": "527"},
+        correct_option_text="476",
+    )
+
 
 class FakeClient:
     def __init__(self, items):
-        self.items=iter(items)
-        self.calls=0
-        self.responses=self
+        self.items = iter(items)
+        self.calls = 0
+        self.sent = []
+        self.responses = self
+
     def with_options(self, **kwargs):
-        assert kwargs["timeout"] == 8.0 and kwargs["max_retries"] == 0
+        assert kwargs == {"timeout": 8.0, "max_retries": 0}
         return self
+
     def create(self, **kwargs):
         self.calls += 1
-        value=next(self.items)
+        self.sent.append(kwargs)
+        value = next(self.items)
         if isinstance(value, Exception):
             raise value
-        return SimpleNamespace(status="completed",output_text=value)
+        if isinstance(value, tuple):
+            status, raw = value
+        else:
+            status, raw = "completed", value
+        return SimpleNamespace(status=status, output_text=raw)
+
 
 class HelperResponderTests(unittest.TestCase):
-    def test_valid_mistake_and_no_answer_leak(self):
-        self.assertEqual(_validate("KEY: A\nSPEECH: Наверное, 395.",sample()),"Наверное, 395.")
-        self.assertIsNone(_validate("KEY: C\nSPEECH: 476.",sample()))
-        self.assertIsNone(_validate("KEY: A\nSPEECH: Впрочем, 476.",sample()))
+    def test_same_model_instructions_for_know_and_mistaken(self):
+        know = sample("KNOW")
+        wrong = sample("MISTAKEN")
+        inst_know, prompt_know = _prompt(know)
+        inst_wrong, prompt_wrong = _prompt(wrong)
+        self.assertEqual(inst_know, inst_wrong)
+        self.assertNotEqual(prompt_know, prompt_wrong)
+        self.assertNotIn("476", prompt_wrong)
+        self.assertNotIn("MISTAKEN", inst_wrong)
+        self.assertIn("Selected option:", prompt_wrong)
+        for style in ("CONFIDENT", "TENTATIVE"):
+            know["delivery_style"] = wrong["delivery_style"] = style
+            self.assertEqual(_prompt(know)[0], _prompt(wrong)[0])
 
-    def test_confidence_is_independent_of_correctness(self):
-        for outcome in ("KNOW", "MISTAKEN"):
-            for style in ("CONFIDENT", "TENTATIVE"):
-                data = sample(outcome)
-                data["delivery_style"] = style
-                instructions, prompt = _prompt(data)
-                self.assertIn("KEY: X", instructions)
-                self.assertIn("В каком году?", prompt)
-                if style == "CONFIDENT":
-                    self.assertIn("Do not hedge", instructions)
-                    self.assertNotIn("Sound naturally uncertain", instructions)
-                else:
-                    self.assertIn("Sound naturally uncertain", instructions)
-                    self.assertNotIn("Do not hedge", instructions)
-                self.assertIn(f"option {data['letter']}", instructions)
+    def test_unsure_knows_question_but_not_choices(self):
+        data = sample("UNSURE")
+        inst, prompt = _prompt(data)
+        self.assertIn("В каком году?", prompt)
+        self.assertNotIn("476", prompt)
+        self.assertNotIn("410", prompt)
+        self.assertIn("ALREADY looking", inst)
+        self.assertEqual(_validate("SPEECH: Я не уверен.", data), "Я не уверен.")
+        self.assertIsNone(_validate("SPEECH: Пришли вопрос и варианты.", data))
+        self.assertIsNone(_validate("SPEECH: Я думаю, 476.", data))
 
-    def test_unsure_has_no_question(self):
-        instructions, prompt=_prompt(sample("UNSURE"))
-        self.assertIn("History",prompt)
-        self.assertNotIn("В каком году?",prompt)
-        self.assertNotIn("476",prompt)
-        self.assertEqual(_validate("SPEECH: Не знаю.",sample("UNSURE")),"Не знаю.")
+    def test_literal_leak_including_cassini_huygens(self):
+        data = sample()
+        self.assertIsNone(_validate("KEY: A\nSPEECH: Впрочем, 476.", data))
+        self.assertIsNone(_validate("KEY: C\nSPEECH: Наверное, 395.", data))
+        titan = sample()
+        titan.update(
+            letter="B",
+            question_text="Кто первым сел на Титан?",
+            choices={"A": "Гюйгенс", "B": "Кассини", "C": "Вояджер", "D": "Маринер"},
+            correct_option_text="Гюйгенс",
+        )
+        self.assertIsNone(_validate(
+            "KEY: B\nSPEECH: Советую Кассини: миссия Кассини—Гюйгенс изучала Титан.", titan
+        ))
+        self.assertEqual(_validate(
+            "KEY: B\nSPEECH: Я бы взял Кассини.", titan
+        ), "Я бы взял Кассини.")
 
-    def test_bounded_retry_keeps_the_same_wrong_answer(self):
-        client=FakeClient([TimeoutError(), "KEY: A\nSPEECH: Вероятно, 395."])
-        self.assertEqual(talk(sample(),client=client),"Вероятно, 395.")
-        self.assertEqual(client.calls,2)
+    def test_self_negation_and_no_false_numeric_substrings(self):
+        data = sample()
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: Я бы не советовал выбирать 395.", data
+        ))
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: 395 — это неправильный ответ.", data
+        ))
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: Я бы выбрал вариант C.", data
+        ))
+        small = sample()
+        small.update(letter="B", choices={"A": "4", "B": "451", "C": "5", "D": "6"})
+        self.assertEqual(
+            _validate("KEY: B\nSPEECH: Я выбираю 451.", small), "Я выбираю 451."
+        )
 
-    def test_exhaustion_is_not_success(self):
-        client=FakeClient([TimeoutError(),TimeoutError()])
+    def test_bounded_retry_does_not_change_frozen_key(self):
+        client = FakeClient([
+            "KEY: A\nSPEECH: 476 — правильный ответ.",
+            "KEY: A\nSPEECH: Я бы выбрал 395.",
+        ])
+        with patch.dict("os.environ", {"QUIZ_HELPER_MODEL_ID": "gpt-5.4"}):
+            self.assertEqual(talk(sample(), client=client), "Я бы выбрал 395.")
+        self.assertEqual(client.calls, 2)
+        for request in client.sent:
+            self.assertEqual(request["model"], "gpt-5.4")
+            self.assertEqual(request["reasoning"]["effort"], "low")
+            self.assertIn("Selected option: A: 395", request["input"])
+            self.assertNotIn("476", request["input"])
+        self.assertIn("NO factual justification", client.sent[1]["instructions"])
+
+    def test_two_rejected_drafts_get_deterministic_safe_fallback(self):
+        client = FakeClient([
+            "KEY: A\nSPEECH: 476.",
+            "KEY: A\nSPEECH: Я бы не советовал выбирать 395.",
+        ])
+        self.assertEqual(talk(sample(), client=client), "Бери 395.")
+        self.assertEqual(client.calls, 2)
+        self.assertEqual(_fallback(sample("UNSURE")), "Не уверен, не хочу тебя запутать.")
+
+    def test_network_failures_are_not_charged(self):
+        client = FakeClient([TimeoutError(), TimeoutError()])
         with self.assertRaises(HelperUnavailable):
-            talk(sample(),client=client)
-        self.assertEqual(client.calls,2)
+            talk(sample(), client=client)
+        self.assertEqual(client.calls, 2)
 
-if __name__=="__main__":
+    def test_mixed_timeout_then_valid(self):
+        client = FakeClient([TimeoutError(), "KEY: A\nSPEECH: Я выбрал 395."])
+        self.assertEqual(talk(sample(), client=client), "Я выбрал 395.")
+        self.assertEqual(client.calls, 2)
+
+    def test_two_incomplete_responses_are_not_charged(self):
+        client = FakeClient([("incomplete", ""), ("incomplete", "")])
+        with self.assertRaises(HelperUnavailable):
+            talk(sample(), client=client)
+
+
+if __name__ == "__main__":
     unittest.main()
