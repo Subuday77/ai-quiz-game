@@ -699,12 +699,14 @@ test('concurrent browser game creation conflict restores already-active DB round
     app.startGame();
     assert.equal(posts[0].url, '/api/v2/games');
     posts[0].subject.error(new HttpErrorResponse({ status: 409 }));
-  });
-  assert.equal(requests[0].url, '/api/v2/games/active');
-  assert.equal(app.restoringGame, true);
-  succeed(requests[0], {
-    game_id: 'other-browser-active', language: 'German', phase: 'main',
-    question_issued: true, correct_main_answers: 2, main_question_index: 3,
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    assert.equal(app.restoringGame, true);
+    // Resolve the server lookup inside virtual time so its 10s timeout
+    // cannot expire while the TestScheduler flushes pending timers.
+    succeed(requests[0], {
+      game_id: 'other-browser-active', language: 'German', phase: 'main',
+      question_issued: true, correct_main_answers: 2, main_question_index: 3,
+    });
   });
   assert.equal(app.error, '');
   assert.equal(app.restoringGame, false);
