@@ -193,7 +193,7 @@
       </select>
       <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
       <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
-      <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && (categoryInfo === null || categoryInfo.can_exclude)">
+      <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && error !== 'game.restoreFailed' && (categoryInfo === null || categoryInfo.can_exclude)">
         <button class="outline-button" type="button" (click)="openCategoryExclusions()"
                 [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
           {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
@@ -224,7 +224,7 @@
           {{ locale.t('perks.confirmExclusions') }}
         </button>
       </div>
-      <div class="helper-shop" *ngIf="account && !helperCard && !resumeAvailable && !resumeCandidate && progress === 0">
+      <div class="helper-shop" *ngIf="account && !helperCard && !resumeAvailable && !resumeCandidate && progress === 0 && error !== 'game.restoreFailed'">
         <button type="button" class="outline-button helper-hire-toggle"
                 (click)="showHelperHire()" [disabled]="helperBusy || loading || languageSaving"
                 [attr.aria-expanded]="helperHireOpen">
@@ -258,9 +258,13 @@
         </div>
         <p class="error" role="alert" *ngIf="helperError">{{ locale.t(helperError) }}</p>
       </div>
+      <button type="button" class="outline-button" *ngIf="error === 'game.restoreFailed'"
+              (click)="retryRestoreGame()" [disabled]="loading || restoringGame">
+        {{ locale.t('game.retryRestore') }}
+      </button>
       <div class="question-actions">
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
         <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startGame()"
