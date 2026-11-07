@@ -222,9 +222,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get canEditPregameLanguage(): boolean {
+    // Prepaid helper/category configuration creates a DB game before Q1.
+    // Language is locked by the first issued question, not by gameId.
     return this.screen === 'setup' && (
-      !this.gameId || this.resumeAvailable ||
-      (this.progress === 0 && this.categoryInfo?.current === null)
+      !this.gameId || this.resumeAvailable || !this.gameQuestionIssued
     );
   }
 
