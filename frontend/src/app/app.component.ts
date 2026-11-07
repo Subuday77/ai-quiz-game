@@ -1039,7 +1039,8 @@ export class AppComponent implements OnInit, OnDestroy {
     const questionId = this.current.question_id;
     this.subscriptions.add(this.http.post<HelperReply>(
       GAME_API + '/' + gameId + '/helper/call',
-      { question_id: questionId, request_key: this.helperCallKey },
+      { question_id: questionId, request_key: this.helperCallKey,
+        ui_language: this.locale.code },
     ).pipe(timeout(22000), finalize(() => { this.helperBusy = false; })).subscribe({
       next: result => {
         if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
