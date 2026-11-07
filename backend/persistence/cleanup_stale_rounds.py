@@ -7,6 +7,9 @@ Review output, then add --apply. Stop the local FastAPI server while applying.
 """
 import argparse
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -66,6 +69,11 @@ def cleanup(db: Session, *, username: str, older_than_days: int, apply: bool) ->
     return result
 
 
+def load_backend_environment() -> None:
+    """Load the same backend/.env used by FastAPI, without overriding shell ENV."""
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--username", required=True, help="Exact game account username")
@@ -74,6 +82,7 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true",
                         help="Apply the update; without this flag only report")
     args = parser.parse_args()
+    load_backend_environment()
     with Session(engine(), autoflush=False, expire_on_commit=False) as db:
         result = cleanup(db, username=args.username,
                          older_than_days=args.older_than_days, apply=args.apply)
