@@ -59,7 +59,7 @@ class MultilingualSpeechTests(unittest.TestCase):
                     speech = _fallback(data)
                     self.assertEqual(speech, f"{expected_prefix}{name}».")
                     self.assertEqual(
-                        _validate(f"KEY: B\\nSPEECH: {speech}", data), speech
+                        _validate(f"KEY: B\nSPEECH: {speech}", data), speech
                     )
 
     def test_same_answer_is_embeddable_in_idiomatic_languages(self):
@@ -76,7 +76,7 @@ class MultilingualSpeechTests(unittest.TestCase):
             with self.subTest(language=language):
                 data = scenario(language=language, answer=answer)
                 self.assertEqual(
-                    _validate(f"KEY: B\\nSPEECH: {speech}", data), speech
+                    _validate(f"KEY: B\nSPEECH: {speech}", data), speech
                 )
 
     def test_unsure_remains_answer_free_and_allows_conversational_variation(self):
@@ -92,10 +92,10 @@ class MultilingualSpeechTests(unittest.TestCase):
     def test_bad_explanatory_claims_still_fail(self):
         data = scenario(answer="Словения")
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Я за Словения; она граничит с Италией.", data
+            "KEY: B\nSPEECH: Я за Словения; она граничит с Италией.", data
         ))
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Мой ответ — «Словения». "
+            "KEY: B\nSPEECH: Мой ответ — «Словения». "
             "У неё выход к Адриатике.", data
         ))
 
