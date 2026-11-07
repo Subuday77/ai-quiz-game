@@ -401,56 +401,58 @@ test('failed question hides Next and offers one Retry without losing progress', 
   assert.equal(app.canRetryQuestion, false);
   assert.equal(app.progress, 10);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted"/);
+  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted && !bonusDecisionAvailable"/);
 });
 
-test('bonus failure keeps 15/15; only ordinary Retry is visible', () => {
+test('bonus choice is required before issuing Q16; failed loading still permits retry', () => {
   const { app, requests, posts, scheduler } = setup();
   app.screen = 'feedback';
   app.progress = 15;
+  app.bonusDecisionAvailable = true;
   app.feedback = { phase: 'bonus', correct: true, correct_answer: 'B',
     correct_main_answers: 15, achievement: 'gold' };
   app.currentStars.gold = 1;
+  app.continue();
+  assert.equal(requests.length, 0); // Cannot bypass the explicit gold decision.
+  app.acceptBonus();
+  assert.equal(posts[0].url, '/api/v2/games/existing-game/bonus/accept');
   scheduler.run(() => {
-    app.continue();
+    succeed(posts[0], { phase: 'bonus', correct_main_answers: 15 });
+    assert.equal(app.bonusDecisionAvailable, false);
+    assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
     requests[0].subject.error(new HttpErrorResponse({ status: 503 }));
     assert.equal(app.canRetryQuestion, true);
     assert.equal(app.progress, 15);
-    assert.equal(app.currentStars.gold, 1);
-    app.continue(); // "Next question" cannot issue a second request.
+    app.continue();
     assert.equal(requests.length, 1);
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, '/api/v2/games/existing-game/question');
     succeed(requests[1], { ...question, number: 16, difficulty: 15, bonus: true });
   });
-  assert.equal(posts.length, 0); // Player has no topic-switch endpoint.
   assert.equal(app.current.bonus, true);
   assert.equal(app.canRetryQuestion, false);
-  assert.equal(app.progress, 15);
   assert.equal(app.currentStars.gold, 1);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.doesNotMatch(template, /changeBonusTopic|game.changeBonusTopic/);
-  assert.doesNotMatch(source, /changeBonusTopic|canChangeBonusTopic|bonus\/change-topic/);
 });
 
-test('bonus network errors do not offer any topic selection', () => {
+test('bonus chooser network errors do not issue a question or charge again', () => {
   for (const error of [
-    new HttpErrorResponse({ status: 0 }), new Error('connection error')
+    new HttpErrorResponse({ status: 0 }), new Error('connection error'),
   ]) {
-    const { app, requests, posts, scheduler } = setup();
+    const { app, requests, posts } = setup();
+    app.bonusDecisionAvailable = true;
     app.progress = 15;
     app.screen = 'feedback';
     app.feedback = { phase: 'bonus', correct: true, correct_answer: 'B',
       correct_main_answers: 15, achievement: 'gold' };
-    scheduler.run(() => {
-      app.continue();
-      requests[0].subject.error(error);
-    });
-    assert.equal(app.canRetryQuestion, true);
-    assert.equal(posts.length, 0);
+    app.acceptBonus();
+    assert.equal(posts.length, 1);
+    posts[0].subject.error(error);
+    assert.equal(requests.length, 0);
+    assert.equal(app.bonusDecisionAvailable, true);
+    assert.equal(app.error, 'helper.bonusDecisionFailed');
   }
-  assert.equal(english['game.changeBonusTopic'], undefined);
 });
 
 test('results button keeps results label and does not generate a new question', () => {
@@ -585,7 +587,7 @@ test('visible pregame exclusion button creates empty round and defers Q1 until S
     assert.equal(app.screen, 'setup');
     assert.equal(app.showCategoryExclusions, true);
     assert.equal(app.categoryInfo.can_exclude, true);
-    assert.equal(app.setupButtonLabelKey, 'perks.startQuestions');
+    assert.equal(app.setupButtonLabelKey, 'game.start');
     assert.equal(requests.length, 0);
     app.startGame();
     assert.equal(app.showCategoryExclusions, false);
@@ -621,6 +623,7 @@ test('adjacent star arrows exchange exactly one bundle in either direction', () 
 
 test('setup button shows loading during resume and start again after failed creation', () => {
   const { app, requests, posts, scheduler } = setup();
+  app.gameQuestionIssued = true;
   assert.equal(app.setupButtonLabelKey, 'game.resume');
   scheduler.run(() => {
     app.startGame();
@@ -629,6 +632,7 @@ test('setup button shows loading during resume and start again after failed crea
   });
   assert.equal(app.screen, 'question');
   app.gameId = '';
+  app.gameQuestionIssued = false;
   app.screen = 'setup';
   assert.equal(app.setupButtonLabelKey, 'game.start');
   scheduler.run(() => {
@@ -657,7 +661,7 @@ test('offers a saved round without locking language and resumes only on choice',
     app.startGame();
     assert.equal(posts.length, 0);
     succeed(requests[0], { game_id: 'saved-game-id', language: 'German',
-      phase: 'main', correct_main_answers: 7 });
+      phase: 'main', correct_main_answers: 7, question_issued: true });
     assert.equal(app.restoringGame, false);
     assert.equal(app.resumeAvailable, true);
     assert.equal(app.gameId, '');
