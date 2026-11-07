@@ -228,7 +228,7 @@ def _validate(raw: str, data: dict) -> str | None:
 # Safe, deterministic last-resort wording after at least one model reply was
 # received but could not pass validation. No second model or checker needed.
 _FALLBACK = {
-    "russian": ("Мой ответ — «{answer}».", "Мне кажется, вариант «{answer}».", "Не уверен, не хочу тебя запутать."),
+    "russian": ("Мой ответ — «{answer}».", "Скорее вариант «{answer}».", "Не уверен, не хочу тебя запутать."),
     "english": ("Go with {answer}.", "I'd choose {answer}.", "I'm not sure enough to advise."),
     "german": ("Nimm {answer}.", "Ich würde {answer} nehmen.", "Ich bin mir nicht sicher."),
     "french": ("Choisis {answer}.", "Je choisirais {answer}.", "Je ne suis pas sûr de la réponse."),
