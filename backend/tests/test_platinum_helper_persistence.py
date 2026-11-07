@@ -2,6 +2,7 @@
 import json
 import os
 import unittest
+from datetime import datetime, timezone
 from random import Random
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ from persistence.models import (
 from platinum_helper.core import CATEGORY_TOPICS, MAX_CONSULTATIONS, TOPICS
 from platinum_helper.service import (
     available_platinum, buy, card, finish_call, get_purchase,
-    refund_if_earned, reserve_call,
+    refund_if_earned, reserve_call, _recent_speech_history,
 )
 
 
@@ -238,6 +239,126 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertEqual(old, "A valid response")
         self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 1)
 
+
+    def test_three_calls_reuse_anonymized_speech_after_reload_without_recharge(self):
+        self.purchase()
+        question, first_attempt = self.issue_question()
+        with patch("platinum_helper.service.choose_outcome", return_value="KNOW"):
+            _, _, cached, first = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="speech-memory-first",
+            )
+        self.assertFalse(cached)
+        self.assertEqual(first["speech_history"], [])
+        finish_call(self.db, user_id=self.user.id, run_id=self.run.id,
+                    call_id=first["call_id"], reply="Мне кажется, тут 300.")
+        first_attempt.answered_at = datetime.now(timezone.utc)
+        self.db.commit()
+
+        second_attempt = QuestionAttempt(
+            run_id=self.run.id, question_id=question.id,
+            number=2, requested_difficulty=1,
+        )
+        self.db.add(second_attempt)
+        self.db.commit()
+        # Mimic a browser reload with a fresh SQLAlchemy state.
+        self.db.expire_all()
+        with patch("platinum_helper.service.choose_outcome", return_value="KNOW"):
+            _, _, cached, second = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="speech-memory-second",
+            )
+        self.assertFalse(cached)
+        self.assertEqual(second["speech_history"],
+                         ["Мне кажется, тут [ANSWER]."])
+        self.assertNotIn("300", str(second["speech_history"]))
+        finish_call(self.db, user_id=self.user.id, run_id=self.run.id,
+                    call_id=second["call_id"], reply="По-моему, тут 300.")
+        second_attempt.answered_at = datetime.now(timezone.utc)
+        self.db.commit()
+
+        third_attempt = QuestionAttempt(
+            run_id=self.run.id, question_id=question.id,
+            number=3, requested_difficulty=2,
+        )
+        self.db.add(third_attempt)
+        self.db.commit()
+        self.db.expire_all()
+        with patch("platinum_helper.service.choose_outcome", return_value="KNOW"):
+            _, _, cached, third = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="speech-memory-third",
+            )
+        self.assertFalse(cached)
+        self.assertEqual(third["speech_history"], [
+            "Мне кажется, тут [ANSWER].",
+            "По-моему, тут [ANSWER].",
+        ])
+        result = finish_call(
+            self.db, user_id=self.user.id, run_id=self.run.id,
+            call_id=third["call_id"], reply="Я за 300.",
+        )
+        self.assertEqual(result["helper"]["consultations_remaining"], 0)
+        old_text, helper, cached, payload = reserve_call(
+            self.db, user_id=self.user.id, run_id=self.run.id,
+            question_id=question.id, request_key="speech-memory-third",
+        )
+        self.assertTrue(cached)
+        self.assertIsNone(payload)
+        self.assertEqual(old_text, "Я за 300.")
+        self.assertEqual(helper["consultations_remaining"], 0)
+
+    def test_speech_history_excludes_failed_pending_and_other_hires(self):
+        self.purchase()
+        question, attempt = self.issue_question()
+        own = get_purchase(self.db, self.run.id)
+        other = PlatinumHelperPurchase(
+            run_id=self.past.id, user_id=self.user.id,
+            price=1, profession=own.profession, profile=dict(own.profile),
+            consultations_used=1, refunded=False,
+        )
+        self.db.add(other)
+        self.db.flush()
+        past_attempt = QuestionAttempt(
+            run_id=self.past.id, question_id=question.id, number=1,
+            requested_difficulty=0,
+        )
+        self.db.add(past_attempt)
+        self.db.flush()
+        self.db.add_all([
+            PlatinumHelperCall(
+                purchase_id=own.id, request_key="speech-failed",
+                question_attempt_id=attempt.id, topic="History",
+                outcome="KNOW", selected_key="C", status="failed",
+                response_text="Мне кажется, тут 300.",
+            ),
+            PlatinumHelperCall(
+                purchase_id=own.id, request_key="speech-pending",
+                question_attempt_id=attempt.id, topic="History",
+                outcome="KNOW", selected_key="C", status="pending",
+                response_text="По-моему, тут 300.",
+            ),
+            PlatinumHelperCall(
+                purchase_id=other.id, request_key="another-game",
+                question_attempt_id=past_attempt.id, topic="History",
+                outcome="KNOW", selected_key="C", status="completed",
+                response_text="Другой помощник выбрал 300.",
+            ),
+        ])
+        self.db.commit()
+        self.assertEqual(_recent_speech_history(self.db, own.id), [])
+        self.assertEqual(_recent_speech_history(self.db, other.id),
+                         ["Другой помощник выбрал [ANSWER]."])
+        # A prior UNSURE reply has no selected label and remains style-only.
+        self.db.add(PlatinumHelperCall(
+            purchase_id=own.id, request_key="speech-unsure",
+            question_attempt_id=attempt.id, topic="History",
+            outcome="UNSURE", selected_key=None, status="completed",
+            response_text="Не знаю, тут пас.",
+        ))
+        self.db.commit()
+        self.assertEqual(_recent_speech_history(self.db, own.id),
+                         ["Не знаю, тут пас."])
 
     def test_plausible_mistake_uses_saved_generator_scores(self):
         self.purchase()
