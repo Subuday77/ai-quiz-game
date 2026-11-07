@@ -7,7 +7,8 @@ for irreversible answer transitions.
 import os
 import random
 import secrets
-from uuid import UUID
+from uuid import UUID, NAMESPACE_URL, uuid5
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,7 +28,7 @@ from persistence.categories import (
     allowed_categories, available_categories, category_snapshot,
     exclude_pregame_categories,
 )
-from persistence.models import Question, QuestionAttempt, Topic, User
+from persistence.models import GameRun, Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
 from persistence.bonus_wager import accept_bonus, decline_bonus
 from platinum_helper.service import get_purchase, card as helper_card
@@ -39,6 +40,18 @@ router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"])
 
 class NewGame(BaseModel):
     language: str = "English"
+
+
+def _replacement_id(run_id: UUID, user_id: UUID) -> UUID:
+    """Stable successor ID: retrying an uncertain replacement cannot create
+    more than one new round, including after the client reloads.
+    """
+    return uuid5(NAMESPACE_URL, f"ai-quiz-game/replace/{user_id}/{run_id}")
+
+
+def _topics_ready(db: Session) -> bool:
+    existing = set(db.scalars(select(Topic.slug)))
+    return {category_slug(name) for name in QUESTION_CATEGORIES}.issubset(existing)
 
 
 class AnswerInput(BaseModel):
@@ -79,6 +92,7 @@ class GameInfo(BaseModel):
     question_issued: bool = False
     bonus_decision_available: bool = False
     helper: dict | None = None
+    replacement_game_id: UUID | None = None
 
 
 class AnswerFeedback(BaseModel):
@@ -125,6 +139,12 @@ def _game_info(db: Session, run) -> GameInfo:
             and pending_question(db, run_id=run.id) is None
         ),
         helper=helper_card(purchase) if purchase else None,
+        replacement_game_id=(
+            _replacement_id(run.id, run.user_id)
+            if run.status == "abandoned" and db.get(
+                GameRun, _replacement_id(run.id, run.user_id)
+            ) is not None else None
+        ),
     )
 
 
@@ -239,11 +259,59 @@ def new_game(payload: NewGame, request: Request,
     validate_origin(request)
     if payload.language not in LANGUAGE_DICT.values():
         raise HTTPException(status_code=422, detail="Unsupported language")
-    existing = set(db.scalars(select(Topic.slug)))
-    if not {category_slug(name) for name in QUESTION_CATEGORIES}.issubset(existing):
+    if not _topics_ready(db):
         raise HTTPException(status_code=503, detail="Topic catalog not initialized")
     run = create_game(db, user_id=user.id, language=payload.language)
     return _game_info(db, run)
+
+
+@router.post("/{run_id}/replace", response_model=GameInfo, status_code=201)
+def replace_game(run_id: UUID, payload: NewGame, request: Request,
+                 user: User = Depends(authenticated_user),
+                 db: Session = Depends(get_db)):
+    """Confirm abandonment and create an unstarted replacement as ONE transaction.
+
+    No rewards, debits, or paid perks move across rounds. Replays of the same
+    replacement return its existing ID, including after a network timeout.
+    The old run's row is serialized with answers/purchases before changing status.
+    """
+    validate_origin(request)
+    if payload.language not in LANGUAGE_DICT.values():
+        raise HTTPException(status_code=422, detail="Unsupported language")
+    try:
+        # Consistent lock order with answers and paid perks: User then GameRun.
+        from persistence.star_economy import lock_user_stars
+        lock_user_stars(db, user.id)
+        run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        successor_id = _replacement_id(run.id, user.id)
+        successor = db.get(GameRun, successor_id)
+        if run.status == "abandoned" and successor is not None:
+            result = _game_info(db, successor)
+            db.commit()
+            return result
+        if run.status not in ("main", "bonus"):
+            raise HTTPException(status_code=409, detail="Round is no longer active")
+        if not _topics_ready(db):
+            raise HTTPException(status_code=503, detail="Topic catalog not initialized")
+        if successor is not None:
+            raise HTTPException(status_code=409, detail="Replacement round already exists")
+        successor = GameRun(
+            id=successor_id, user_id=user.id,
+            language=payload.language, status="main",
+        )
+        db.add(successor)
+        run.status = "abandoned"
+        run.finished_at = datetime.now(timezone.utc)
+        db.flush()
+        result = _game_info(db, successor)
+        db.commit()
+        return result
+    except GameNotFound:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get("/{run_id}", response_model=GameInfo)
