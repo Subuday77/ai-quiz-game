@@ -128,6 +128,42 @@ class TaggedContractTests(unittest.TestCase):
         require_unique(other, [previous])
 
 
+    def test_real_heart_fact_aliases_rejected_without_collapsing_all_anatomy(self):
+        variants = (
+            ("human-heart", "pumps", "blood",
+             "Какой орган в организме человека перекачивает кровь по кровеносной системе?"),
+            ("heart", "function", "pumps-blood-through-blood-vessels",
+             "Какой орган в организме человека перекачивает кровь по кровеносным сосудам?"),
+            ("human-heart", "primary-function", "pump-blood-through-the-body",
+             "Какой орган у человека перекачивает кровь по всему телу?"),
+        )
+        def item(triple, wording):
+            return TaggedQuestion.model_validate({
+                "question": wording,
+                "difficulty": 2,
+                "answers": {"A": "Печень", "B": "Сердце", "C": "Почка", "D": "Лёгкое"},
+                "correct_answer": "B",
+                "tags": {"entity": [triple[0]], "concept": ["circulation"], "keyword": []},
+                "fact": dict(zip(("subject", "relation", "object"), triple)),
+            })
+        first = item(variants[0][:3], variants[0][3])
+        def previous(v):
+            q = item(v[:3], v[3])
+            return HistoryItem(
+                question_id=v[0], category_slug="human-anatomy", question_text=q.question,
+                fact_key=q.fact.key, subject=q.fact.subject,
+                relation=q.fact.relation, object=q.fact.object,
+                tags={k: tuple(v) for k,v in q.tags.model_dump().items()},
+            )
+        for i, variant in enumerate(variants):
+            history = [previous(other) for j, other in enumerate(variants) if j != i]
+            with self.subTest(i=i):
+                with self.assertRaises(DuplicateQuestionError):
+                    require_unique(item(variant[:3], variant[3]), history)
+        unrelated = item(("left-ventricle", "has-thickest-wall-among-heart-chambers", "true"),
+                         "Какая камера сердца имеет самую толстую мышечную стенку?")
+        require_unique(unrelated, [previous(v) for v in variants])
+
     def test_literal_1984_repeat_rejected_even_when_fact_direction_and_answers_change(self):
         first = TaggedQuestion.model_validate({
             "question": 'Кто написал роман «1984»?', "difficulty": 2,
