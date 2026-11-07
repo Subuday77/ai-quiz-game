@@ -218,6 +218,7 @@ def offer_question(
                 requested_difficulty=question.difficulty,
                 text=question.question, choices=question.answers,
                 correct_key=question.correct_answer, fingerprint=fingerprint,
+                competence_area=(question._competence_area if dedup_enforce else None),
                 status="approved", generator_provider=provider,
                 generator_model=model, prompt_version=prompt_version,
                 schema_version=schema_version,
@@ -240,6 +241,10 @@ def offer_question(
                 or stored.requested_difficulty != question.difficulty):
             raise GameConflict("Existing question is conflicting or not approved")
         if dedup_enforce:
+            # Old identical saved questions may lack this field; upgrade them
+            # only after the new candidate passed the independent review.
+            if stored.competence_area is None and question._competence_area is not None:
+                stored.competence_area = question._competence_area
             from tagging.repository import save_metadata
             save_metadata(db, stored, question)
             # Generator estimates are recorded once, separately from quality
