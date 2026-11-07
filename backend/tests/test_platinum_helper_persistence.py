@@ -160,6 +160,7 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         _, _, _, repeated = reserve_call(self.db, **args, rng=Random(555))
         self.assertEqual(first["outcome"], repeated["outcome"])
         self.assertEqual(first["letter"], repeated["letter"])
+        self.assertEqual(first["delivery_style"], repeated["delivery_style"])
         self.assertEqual(first["call_id"], repeated["call_id"])
         finish_call(self.db, user_id=self.user.id, run_id=self.run.id,
                     call_id=first["call_id"], reply="A valid response")
