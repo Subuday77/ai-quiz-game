@@ -423,7 +423,7 @@ def main(argv: list[str] | None = None) -> int:
             or args.max_api_requests < 2 or args.input_usd_per_m < 0
             or args.output_usd_per_m < 0):
         parser.error("Invalid limit, target or budget")
-    load_dotenv(BACKEND / ".env", override=False)
+    load_dotenv(BACKEND.parent / ".env", override=False)
     directory = args.output_dir.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     plan_path = directory / "plan.json"
