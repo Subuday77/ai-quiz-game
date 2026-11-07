@@ -19,6 +19,9 @@ after(() => {
   // Dispose every instance so Node can exit naturally after all assertions.
   for (const app of testComponents) app.ngOnDestroy();
   rmSync(temp, { recursive: true, force: true });
+  // CI diagnostic: all assertions can pass while an event-loop handle remains.
+  // This is deliberately temporary until the owning resource is identified.
+  console.error('CI teardown resource types:', process.getActiveResourcesInfo());
 });
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
 const english = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
