@@ -1445,28 +1445,27 @@ export class AppComponent implements OnInit, OnDestroy {
   private restoreActiveGame(): void {
     const accountId = this.account?.id;
     if (!accountId) return;
-    const savedId = this.readActiveGame(accountId);
-    if (!savedId) return;
+    // Always ask PostgreSQL. Browser storage is only a best-effort cache:
+    // it may be missing after switching localhost <-> 127.0.0.1, browsers,
+    // cookies, or clearing site data. The authenticated server owns the run.
     const version = ++this.restoreVersion;
     this.restoringGame = true;
-    this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + savedId).pipe(
+    this.subscriptions.add(this.http.get<GameInfo | null>(GAME_API + '/active').pipe(
       timeout(10000),
       finalize(() => { if (this.restoreVersion === version) this.restoringGame = false; }),
     ).subscribe({
       next: (run) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
         this.error = '';
-        if (run.phase === 'abandoned' && run.replacement_game_id) {
-          // The replace POST may have committed before a network timeout/F5.
-          // Follow the idempotent successor instead of losing the new setup.
-          this.rememberActiveGame(run.replacement_game_id);
-          this.restoreActiveGame();
-          return;
-        }
-        if (run.phase !== 'main' && run.phase !== 'bonus') {
+        if (!run) {
           this.removeSavedGame(accountId);
           return;
         }
+        if (run.phase !== 'main' && run.phase !== 'bonus') {
+          this.error = 'game.restoreFailed';
+          return;
+        }
+        this.rememberActiveGame(run.game_id);
         // A game without an issued first question is still in pregame setup.
         // Restore it directly: purchasing a helper allocates and charges this
         // game before Q1, and offering Start New here would strand the purchase.
@@ -1491,13 +1490,10 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err: unknown) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
-        if (err instanceof HttpErrorResponse && err.status === 404) {
-          this.removeSavedGame(accountId);
-        } else if (this.isUnauthorized(err)) {
-          this.sessionExpired();
-        } else {
-          this.error = 'game.restoreFailed';
-        }
+        // A 404 here is an API mismatch/error, not proof that the saved
+        // round disappeared. Never clear its cache on a failed lookup.
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'game.restoreFailed';
       },
     }));
   }
