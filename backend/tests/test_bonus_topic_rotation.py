@@ -67,6 +67,7 @@ class BonusTopicRotationTests(unittest.TestCase):
             run = db.get(GameRun, UUID(self.game_id))
             run.status = "bonus"
             run.correct_main_answers = 15
+            run.bonus_wager_accepted = True  # Q16 generation is authorized in this fixture.
             db.commit()
 
     def get_state(self):
