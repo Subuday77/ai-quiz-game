@@ -17,3 +17,6 @@ backend/logs/
 # Local generated calibration reports (may contain candidate questions/answers)
 answer_check_*.jsonl
 answer_check_*.csv
+
+# Local Platinum Helper live QA: stored questions, correct options and raw AI text
+backend/qa_reports/
