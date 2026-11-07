@@ -493,3 +493,7 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .helper-profession-picker { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #45476f; border-radius: 12px; }
 .helper-profession-picker select { width: 100%; }
 .helper-refund-note { font-size: 13px; line-height: 1.55; opacity: .88; margin: 6px 0 0; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; margin: 16px 0; border: 1px solid #77709f; border-radius: 12px; }
+.bonus-decision h2,.bonus-decision h3,.bonus-decision p { width: 100%; margin: 0 0 5px; }
+.bonus-decision p { line-height: 1.6; }
