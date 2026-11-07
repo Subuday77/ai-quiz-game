@@ -283,7 +283,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   helperProfessionLabel(helper: HelperCard): string {
-    const prefix = helper.gender === 'female' && this.locale.code !== 'en'\n      ? 'helper.professionFemale.' : 'helper.profession.';
+    const prefix = helper.gender === 'female' && this.locale.code !== 'en'
+      ? 'helper.professionFemale.' : 'helper.profession.';
     return this.locale.t(prefix + helper.profession);
   }
 
