@@ -688,7 +688,7 @@ test('hiring a helper retains category-exclusion setup and uses UI language only
 });
 
 test('concurrent browser game creation conflict restores already-active DB round', () => {
-  const { app, posts, requests, scheduler } = setup();
+  const { app, posts, requests, scheduler } = setup({ activeLookupPending: true });
   app.gameId = '';
   scheduler.run(() => {
     app.startGame();
