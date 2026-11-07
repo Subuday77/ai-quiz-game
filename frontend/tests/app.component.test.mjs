@@ -55,7 +55,8 @@ const question = {
 };
 
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
-                  signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false } = {}) {
+                  signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
+                  activeLookupPending = false } = {}) {
   const requests = [];
   const posts = [];
   const patches = [];
@@ -87,6 +88,10 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       }
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+      }
+      if (url === '/api/v2/games/active' && !activeLookupPending &&
+          !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
+        return of(null); // No active game in the default mock database.
       }
       if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
         return of({
@@ -703,7 +708,7 @@ test('transient restore failure never creates new game over a paid round', () =>
     assert.equal(posts.length, 0);
     assert.equal(saved.get(key), 'paid-pregame');
     app.retryRestoreGame();
-    assert.equal(requests[1].url, '/api/v2/games/paid-pregame');
+    assert.equal(requests[1].url, '/api/v2/games/active');
     succeed(requests[1], {
       game_id: 'paid-pregame', language: 'Russian',
       phase: 'main', correct_main_answers: 0, question_issued: false,
@@ -735,17 +740,14 @@ test('abandoned round reload follows committed replacement instead of losing set
   try {
     const { app, requests, posts } = setup();
     app.gameId = '';
-    assert.equal(requests[0].url, '/api/v2/games/old-game');
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    // The server is authoritative: it returns the successor directly even
+    // when the browser still remembers the old abandoned run.
     succeed(requests[0], {
-      game_id: 'old-game', phase: 'abandoned', language: 'English',
-      correct_main_answers: 10, replacement_game_id: 'new-game',
-    });
-    assert.equal(saved.get(key), 'new-game');
-    assert.equal(requests[1].url, '/api/v2/games/new-game');
-    succeed(requests[1], {
       game_id: 'new-game', phase: 'main', language: 'Hebrew',
       correct_main_answers: 0, question_issued: false,
     });
+    assert.equal(saved.get(key), 'new-game');
     assert.equal(app.gameId, 'new-game');
     assert.equal(app.selectedLanguage, 'Hebrew');
     assert.equal(app.screen, 'setup');
@@ -784,7 +786,7 @@ test('reload restores a paid helper before Q1 without buying another or allocati
   try {
     const { app, requests, posts, patches, scheduler } = setup();
     app.gameId = ''; // setup() supplies a dummy ID after initialization.
-    assert.equal(requests[0].url, '/api/v2/games/paid-pregame');
+    assert.equal(requests[0].url, '/api/v2/games/active');
     succeed(requests[0], {
       game_id: 'paid-pregame', language: 'English', phase: 'main',
       correct_main_answers: 0, main_question_index: 0,
@@ -931,7 +933,7 @@ test('offers a saved round without locking language and resumes only on choice',
   try {
     const { app, requests, posts } = setup();
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/api/v2/games/saved-game-id');
+    assert.equal(requests[0].url, '/api/v2/games/active');
     assert.equal(app.restoringGame, true);
     app.gameId = '';
     app.startGame();
@@ -1034,7 +1036,7 @@ test('failed confirmed new-game request keeps the saved started round resumable'
   assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
 });
 
-test('closed and missing saved games do not block a new round', () => {
+test('server reports no active game after terminal runs or missing cache', () => {
   for (const mode of ['lost', 'completed', 'abandoned', 'missing']) {
     const previous = globalThis.localStorage;
     const key = 'ai-quiz-game:active-round:v2:user-1';
@@ -1047,12 +1049,8 @@ test('closed and missing saved games do not block a new round', () => {
     try {
       const { app, requests, posts, scheduler } = setup();
       app.gameId = '';
-      if (mode === 'missing') {
-        requests[0].subject.error(new HttpErrorResponse({ status: 404 }));
-      } else {
-        succeed(requests[0], { game_id: 'saved-game-id',
-          language: 'English', phase: mode, correct_main_answers: 7 });
-      }
+      assert.equal(requests[0].url, '/api/v2/games/active');
+      succeed(requests[0], null); // Active endpoint returns JSON null.
       assert.equal(app.resumeCandidate, null);
       assert.equal(app.resumeAvailable, false);
       assert.equal(saved.has(key), false);
