@@ -20,11 +20,20 @@ class HelperUnavailable(RuntimeError):
     pass
 
 
+def _speech_language(data: dict) -> str:
+    """UI language controls speech; older offline scenarios retain question language."""
+    raw = str(data.get("speech_language") or data["language"]).strip().casefold()
+    return _LANG.get(raw, raw).capitalize()
+
+
 def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
+    speech_language = _speech_language(data)
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
-        f"with a friend during a trivia game. Answer ONLY in {data['language']}. "
-        "Do not switch to another language, including Russian when the selected language is not Russian. "
+        f"with a friend during a trivia game. Answer ONLY in {speech_language}, "
+        "the player's interface language, regardless of the question language. "
+        "The question and answer labels may be in another language; do not "
+        "switch speech language to match them or translate any answer labels. "
         "Keep the exact selected answer text unchanged, even if its name is foreign. "
         f"Your gender is {data.get('gender') or 'unspecified'}; your background "
         f"is {data.get('nationality') or 'unspecified'}. "
@@ -55,11 +64,11 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         "You have settled on the selected option shown below. Clearly "
         "recommend its exact name, but treat the name as an UNCHANGED label "
         "from the game, not a noun that must fit after your chosen verb. "
-        "Write a grammatically natural sentence AROUND the label in the game "
-        "language. When a verb or preposition would require changing the "
+        "Write a grammatically natural sentence AROUND the label in the player's "
+        "interface language. When a verb or preposition would require changing the "
         "label's form, rephrase using an option/answer label construction "
         "instead; do not decline, conjugate, translate or alter the label. "
-        "This is general advice: follow the grammar of the requested language, "
+        "This is general advice: follow the grammar of the interface language, "
         "without assuming that every language has noun cases. "
         "Speak as a friend giving a hunch, not an AI reporting confidence. "
         "Avoid mechanical formulas such as 'I would confidently choose' and "
@@ -85,7 +94,7 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     if strict:
         instructions += (
             "Your earlier response did not meet the safety requirements. "
-            f"Use ONLY {data['language']}. "
+            f"Use ONLY {speech_language}. "
             "Write a single plain sentence: recommend the exact selected "
             "answer with NO factual justification, extra claim, argument "
             "or comparison. Use an idiomatic option-label construction, "
@@ -145,8 +154,8 @@ def _language_script_ok(speech: str, data: dict) -> bool:
     A selected answer can itself be a foreign proper noun. Remove its literal
     text before checking the surrounding phrase. This is NOT full language ID.
     """
-    language = _LANG.get(str(data["language"]).casefold(),
-                         str(data["language"]).casefold())
+    raw_language = str(data.get("speech_language") or data["language"]).strip().casefold()
+    language = _LANG.get(raw_language, raw_language)
     selected = data.get("letter")
     if selected and selected in data.get("choices", {}):
         speech = re.sub(re.escape(data["choices"][selected]), " ", speech, flags=re.I)
@@ -246,7 +255,8 @@ _LANG = {"ru": "russian", "en": "english", "de": "german", "fr": "french",
 
 
 def _fallback(data: dict) -> str:
-    language = _LANG.get(str(data["language"]).lower(), str(data["language"]).lower())
+    raw_language = str(data.get("speech_language") or data["language"]).strip().casefold()
+    language = _LANG.get(raw_language, raw_language)
     formats = _FALLBACK.get(language)
     if formats is None:
         raise HelperUnavailable("No safe fallback for language")
