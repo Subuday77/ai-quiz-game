@@ -134,26 +134,26 @@ class SpeechFrameTests(unittest.TestCase):
         instruction, _ = _prompt(plain)
         self.assertIn("Unicode em dash (U+2014)", instruction)
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Выбирай Quecksilber — мой совет.", plain
+            "KEY: B\nSPEECH: Выбирай Quecksilber — мой совет.", plain
         ))
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Quecksilber — хорошая ставка.", plain
+            "KEY: B\nSPEECH: Quecksilber — хорошая ставка.", plain
         ))
         # Other punctuation remains valid; we ban ONLY U+2014, not hyphens
         # in names or incidental commas / colons.
         self.assertEqual(_validate(
-            "KEY: B\\nSPEECH: Мой совет: «Quecksilber».", plain
+            "KEY: B\nSPEECH: Мой совет: «Quecksilber».", plain
         ), "Мой совет: «Quecksilber».")
 
         with_dash = scenario(answer="Paris — Lyon", speech_language="ru")
         self.assertEqual(_validate(
-            "KEY: B\\nSPEECH: Пожалуй, «Paris — Lyon».", with_dash
+            "KEY: B\nSPEECH: Пожалуй, «Paris — Lyon».", with_dash
         ), "Пожалуй, «Paris — Lyon».")
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Paris — Lyon — мой выбор.", with_dash
+            "KEY: B\nSPEECH: Paris — Lyon — мой выбор.", with_dash
         ))
         self.assertIsNone(_validate(
-            "KEY: B\\nSPEECH: Я за Paris — Lyon — точно.", with_dash
+            "KEY: B\nSPEECH: Я за Paris — Lyon — точно.", with_dash
         ))
         unsure = scenario(outcome="UNSURE")
         self.assertIsNone(_validate(
@@ -166,8 +166,8 @@ class SpeechFrameTests(unittest.TestCase):
     def test_em_dash_rejected_on_first_draft_then_retried_with_same_frame(self):
         d = scenario(answer="Словения", presentation_style="DIRECT")
         client = FakeClient([
-            "KEY: B\\nSPEECH: Словения — мой выбор.",
-            "KEY: B\\nSPEECH: Я за «Словения».",
+            "KEY: B\nSPEECH: Словения — мой выбор.",
+            "KEY: B\nSPEECH: Я за «Словения».",
         ])
         self.assertEqual(talk(d, client=client), "Я за «Словения».")
         self.assertEqual(len(client.requests), 2)
@@ -187,7 +187,7 @@ class SpeechFrameTests(unittest.TestCase):
         self.assertEqual(result, "Ставлю на «Словения».")
         self.assertEqual(len(client.requests), 2)
         for request in client.requests:
-            self.assertIn("relaxed, conversational nudge", request["instructions"])
+            self.assertIn("A quick friendly suggestion addressed TO your", request["instructions"])
             self.assertIn("Selected option: B: Словения", request["input"])
             self.assertNotIn("Афина", request["input"])
         self.assertIn("NO factual justification", client.requests[1]["instructions"])
