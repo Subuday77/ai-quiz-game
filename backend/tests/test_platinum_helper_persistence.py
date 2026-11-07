@@ -13,7 +13,7 @@ from persistence.gameplay import GameConflict, record_answer
 from persistence.game_routes import _game_info
 from persistence.models import (
     Base, GameRun, WalletTransaction, PlatinumHelperCall, PlatinumHelperPurchase, Question,
-    QuestionAttempt, QuestionReview, StarAward, Topic, User,
+    QuestionAttempt, QuestionReview, QuestionFact, StarAward, Topic, User,
 )
 from platinum_helper.core import CATEGORY_TOPICS, MAX_CONSULTATIONS, TOPICS
 from platinum_helper.service import (
@@ -76,6 +76,71 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
     def test_all_quiz_categories_have_competence_mapping(self):
         self.assertEqual(set(QUESTION_CATEGORIES), set(CATEGORY_TOPICS))
         self.assertTrue(set(CATEGORY_TOPICS.values()) <= set(TOPICS))
+
+    def test_reviewed_competence_overrides_game_category(self):
+        self.purchase()
+        question, _ = self.issue_question()
+        topic = self.db.get(Topic, question.topic_id)
+        topic.labels = {"en": "Inventions and discoveries"}
+        question.competence_area = "Physics"
+        purchase = get_purchase(self.db, self.run.id)
+        profile = purchase.profile
+        purchase.profile = {
+            **profile,
+            "skills": {**profile["skills"], "Physics": "HIGH", "Technology": "MEDIUM"},
+        }
+        self.db.commit()
+        with patch("platinum_helper.service.debug_reserved") as trace:
+            _, _, cached, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="reviewed-physics", rng=Random(3),
+            )
+        self.assertFalse(cached)
+        self.assertEqual(payload["topic"], "Physics")
+        saved = self.db.get(PlatinumHelperCall, payload["call_id"])
+        self.assertEqual(saved.topic, "Physics")
+        self.assertEqual(trace.call_args.kwargs["competence_source"], "question")
+
+    def test_old_german_induction_question_infers_physics_from_english_fact(self):
+        self.purchase()
+        question, _ = self.issue_question()
+        self.db.get(Topic, question.topic_id).labels = {
+            "en": "Inventions and discoveries"
+        }
+        question.language = "German"
+        self.run.language = "German"
+        question.text = ("Welcher Wissenschaftler wird allgemein mit der Entdeckung "
+                         "der elektromagnetischen Induktion in Verbindung gebracht?")
+        self.db.add(QuestionFact(
+            question_id=question.id, fact_key="a" * 64,
+            subject="electromagnetic-induction", relation="discoverer",
+            object="michael-faraday",
+        ))
+        self.db.commit()
+        self.assertIsNone(question.competence_area)
+        with patch("platinum_helper.service.debug_reserved") as trace:
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="old-german-faraday", rng=Random(3),
+            )
+        self.assertEqual(payload["topic"], "Physics")
+        self.assertEqual(trace.call_args.kwargs["competence_source"], "legacy_metadata")
+        self.assertIsNone(question.competence_area)
+
+    def test_old_question_without_specific_fact_uses_observable_category_fallback(self):
+        self.purchase()
+        question, _ = self.issue_question()
+        self.db.get(Topic, question.topic_id).labels = {
+            "en": "Inventions and discoveries"
+        }
+        self.db.commit()
+        with patch("platinum_helper.service.debug_reserved") as trace:
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="old-no-metadata", rng=Random(3),
+            )
+        self.assertEqual(payload["topic"], "Technology")
+        self.assertEqual(trace.call_args.kwargs["competence_source"], "legacy_category")
 
     def test_random_purchase_and_idempotent_retry(self):
         self.assertEqual(available_platinum(self.db, self.user.id), 1)
