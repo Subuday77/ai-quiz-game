@@ -183,6 +183,60 @@ wrong-language speech and implicit factual self-disclosure. The model may
 still independently choose identical natural words even with new frames;
 the smoke run measures whether the variation actually helps.
 
+## V6 — no em dashes, more distinct speaking styles, controlled 9-case A/B
+
+V5's six recommendations still relied on "I would" or equivalents, including
+when the phrase was moved after the answer. V6 **distinguishes the approach
+rather than merely rephrasing its name**:
+
+- DIRECT: short present-tense statement of the chosen answer.
+- PERSONAL: a personal preference voiced in first-person present tense.
+- CASUAL: friendly second-person or imperative suggestion when idiomatic.
+
+Across all three frames, the prompt forbids *hypothetical/conditional*
+recommendations, not merely sentences beginning with "I would". The frozen
+CONFIDENT/TENTATIVE style and KNOW/MISTAKEN symmetry remain intact.
+These are meaning-based instructions for all UI languages; there is no
+hardcoded per-language conjugation, declension or translation code.
+
+A literal **em dash (U+2014)** is also disallowed in every generated spoken
+sentence. The deterministic Russian fallback uses a colon instead. The
+validator rejects unwanted em dashes even on UNSURE; if the *selected
+answer text itself* contains one, its verbatim spelling is preserved.
+Existing charged consultation speech remains unchanged on idempotent retry.
+
+**For a scientifically controlled comparison, V6 reuses the exact frozen V5
+questions, selected answers, confidence levels and presentation frames.**
+It deliberately does not sample fresh questions from PostgreSQL. This allows
+judging the actual prompt changes without a new mix of topics/difficulty.
+V4 and V5 used different confidence levels on two scenarios, so the clean
+direct comparison is V5 to V6.
+
+From PyCharm \`backend/\` after \`git pull\`, with the V5 output folder
+still present:
+
+    python -m scripts.helper_speech_smoke_v6
+    python -m scripts.helper_speech_smoke_v6 --execute
+
+Default FREE preview reads the local V5 file:
+
+    qa_reports/platinum_helper_speech_v5_frames/plan.json
+
+If you moved/deleted it, restore that exact original V5 \`plan.json\` or
+supply its path using \`--baseline-plan PATH\` before running. It refuses
+missing/incompatible plans, preserving scientific comparability and avoiding
+accidental paid calls on new cases. The original V5 files are never edited.
+
+V6 outputs to a *new* directory:
+
+    qa_reports/platinum_helper_speech_v6_frames/platinum_helper_live_results.zip
+
+Default real-call guard: 9 consultations, up to 18 paid API attempts,
+estimated USD 0.10 budget limit. The backend DB, game progress, star wallet
+and question pool are not modified. \`--execute\` is the only way to authorize
+real paid model calls. Review the ZIP manually for speech naturalness and
+remaining conditionals: CI tests the guardrails but cannot prove prose quality.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
