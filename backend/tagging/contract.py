@@ -115,6 +115,8 @@ class TaggedQuestion(QuizQuestion):
     # Internal server-only audit payload; never part of model_dump/LLM JSON or Angular API.
     _review_report: dict | None = PrivateAttr(default=None)
     _duplicate_assessment: dict | None = PrivateAttr(default=None)
+    # Verified by the existing tagged reviewer, never sent to the browser.
+    _competence_area: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def fact_in_tags(self) -> "TaggedQuestion":
