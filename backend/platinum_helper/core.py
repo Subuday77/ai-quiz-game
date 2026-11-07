@@ -174,8 +174,8 @@ def generate_profile(
         skills=skills, featured_high=featured_high, featured_low=featured_low,
         tagline=tagline, gender=gender, nationality=nationality,
         tagline_id=rng.randint(1, 4),
-        tagline_high=rng.choice(high_topics) if high_topics else profession,
-        tagline_low=rng.choice(low_topics) if low_topics else "",
+        tagline_high=rng.choice(featured_high) if featured_high else profession,
+        tagline_low=rng.choice(featured_low) if featured_low else "",
 
     )
 
