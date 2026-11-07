@@ -1113,7 +1113,7 @@ test('template shows warning, Resume and New, while keeping pregame perks availa
   assert.match(html, /\(click\)="cancelNewGame\(\)"/);
   assert.match(html, /\(ngModelChange\)="changeQuestionLanguage\(\$event\)"/);
   assert.match(html, /!canEditPregameLanguage/);
-  assert.match(html, /!gameQuestionIssued && \(categoryInfo === null \|\| categoryInfo.can_exclude\)/);
+  assert.match(html, /!gameQuestionIssued && error !== 'game.restoreFailed' && \(categoryInfo === null \|\| categoryInfo.can_exclude\)/);
   assert.equal(english['game.startNew'], 'Start a new game →');
   assert.match(english['hero.resumed'], /continue it or start a new game/i);
   assert.match(english['game.abandonWarning'], /all stars you have already earned/i);
