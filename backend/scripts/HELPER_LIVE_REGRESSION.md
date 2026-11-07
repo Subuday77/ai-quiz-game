@@ -72,6 +72,29 @@ To start a fresh comparable run with the same seed, run these commands from
 The new ZIP will appear in `backend/qa_reports/platinum_helper_live_v2/`.
 Keep the original `platinum_helper_live/` directory for the before/after QA.
 
+## Third speech iteration: multilingual naturalness (V3)
+
+The second 30-case run eliminated wrong-script responses and the four
+self-disqualifying factual explanations, but exposed repetitive formulas and
+ungrammatical insertion of nominative answer labels after a verb.
+
+V3 uses a **language-neutral** rule: construct a natural sentence *around*
+an unchanged option label instead of trying to decline the label. It does
+not implement a case table, automatic declension or per-language rewriting.
+Russian deterministic fallbacks now use an option-label construction.
+
+Start a new 30-case comparison after updating from GitHub:
+
+    python -m scripts.helper_live_regression --limit 30 --output-dir qa_reports/platinum_helper_live_v3
+    python -m scripts.helper_live_regression --execute --limit 30 --output-dir qa_reports/platinum_helper_live_v3
+
+Keep the existing `platinum_helper_live/` (V1) and
+`platinum_helper_live_v2/` directories for comparison. The runner rejects
+plans generated against a different code fingerprint. Evaluate V3 speech
+naturalness in **all languages tested** before expanding to 150; the current
+30-case plan is mostly Russian, so two English examples cannot validate
+every supported language.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
