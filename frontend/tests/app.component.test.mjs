@@ -13,7 +13,13 @@ import { TestScheduler } from 'rxjs/testing';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temp = mkdtempSync(join(root, '.quiz-tests-'));
-after(() => rmSync(temp, { recursive: true, force: true }));
+const testComponents = [];
+after(() => {
+  // Mock component instances own RxJS subscriptions and timer-based i18n polls.
+  // Dispose every instance so Node can exit naturally after all assertions.
+  for (const app of testComponents) app.ngOnDestroy();
+  rmSync(temp, { recursive: true, force: true });
+});
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
 const english = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
 const compilerOptions = {
@@ -107,6 +113,7 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
     },
   };
   const app = new AppComponent(http);
+  testComponents.push(app);
   app.ngOnInit();
   app.gameId = 'existing-game';
   const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
@@ -1647,7 +1654,6 @@ test('helper card uses localizable templates and does not translate the literal 
     strong_topics: ['Biology'], weak_topics: ['Mythology'],
     tagline_id: 1, tagline_high: 'Biology', tagline_low: 'Mythology',
   };
-  app.locale.load('en');
   assert.equal(app.helperProfessionLabel(helper), 'Doctor');
   assert.match(app.helperTagline(helper), /Biology/);
   assert.match(app.helperTagline(helper), /Mythology/);
