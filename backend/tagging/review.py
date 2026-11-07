@@ -28,6 +28,7 @@ from tagging.contract import TaggedQuestion
 from tagging.core import SemanticDuplicateError
 from tagging.review_safeguards import find_safeguards, SafeguardFindings
 from tagging.quality_skill.config import EditorialSettings
+from platinum_helper.core import TOPICS
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from independent_answer_check import AnswerStatus, OptionAssessment, PremiseStatus
@@ -150,6 +151,12 @@ mismatch ALONE must never set facts/fact_valid/options to fail; those
 checks concern factual correctness, not how familiar a player is with it.
 The Python verifier's deterministic rejection takes precedence over this
 review, even if you think a question is new.
+In competence_area choose ONE of the twenty Platinum Helper areas based on
+the knowledge REQUIRED to answer THIS question, independent of the game's
+broad category and the professions of answer choices. Electromagnetic
+induction is Physics, the discovery of penicillin is Medicine, and the
+printing press is Technology. Classify the knowledge being tested, not the
+occupation of a scientist or the generic inventions/discoveries category.
 Return only the strict v5 JSON object. Do not add a model-computed total.
 """
 
@@ -164,9 +171,14 @@ class TaggedReview(QualityReviewV3):
     # its model is NOT invoked and no second LLM call is made.
     premise: PremiseStatus
     option_assessments: dict[str, OptionAssessment] = Field(min_length=4, max_length=4)
+    # Optional in Python to support old/offline fixtures; required in new
+    # strict reviewer output, all within the existing critic API call.
+    competence_area: str | None = None
 
     @model_validator(mode="after")
     def require_all_option_assessments(self):
+        if self.competence_area is not None and self.competence_area not in TOPICS:
+            raise ValueError("Unsupported question competence area")
         if set(self.option_assessments) != set("ABCD"):
             raise ValueError("Option assessments must contain exactly A, B, C, D")
         if any(not entry.rationale.strip() for entry in self.option_assessments.values()):
@@ -366,6 +378,10 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
                                    retry_after=retry_after_seconds(exc)) from None
     finally:
         provider_timeout.reset(token)
+
+    # Reuse this same independent critic call for question-level competence.
+    # Rejected questions never persist the candidate.
+    question._competence_area = verdict.competence_area
 
     # Score and log EVERY well-formed review, including rejected candidates.
     # Preserve the model's untouched verdict for inspection; the reconciled
