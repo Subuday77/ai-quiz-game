@@ -682,6 +682,47 @@ test('hiring a helper retains category-exclusion setup and uses UI language only
   assert.equal(requests.length, 0); // Q1 never appears on hiring.
 });
 
+test('transient restore failure never creates new game over a paid round', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'paid-pregame']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, v) => saved.set(k, v),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup();
+    app.gameId = '';
+    requests[0].subject.error(new Error('offline'));
+    assert.equal(app.error, 'game.restoreFailed');
+    scheduler.run(() => {
+      app.startGame();
+      app.openCategoryExclusions();
+    });
+    assert.equal(posts.length, 0);
+    assert.equal(saved.get(key), 'paid-pregame');
+    app.retryRestoreGame();
+    assert.equal(requests[1].url, '/api/v2/games/paid-pregame');
+    succeed(requests[1], {
+      game_id: 'paid-pregame', language: 'Russian',
+      phase: 'main', correct_main_answers: 0, question_issued: false,
+      helper: {
+        id: 'one-paid-helper', name: 'Андрей Петров', profession: 'Physicist',
+        consultations_remaining: 3,
+      },
+    });
+    assert.equal(app.error, '');
+    assert.equal(app.gameId, 'paid-pregame');
+    assert.equal(app.helperCard.id, 'one-paid-helper');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
 test('abandoned round reload follows committed replacement instead of losing setup', () => {
   const prior = globalThis.localStorage;
   const key = 'ai-quiz-game:active-round:v2:user-1';
