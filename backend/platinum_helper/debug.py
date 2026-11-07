@@ -88,7 +88,8 @@ def active_round(info) -> None:
     )
 
 
-def reserved(purchase, call, question, category: str, run_id, *, reused: bool) -> None:
+def reserved(purchase, call, question, category: str, run_id, *,
+             reused: bool, competence_source: str = "unknown") -> None:
     if not enabled():
         return
     profile = purchase.profile
@@ -109,6 +110,7 @@ def reserved(purchase, call, question, category: str, run_id, *, reused: bool) -
         question=question.text,
         question_category=category,
         competence_area=call.topic,
+        competence_source=competence_source,
         competence_level=skill,
         skills=skill_groups(profile),
         outcome_probabilities_percent=dict(zip(("KNOW", "MISTAKEN", "UNSURE"), weights)),
