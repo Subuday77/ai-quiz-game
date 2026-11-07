@@ -1,6 +1,9 @@
 """Offline Platinum Helper persistence regression: no network, no paid API calls."""
+import json
+import os
 import unittest
 from random import Random
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -192,6 +195,68 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertEqual(result.achievement, "gold")
         self.assertEqual(available_platinum(self.db, self.user.id), 1)
         self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 0)
+
+
+    def test_opt_in_helper_debug_reports_all_skills_and_actual_selection(self):
+        with patch.dict(os.environ, {"QUIZ_HELPER_DEBUG": "true"}):
+            with self.assertLogs("quiz.helper.debug", level="DEBUG") as captured:
+                public = self.purchase()
+                question, _ = self.issue_question()
+                _, _, cached, payload = reserve_call(
+                    self.db, user_id=self.user.id, run_id=self.run.id,
+                    question_id=question.id, request_key="qa-debug-0001",
+                    rng=Random(8),
+                )
+                self.assertFalse(cached)
+                result = finish_call(
+                    self.db, user_id=self.user.id, run_id=self.run.id,
+                    call_id=payload["call_id"], reply="Example validated speech",
+                )
+        records = [
+            json.loads(line.split("HELPER_DEBUG: ", 1)[1])
+            for line in captured.output
+        ]
+        self.assertEqual([r["event"] for r in records], [
+            "helper_profile_purchased",
+            "helper_consultation_reserved",
+            "helper_consultation_finished",
+        ])
+        created, reserved, finished = records
+        self.assertNotIn("skills", public)  # Private data never enters HTTP card.
+        for row in (created, reserved):
+            self.assertEqual(set(row["skills"]), {"HIGH", "MEDIUM", "LOW"})
+            self.assertEqual(
+                set(sum(row["skills"].values(), [])), set(TOPICS),
+            )
+        self.assertEqual(reserved["question_category"], "Modern history")
+        self.assertEqual(reserved["competence_area"], "History")
+        self.assertEqual(
+            reserved["competence_level"],
+            get_purchase(self.db, self.run.id).profile["skills"]["History"],
+        )
+        self.assertEqual(
+            reserved["outcome_probabilities_percent"],
+            {"KNOW": 90, "MISTAKEN": 8, "UNSURE": 2}
+            if reserved["competence_level"] == "HIGH"
+            else ({"KNOW": 45, "MISTAKEN": 30, "UNSURE": 25}
+                  if reserved["competence_level"] == "MEDIUM"
+                  else {"KNOW": 5, "MISTAKEN": 15, "UNSURE": 80}),
+        )
+        correct = (
+            reserved["selected_key"] == question.correct_key
+            if reserved["selected_key"] is not None else None
+        )
+        self.assertEqual(reserved["selected_answer_correct"], correct)
+        self.assertEqual(finished["selected_answer_correct"], correct)
+        self.assertEqual(finished["confidence"], reserved["confidence"])
+        if reserved["selected_key"] is not None:
+            self.assertIn(reserved["confidence"], ("CONFIDENT", "TENTATIVE"))
+        else:
+            self.assertIsNone(reserved["confidence"])
+        self.assertTrue(finished["charged"])
+        self.assertEqual(finished["status"], "completed")
+        self.assertEqual(finished["speech"], "Example validated speech")
+        self.assertEqual(result["text"], "Example validated speech")
 
     def test_calls_not_allowed_in_bonus(self):
         self.purchase()
