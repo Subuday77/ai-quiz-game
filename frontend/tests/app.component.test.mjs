@@ -653,6 +653,142 @@ test('setup button shows loading during resume and start again after failed crea
   assert.equal(app.setupButtonLabelKey, 'game.start');
 });
 
+test('reload restores a paid helper before Q1 without buying another or allocating a new run', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'paid-pregame']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  const helper = {
+    id: 'persisted-helper', name: 'Maria Sample', profession: 'Historian',
+    erudition: 67, strong_topics: ['History'], weak_topics: ['Sports'],
+    consultations_remaining: 3, consultations_total: 3, refunded: false, price: 1,
+  };
+  try {
+    const { app, requests, posts, patches, scheduler } = setup();
+    app.gameId = ''; // setup() supplies a dummy ID after initialization.
+    assert.equal(requests[0].url, '/api/v2/games/paid-pregame');
+    succeed(requests[0], {
+      game_id: 'paid-pregame', language: 'English', phase: 'main',
+      correct_main_answers: 0, main_question_index: 0,
+      question_issued: false, helper,
+    });
+    assert.equal(app.restoringGame, false);
+    assert.equal(app.gameId, 'paid-pregame');
+    assert.equal(app.resumeCandidate, null);
+    assert.equal(app.resumeAvailable, false);
+    assert.equal(app.helperCard, helper);
+    assert.equal(app.displayedHelperCard, helper);
+    assert.equal(app.gameQuestionIssued, false);
+    assert.equal(app.setupButtonLabelKey, 'game.start');
+    assert.equal(app.canEditPregameLanguage, true);
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(saved.get(key), 'paid-pregame');
+    assert.equal(posts.length, 0); // A reload NEVER repurchases the helper.
+
+    // Language remains editable before Q1, even when a helper was already paid for.
+    app.changeQuestionLanguage('Russian');
+    assert.equal(patches[0].url, '/api/v2/games/paid-pregame/language');
+    assert.deepEqual(patches[0].body, { language: 'Russian' });
+    succeed(patches[0], {
+      game_id: 'paid-pregame', language: 'Russian', phase: 'main',
+      correct_main_answers: 0, question_issued: false, helper,
+    });
+    assert.equal(app.selectedLanguage, 'Russian');
+
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(requests[1].url, '/api/v2/games/paid-pregame/question');
+      succeed(requests[1], { ...question, number: 1, difficulty: 0 });
+    });
+    assert.equal(app.gameQuestionIssued, true);
+    assert.equal(app.helperCard, helper);
+    assert.equal(posts.length, 0);
+    const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+    assert.match(template, /class="helper-tablet" \*ngIf="displayedHelperCard as helper"/);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('saved game with issued question previews paid helper before Resume', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'already-started']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  const helper = {
+    id: 'helper-from-db', name: 'Henri Example', profession: 'Chef',
+    erudition: 42, strong_topics: ['Chemistry'], weak_topics: ['Music'],
+    consultations_remaining: 2, consultations_total: 3, refunded: false, price: 1,
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup();
+    app.gameId = '';
+    succeed(requests[0], {
+      game_id: 'already-started', language: 'French', phase: 'main',
+      correct_main_answers: 3, main_question_index: 4,
+      question_issued: true, helper,
+    });
+    assert.equal(app.gameId, '');
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.helperCard, null); // Preview is not yet the active game.
+    assert.equal(app.displayedHelperCard, helper);
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(app.gameId, 'already-started');
+      assert.equal(app.helperCard, helper);
+      assert.equal(requests[1].url, '/api/v2/games/already-started/question');
+      succeed(requests[1], { ...question, number: 5 });
+    });
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('creating a new run clears old helper only after POST succeeds', () => {
+  const { app, posts, requests, scheduler } = setup();
+  const oldHelper = {
+    id: 'old-helper', name: 'Old Helper', profession: 'Engineer',
+    erudition: 50, strong_topics: [], weak_topics: [],
+    consultations_remaining: 2, consultations_total: 3, refunded: false, price: 1,
+  };
+  app.helperCard = oldHelper;
+  app.helperReply = 'Old reply';
+  app.helperCallKey = 'old-call';
+  app.resumeAvailable = true;
+  app.selectedLanguage = 'Spanish';
+  scheduler.run(() => {
+    app.startFreshGame();
+    assert.equal(app.helperCard, oldHelper);
+    posts[0].subject.error(new Error('network error'));
+  });
+  assert.equal(app.helperCard, oldHelper); // Failure doesn't discard paid state.
+  scheduler.run(() => {
+    app.startFreshGame();
+    succeed(posts[1], {
+      game_id: 'another-game', language: 'Spanish', phase: 'main',
+      correct_main_answers: 0,
+    });
+    assert.equal(app.helperCard, null);
+    assert.equal(app.displayedHelperCard, null);
+    assert.equal(app.helperReply, '');
+    assert.equal(app.helperCallKey, '');
+    assert.equal(requests[0].url, '/api/v2/games/another-game/question');
+    succeed(requests[0], { ...question, number: 1 });
+  });
+});
+
 test('offers a saved round without locking language and resumes only on choice', () => {
   const previous = globalThis.localStorage;
   const saved = new Map([['ai-quiz-game:active-round:v2:user-1', 'saved-game-id']]);
