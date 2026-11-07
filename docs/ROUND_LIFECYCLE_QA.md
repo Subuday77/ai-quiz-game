@@ -38,15 +38,19 @@
    old duplicate games **without** any paid perks. If an older duplicate has a
    helper purchase or debit, the migration aborts transactionally with that
    game ID. Review it first; do **not** delete rows or blindly bypass the guard.
-3. To archive **remaining old unpaid** active games (including the sole active
+3. The standalone cleanup CLI loads `PROJECT_ROOT/.env` (same as
+   Alembic), then `backend/.env` if present, without overriding shell
+   environment variables. If neither defines `DATABASE_URL`, configure it
+   before running maintenance; never print or paste the secret into logs.
+4. To archive **remaining old unpaid** active games (including the sole active
    one), preview with:
    `python -m persistence.cleanup_stale_rounds --username YOUR_USERNAME --older-than-days 2`
    The default is DRY RUN; only active games older than the specified age are
    inspected. Paid games are listed under `protected`.
-4. After reviewing the IDs, run the same command with `--apply` to archive
+5. After reviewing the IDs, run the same command with `--apply` to archive
    only `archivable` games. No questions, awards, purchases or wallet
    transactions are deleted, and no paid games are touched.
-5. Restart the FastAPI backend in PyCharm, reload Angular and verify that
+6. Restart the FastAPI backend in PyCharm, reload Angular and verify that
    `/api/v2/games/active` contains the expected run (or JSON `null`).
 
 ## Verification SQL
