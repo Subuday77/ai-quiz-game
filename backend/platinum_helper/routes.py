@@ -11,7 +11,7 @@ from persistence.database import get_db
 from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import User
 from platinum_helper.core import PROFESSIONAL_SKILLS
-from platinum_helper.identity import generate_identity
+from platinum_helper.identity import UI_FAKER_LOCALES, generate_identity
 from platinum_helper.responder import HelperUnavailable, talk
 from platinum_helper.service import (
     buy, finish_call, get_purchase, card, reserve_call,
@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api/v2/games", tags=["Platinum Helper"])
 
 class BuyInput(BaseModel):
     profession: str | None = None
+    ui_language: str | None = None
 
 
 class CallInput(BaseModel):
@@ -58,7 +59,12 @@ def purchase(run_id: UUID, payload: BuyInput, request: Request,
              db: Session = Depends(get_db)):
     validate_origin(request)
     rng = random.SystemRandom()
-    identity = generate_identity(rng)
+    # The browser sends its visible interface language. It is independent of
+    # the selected question language, and validated against known Faker locales.
+    ui_language = payload.ui_language if payload.ui_language is not None else user.ui_language
+    if ui_language not in UI_FAKER_LOCALES:
+        raise HTTPException(status_code=422, detail="Unsupported interface language")
+    identity = generate_identity(rng, ui_language=ui_language)
     try:
         return buy(db, user_id=user.id, run_id=run_id,
                    profession=payload.profession,
