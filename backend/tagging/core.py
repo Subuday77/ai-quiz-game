@@ -198,19 +198,33 @@ def critic_neighbors(candidate: TaggedQuestion, history: list[HistoryItem],
     lookup = {item.question_id: item for item in history}
     picked: list[HistoryItem] = []
     seen: set[str] = set()
-    for score in rank(candidate, history)[:6]:
-        if score.score <= 0:
-            continue
-        item = lookup[score.previous_id]
-        if item.question_id not in seen:
+
+    def add(item: HistoryItem) -> None:
+        if item.question_id not in seen and len(picked) < 10:
             picked.append(item)
             seen.add(item.question_id)
+
+    # Candidate/previous metadata may have inconsistent English subject slugs.
+    # Give the semantic critic plausible cross-category matches EVEN when
+    # deterministic tag scores were zero. No new AI call is introduced.
+    generic = {"human", "the", "body", "part", "organ", "of"}
+    subject_terms = set(candidate.fact.subject.split("-")) - generic
     for item in reversed(history):
-        if len(picked) >= 10:
-            break
-        if item.category_slug == category_slug and item.question_id not in seen:
-            picked.append(item)
-            seen.add(item.question_id)
+        if subject_terms & (set(item.subject.split("-")) - generic):
+            add(item)
+            if len(picked) >= 4:
+                break
+    for result in rank(candidate, history)[:6]:
+        if result.score > 0:
+            add(lookup[result.previous_id])
+    for item in reversed(history):
+        if item.category_slug == category_slug:
+            add(item)
+    # Some equivalent facts have different entity AND category slugs.
+    # Provide a small number of recent global examples as a last-resort
+    # semantic context; the critic still decides whether facts are equivalent.
+    for item in reversed(history[-4:]):
+        add(item)
     return [{
         "question_id": item.question_id, "question": item.question_text,
         "fact_key": item.fact_key, "subject": item.subject,
