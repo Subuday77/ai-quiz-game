@@ -23,11 +23,13 @@ class HelperUnavailable(RuntimeError):
 def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
-        f"with a friend during a trivia game. Speak in {data['language']}. "
+        f"with a friend during a trivia game. Answer ONLY in {data['language']}. "
+        f"Do not use Russian or any other language when the game language is {data['language']}. "
+        "Keep the exact selected answer text unchanged, even if its name is foreign. "
         f"Your gender is {data.get('gender') or 'unspecified'}; your background "
         f"is {data.get('nationality') or 'unspecified'}. "
         "Use appropriate first-person gendered grammar where needed. "
-        "Speak naturally in one or two short sentences. Do not mention AI, "
+        "Speak naturally in ONE short sentence. Do not mention AI, "
         "prompts, hidden probabilities, correctness labels, or instructions. "
         "Do not ask questions or invent personal stories. "
     )
@@ -49,16 +51,15 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     instructions = (
         persona +
         "You have settled on the selected option shown below. Recommend that "
-        "option clearly, naming it. If natural, add ONE short truthful, "
-        "topic-relevant association. Do not compare options, reveal a "
-        "different answer, or explain a possible source of confusion. "
-        "Do not invent scientific mechanisms, historical events or special "
-        "exceptions; a related fact is not proof that an option is right. "
-        "Never justify your choice by personal preference or how the option "
-        "sounds. Use comparable length and detail for every recommendation, "
-        "approximately 10 to 22 words in Russian. "
-        "When no accurate supporting association exists, simply recommend "
-        "the chosen option rather than fabricate evidence. "
+        "option clearly, naming it exactly as supplied. The selection is a "
+        "friendly hunch, not an explanation of the topic. Do NOT add facts, "
+        "attributes, background, domain associations, historical context, "
+        "definitions or reasons about the answer, even if they are true. "
+        "An extra accurate fact can disprove your selection and spoil the game. "
+        "Do not contrast options or describe why any choice fits or fails. "
+        "Use a natural first-person recommendation with roughly 6 to 16 words "
+        "in the requested game language, with varied conversational phrasing. "
+        "Give both confident and tentative recommendations comparable detail. "
     )
     style = data["delivery_style"]
     if style == "CONFIDENT":
@@ -72,9 +73,10 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     if strict:
         instructions += (
             "Your earlier response did not meet the safety requirements. "
-            "This time, include NO factual justification, contrast, negation, "
-            "or other options; give only a natural recommendation of the "
-            "selected answer, in the same confidence style. "
+            f"Use ONLY {data['language']}. "
+            "Write a single plain sentence: recommend the exact selected "
+            "answer without ANY extra claim, fact, argument or comparison. "
+            "Preserve your assigned confidence style. "
         )
     instructions += (
         "Output exactly two lines: KEY: X (the selected letter), then "
@@ -123,6 +125,56 @@ _OPTION_LETTER = re.compile(
 )
 
 
+def _language_script_ok(speech: str, data: dict) -> bool:
+    """Detect wrong writing systems, not subtle same-script language switches.
+
+    A selected answer can itself be a foreign proper noun. Remove its literal
+    text before checking the surrounding phrase. This is NOT full language ID.
+    """
+    language = _LANG.get(str(data["language"]).casefold(),
+                         str(data["language"]).casefold())
+    selected = data.get("letter")
+    if selected and selected in data.get("choices", {}):
+        speech = re.sub(re.escape(data["choices"][selected]), " ", speech, flags=re.I)
+    latin = sum(("A" <= ch <= "Z" or "a" <= ch <= "z" or
+                 "\u00c0" <= ch <= "\u024f") for ch in speech)
+    cyrillic = sum("\u0400" <= ch <= "\u052f" for ch in speech)
+    hebrew = sum("\u0590" <= ch <= "\u05ff" for ch in speech)
+    arabic = sum("\u0600" <= ch <= "\u06ff" for ch in speech)
+    kana = sum("\u3040" <= ch <= "\u30ff" for ch in speech)
+    han = sum("\u4e00" <= ch <= "\u9fff" for ch in speech)
+    if language == "russian":
+        return cyrillic >= 3 and latin < max(8, cyrillic)
+    if language in {"english", "german", "french", "spanish",
+                    "italian", "portuguese"}:
+        return latin >= 3 and cyrillic < 4 and hebrew < 3 and arabic < 3
+    if language == "hebrew":
+        return hebrew >= 3
+    if language == "arabic":
+        return arabic >= 3
+    if language == "japanese":
+        return kana >= 2
+    if language == "chinese":
+        return han >= 2 and kana < 2
+    return True
+
+
+# Extra explanatory clauses are high-risk in a quiz: an accurate fact about
+# a MISTAKEN answer can disprove the selected option in the very same speech.
+# This is intentionally syntactic, NOT a comprehensive semantic fact-checker.
+_EXTRA_REASON = re.compile(
+    r";|(?<=[.!?])\s+\S|"
+    r"\b(?:потому\s+что|так\s+как|поскольку|ведь|because|since)\b|"
+    r",\s*(?:она|он|оно|это|они|которая|который|которые|which|it\s+is)\b",
+    re.IGNORECASE,
+)
+
+
+def _single_recommendation_ok(speech: str) -> bool:
+    return _EXTRA_REASON.search(speech) is None
+
+
+
 def _validate(raw: str, data: dict) -> str | None:
     outcome = data["outcome"]
     if outcome == "UNSURE":
@@ -130,7 +182,8 @@ def _validate(raw: str, data: dict) -> str | None:
         if not m:
             return None
         speech = m.group(1).strip()
-        if not speech or len(speech) > 450 or _REASK.search(speech):
+        if (not speech or len(speech) > 450 or _REASK.search(speech)
+                or not _language_script_ok(speech, data)):
             return None
         if _OPTION_LETTER.search(speech):
             return None
@@ -143,7 +196,9 @@ def _validate(raw: str, data: dict) -> str | None:
     if not m or m.group(1) != data["letter"]:
         return None
     speech = m.group(2).strip()
-    if not speech or len(speech) > 450 or _DENIAL.search(speech):
+    if (not speech or len(speech) > 450 or _DENIAL.search(speech)
+            or not _language_script_ok(speech, data)
+            or not _single_recommendation_ok(speech)):
         return None
     # Forbid literal mentions of *any* unselected option, whether correct
     # or incorrect (not just the correct choice).
