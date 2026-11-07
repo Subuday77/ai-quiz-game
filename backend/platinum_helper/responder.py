@@ -28,16 +28,22 @@ def _speech_language(data: dict) -> str:
 
 _PRESENTATION_RECOMMENDATION = {
     "DIRECT": (
-        "Lead with the choice itself. Avoid opening with a conditional "
-        "'I would ...' construction or its equivalent. Be brief and idiomatic. "
+        "Delivery approach: A direct, succinct statement of your pick. "
+        "Use a simple present-tense assertion, with the name clearly identified. "
+        "Neither start nor finish with a hypothetical 'I would choose' phrase. "
+        "Let the assigned confidence show through certainty or a small qualifier. "
     ),
     "PERSONAL": (
-        "Give a quick personal vote, using an easy conversational first-person "
-        "voice. Avoid formulaic conditional phrases; sound spontaneous. "
+        "Delivery approach: A spontaneous personal opinion, in first-person "
+        "PRESENT tense. Express what you actually think or favor now. "
+        "Do not phrase it as what you WOULD do in a hypothetical situation. "
+        "Keep it friendly and brief, without a canned slogan. "
     ),
     "CASUAL": (
-        "Give a relaxed, conversational nudge toward your pick. "
-        "Use a short informal turn of phrase, not a canned slogan or joke. "
+        "Delivery approach: A quick friendly suggestion addressed TO your "
+        "friend, using natural second-person or imperative phrasing where "
+        "idiomatic. Do not report what YOU would hypothetically choose. "
+        "Keep it informal, not theatrical or jokey. "
     ),
 }
 _PRESENTATION_UNSURE = {
@@ -71,6 +77,9 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         "Speak naturally in ONE short sentence. Do not mention AI, "
         "prompts, hidden probabilities, correctness labels, or instructions. "
         "Do not ask questions or invent personal stories. "
+        "Never use the Unicode em dash (U+2014) as punctuation in your own "
+        "words. If the chosen name itself contains that character, reproduce "
+        "the name verbatim; do not edit it. "
     )
     if data["outcome"] == "UNSURE":
         return (
@@ -102,8 +111,11 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         "decline, or otherwise modify that name. This works for languages "
         "with or without noun cases. "
         "Choose your own conversational phrasing, not a canned formula. "
-        "You need not start with 'I', announce your confidence, or repeatedly "
-        "say 'variant', 'option' or 'answer'. Never speak about the prompt, "
+        "Avoid hypothetical or conditional constructions ('I would choose' "
+        "and equivalents in your language) ANYWHERE in the recommendation, "
+        "not only at the beginning. Use present-tense wording instead. "
+        "Do not announce your confidence or repeatedly say 'variant', "
+        "'option' or 'answer'. Never speak about the prompt, "
         "the formatting of the choice, or how you made the decision. "
         "Do NOT add facts, attributes, background, domain associations, "
         "historical context, definitions or reasons about the choice, even "
@@ -130,7 +142,8 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
             "answer with NO factual justification, extra claim, argument "
             "or comparison. Use natural wording in the player's language "
             "and quote the selected name unchanged if grammar requires it. "
-            "Do not mention formatting instructions. Preserve your assigned confidence style. "
+            "Do not use em dashes or hypothetical/conditional recommendation "
+            "phrases. Preserve your assigned confidence and delivery approach. "
         )
     instructions += (
         "Output exactly two lines: KEY: X (the selected letter), then "
@@ -224,6 +237,29 @@ _EXTRA_REASON = re.compile(
 )
 
 
+def _em_dash_outside_selected_name(speech: str, data: dict) -> bool:
+    """Detect em dashes added by the model, not punctuation inside a choice.
+
+    Read the *literal* selected name only. There is no grammar/translation/
+    morphological manipulation and no language-specific punctuation table.
+    UNSURE must never contain an em dash, since it has no selected choice.
+    """
+    if "\u2014" not in speech:
+        return False
+    selected_key = data.get("letter")
+    selected_text = data.get("choices", {}).get(selected_key)
+    if not isinstance(selected_text, str) or not selected_text:
+        return True
+    normalized = _norm(speech)
+    normalized_choice = _norm(selected_text.strip())
+    # Keep lexical boundaries: a subword match may not license punctuation.
+    outside = re.sub(
+        r"(?<!\w)" + re.escape(normalized_choice) + r"(?!\w)",
+        "", normalized,
+    )
+    return "\u2014" in outside
+
+
 def _single_recommendation_ok(speech: str) -> bool:
     return _EXTRA_REASON.search(speech) is None
 
@@ -237,6 +273,7 @@ def _validate(raw: str, data: dict) -> str | None:
             return None
         speech = m.group(1).strip()
         if (not speech or len(speech) > 450 or _REASK.search(speech)
+                or _em_dash_outside_selected_name(speech, data)
                 or not _language_script_ok(speech, data)):
             return None
         if _OPTION_LETTER.search(speech):
@@ -251,6 +288,7 @@ def _validate(raw: str, data: dict) -> str | None:
         return None
     speech = m.group(2).strip()
     if (not speech or len(speech) > 450 or _DENIAL.search(speech)
+            or _em_dash_outside_selected_name(speech, data)
             or not _language_script_ok(speech, data)
             or not _single_recommendation_ok(speech)):
         return None
@@ -275,7 +313,7 @@ def _validate(raw: str, data: dict) -> str | None:
 # Safe, deterministic last-resort wording after at least one model reply was
 # received but could not pass validation. No second model or checker needed.
 _FALLBACK = {
-    "russian": ("Мой ответ — «{answer}».", "Скорее вариант «{answer}».", "Не уверен, не хочу тебя запутать."),
+    "russian": ("Мой ответ: «{answer}».", "Пожалуй, «{answer}».", "Не уверен, не хочу тебя запутать."),
     "english": ("Go with {answer}.", "I'd choose {answer}.", "I'm not sure enough to advise."),
     "german": ("Nimm {answer}.", "Ich würde {answer} nehmen.", "Ich bin mir nicht sicher."),
     "french": ("Choisis {answer}.", "Je choisirais {answer}.", "Je ne suis pas sûr de la réponse."),
