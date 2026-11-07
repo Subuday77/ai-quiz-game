@@ -29,6 +29,9 @@ class BuyInput(BaseModel):
 class CallInput(BaseModel):
     question_id: UUID
     request_key: str = Field(min_length=8, max_length=80)
+    # The CURRENT visible interface language, not GameRun.language.
+    # Older clients omit it and use their persisted account preference.
+    ui_language: str | None = None
 
 
 def _own(db: Session, run_id: UUID, user_id: UUID):
@@ -81,6 +84,12 @@ def call_helper(run_id: UUID, payload: CallInput, request: Request,
                 user: User = Depends(authenticated_user),
                 db: Session = Depends(get_db)):
     validate_origin(request)
+    speech_language = (
+        payload.ui_language if payload.ui_language is not None
+        else user.ui_language
+    )
+    if speech_language not in UI_FAKER_LOCALES:
+        raise HTTPException(status_code=422, detail="Unsupported interface language")
     try:
         old_text, current_card, cached, data = reserve_call(
             db, user_id=user.id, run_id=run_id, question_id=payload.question_id,
@@ -88,6 +97,9 @@ def call_helper(run_id: UUID, payload: CallInput, request: Request,
         )
         if cached:
             return {"text": old_text, "helper": current_card}
+        # The question and selected option remain in the original game
+        # language; only the character's speech follows the visible UI locale.
+        data["speech_language"] = speech_language
         try:
             reply = talk(data)
         except HelperUnavailable:
