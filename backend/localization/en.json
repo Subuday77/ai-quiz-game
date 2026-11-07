@@ -195,7 +195,7 @@
   "helper.randomCost": "Random helper — 1 platinum ★",
   "helper.chosenCost": "2 platinum ★",
   "helper.buy": "Hire a helper",
-  "helper.remaining": "Calls remaining: {{remaining}} / 3",
+  "helper.remaining": "Help requests remaining: {{remaining}} / 3",
   "helper.erudition": "Erudition: {{score}} / 100",
   "helper.strong": "Knows a lot about",
   "helper.weak": "Not very good at",
