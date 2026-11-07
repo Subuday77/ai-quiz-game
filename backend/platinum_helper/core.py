@@ -16,10 +16,10 @@ TOPICS = (
     "Physics", "Mathematics", "Chemistry", "Biology", "Medicine",
     "History", "Geography", "Literature", "Art", "Music", "Cinema",
     "Mythology", "Sports", "Technology", "Astronomy", "Meteorology",
-    "Fire Safety", "Engineering", "Agriculture", "Comics",
+    "Culture", "Engineering", "Agriculture", "Comics",
 )
 PROFESSIONAL_SKILLS: dict[str, tuple[str, ...]] = {
-    "Firefighter": ("Fire Safety",),
+    "Firefighter": ("Engineering", "Chemistry"),
     "Physicist": ("Physics", "Mathematics"),
     "Mathematician": ("Mathematics",),
     "Plumber": ("Engineering",),
@@ -85,7 +85,7 @@ CATEGORY_TOPICS = {
     "Fashion and clothing": "Art",
     "Transportation": "Engineering",
     "Everyday objects and household knowledge": "Engineering",
-    "Traditions, customs, and world culture": "History",
+    "Traditions, customs, and world culture": "Culture",
 }
 OUTCOME_WEIGHTS = {
     "HIGH": (90, 8, 2),
@@ -105,6 +105,11 @@ class HelperProfile:
     featured_high: tuple[str, ...]
     featured_low: tuple[str, ...]
     tagline: str
+    gender: str = ""
+    nationality: str = ""
+    tagline_id: int = 1
+    tagline_high: str = ""
+    tagline_low: str = ""
 
     def public_card(self, remaining: int) -> dict:
         """Never expose the private complete skill map to the client."""
@@ -127,6 +132,8 @@ def generate_profile(
     name: str = "Alex",
     tagline: str = "",
     rng: Random | None = None,
+    gender: str = "",
+    nationality: str = "",
 ) -> HelperProfile:
     rng = rng or Random()
     if profession not in PROFESSIONAL_SKILLS:
@@ -165,10 +172,11 @@ def generate_profile(
     return HelperProfile(
         id=str(uuid4()), name=name, profession=profession, erudition=erudition,
         skills=skills, featured_high=featured_high, featured_low=featured_low,
-        tagline=tagline or (
-            f"Ask me about {featured_high[0] if featured_high else profession}! "
-            f"But {featured_low[0] if featured_low else 'everything else'} might stump me."
-        ),
+        tagline=tagline, gender=gender, nationality=nationality,
+        tagline_id=rng.randint(1, 4),
+        tagline_high=rng.choice(high_topics) if high_topics else profession,
+        tagline_low=rng.choice(low_topics) if low_topics else "",
+
     )
 
 
