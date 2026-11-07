@@ -44,7 +44,7 @@ jobs:
         run: npm ci
       - name: Frontend unit tests
         working-directory: frontend
-        run: timeout 120s npm test
+        run: timeout 25s npm test
       - name: Angular production build
         if: always()
         working-directory: frontend
