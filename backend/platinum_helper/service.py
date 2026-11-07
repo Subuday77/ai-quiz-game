@@ -9,7 +9,9 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from persistence.gameplay import GameConflict, owned_game, pending_question
+from persistence.gameplay import (
+    GameConflict, hidden_choices, owned_game, pending_question, question_plausibility,
+)
 from persistence.models import (
     GameRun, PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
     Question, QuestionAttempt, StarAward, Topic, User,
@@ -23,7 +25,8 @@ from platinum_helper.debug import (
     purchased as debug_purchased,
     reserved as debug_reserved,
     finished as debug_finished,
-)
+)from platinum_helper.selection import best_visible_wrong
+
 
 
 def available_platinum(db: Session, user_id: UUID) -> int:
@@ -154,9 +157,22 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             # Existing purchased characters predate the revised category map.
             # Their original strengths remain fixed; new areas use MEDIUM.
             outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng)
-            letter = (rng.choice([c for c in "ABCD" if c != question.correct_key])
-                      if outcome == "MISTAKEN" else
-                      question.correct_key if outcome == "KNOW" else None)
+            if outcome == "MISTAKEN":
+                # The bronze perk hides the lowest-scored answers. Never
+                # recommend a hidden option or an absurdly weak distractor.
+                letter = best_visible_wrong(
+                    correct_key=question.correct_key,
+                    difficulty=question.requested_difficulty,
+                    scores=question_plausibility(db, question.id),
+                    hidden=hidden_choices(db, attempt, question),
+                    rng=rng,
+                )
+                if letter is None:
+                    # Frozen BEFORE the provider call; the initial draw
+                    # remains governed by unchanged skill probabilities.
+                    outcome = "UNSURE"
+            else:
+                letter = question.correct_key if outcome == "KNOW" else None
             old = PlatinumHelperCall(
                 purchase_id=purchase.id, request_key=request_key,
                 question_attempt_id=attempt.id, topic=broad, outcome=outcome,
