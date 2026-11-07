@@ -88,8 +88,8 @@ class SpeechFrameTests(unittest.TestCase):
             "KEY: B\nSPEECH: Думаю, Афина.", d
         ))
         self.assertEqual(_validate(
-            "KEY: B\nSPEECH: Мой выбор — «Афродита».", d
-        ), "Мой выбор — «Афродита».")
+            "KEY: B\nSPEECH: Мой выбор: «Афродита».", d
+        ), "Мой выбор: «Афродита».")
 
     def test_cross_language_names_and_unicode_are_accepted_unchanged(self):
         items = (
