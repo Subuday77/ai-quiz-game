@@ -11,12 +11,17 @@ from typing import Mapping, Sequence
 
 from star_perks import PerkUnavailable, normalized_plausibility
 
+from platinum_helper.settings import HelperSettings
+
 
 def cautious_threshold(difficulty: int) -> int:
     """Thresholds calibrated on the 224-question November 2026 sample."""
     if not 0 <= difficulty <= 15:
         raise ValueError("Invalid question difficulty")
-    return 40 if difficulty == 0 else 50 if difficulty <= 3 else 60
+    settings = HelperSettings.from_env()
+    return (settings.threshold_level_0 if difficulty == 0 else
+            settings.threshold_levels_1_3 if difficulty <= 3 else
+            settings.threshold_levels_4_15)
 
 
 def best_visible_wrong(
