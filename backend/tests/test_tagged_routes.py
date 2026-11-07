@@ -63,7 +63,9 @@ class TaggedEndpointTests(unittest.TestCase):
 
     def test_tagged_mode_persists_tags_without_leaking_them_to_browser(self):
         game_id = self.new_game("English")
-        with patch("api.generate_valid_question", return_value=candidate()) as gen:
+        reviewed = candidate()
+        reviewed._competence_area = "Physics"
+        with patch("api.generate_valid_question", return_value=reviewed) as gen:
             result = self.client.get(f"/api/v2/games/{game_id}/question")
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(set(result.json()), set(PublicQuestion.model_fields))
@@ -72,6 +74,7 @@ class TaggedEndpointTests(unittest.TestCase):
         self.assertTrue(gen.call_args.kwargs["tag_history"] == [])
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Question)), 1)
+            self.assertEqual(db.scalar(select(Question.competence_area)), "Physics")
             self.assertEqual(db.scalar(select(func.count()).select_from(QuestionFact)), 1)
             self.assertEqual(db.scalar(select(func.count()).select_from(QuestionAttempt)), 1)
 
