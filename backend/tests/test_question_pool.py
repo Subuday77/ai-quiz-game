@@ -334,6 +334,134 @@ class GlobalPoolTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
 
 
+    def test_q14_switches_to_unused_category_after_generation_exhaustion(self):
+        from persistence.models import GameRun, Topic
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 13
+            db.commit()
+            primary = _category_for_round(self.run_id, 14, db=db)
+
+        calls = []
+
+        def generate(difficulty, language, category, **kwargs):
+            calls.append((difficulty, category, kwargs["question_number"]))
+            if len(calls) == 1:
+                raise HTTPException(status_code=503, detail="AI provider unavailable")
+            item = candidate(difficulty=difficulty)
+            item._review_report = review_report()
+            return item
+
+        with patch("api.generate_valid_question", side_effect=generate):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 14)
+        self.assertEqual(response.json()["difficulty"], 13)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], (13, primary, 14))
+        self.assertNotEqual(calls[1][1], primary)
+        self.assertEqual(calls[1][2], 14)
+        with Session(self.engine) as db:
+            question = db.get(Question, UUID(response.json()["question_id"]))
+            chosen = db.get(Topic, question.topic_id).labels["en"]
+            self.assertEqual(chosen, calls[1][1])
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+        self.assertEqual(self.request().json(), response.json())
+
+    def test_q14_uses_approved_alternate_pool_before_second_ai_call(self):
+        from persistence.game_routes import _alternate_main_category
+        from persistence.models import GameRun
+
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 13
+            db.commit()
+            primary = _category_for_round(self.run_id, 14, db=db)
+            alternate = _alternate_main_category(db, run, 14, primary)
+            self.assertIsNotNone(alternate)
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            item = candidate(difficulty=13)
+            item._review_report = review_report()
+            _, stored = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=item,
+                category=alternate, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            pooled_id = stored.id
+
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=503, detail="AI provider unavailable",
+        )) as generator:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(pooled_id))
+        self.assertEqual(response.json()["number"], 14)
+        generator.assert_called_once()
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+
+    def test_q14_double_generation_failure_preserves_active_round(self):
+        from persistence.models import GameRun
+
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 13
+            db.commit()
+
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=503, detail="AI provider unavailable",
+        )) as generator:
+            response = self.request()
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(generator.call_count, 2)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.status, "main")
+            self.assertEqual(run.correct_main_answers, 13)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 0)
+
+        item = candidate(difficulty=13)
+        item._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=item):
+            retry = self.request()
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["number"], 14)
+
+    def test_q16_auto_rotates_before_second_category_generation(self):
+        from persistence.models import GameRun
+
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.status = "bonus"
+            run.correct_main_answers = 15
+            run.bonus_wager_accepted = True
+            db.commit()
+            primary = _category_for_round(self.run_id, 16, db=db)
+
+        calls = []
+
+        def generate(difficulty, language, category, **kwargs):
+            calls.append((difficulty, category, kwargs["question_number"]))
+            if len(calls) == 1:
+                raise HTTPException(status_code=503, detail="AI provider unavailable")
+            item = candidate(difficulty=15)
+            item._review_report = review_report()
+            return item
+
+        with patch("api.generate_valid_question", side_effect=generate):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 16)
+        self.assertTrue(response.json()["bonus"])
+        self.assertEqual(calls[0], (15, primary, 16))
+        self.assertEqual(len(calls), 2)
+        self.assertNotEqual(calls[1][1], primary)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.bonus_topic_index, 1)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+
     def _seed_bonus_candidate(self, *, legacy=False, critic_too_easy=False,
                               arbitration_version="arbitration_v2"):
         """Create another user's actual Q16, preserving the same Question id."""
@@ -461,7 +589,7 @@ class GlobalPoolTests(unittest.TestCase):
             reply = self.request()
         self.assertEqual(reply.status_code, 503, reply.text)
         self.assertNotIn("question", reply.json())
-        generator.assert_called_once()
+        self.assertEqual(generator.call_count, 2)
         from persistence.models import GameRun
         with Session(self.engine) as db:
             run = db.get(GameRun, self.run_id)
