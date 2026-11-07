@@ -187,10 +187,57 @@ class SpeechFrameTests(unittest.TestCase):
         self.assertEqual(result, "Ставлю на «Словения».")
         self.assertEqual(len(client.requests), 2)
         for request in client.requests:
-            self.assertIn("A quick friendly suggestion addressed TO your", request["instructions"])
+            self.assertIn("A short, relaxed, off-the-cuff opinion", request["instructions"])
             self.assertIn("Selected option: B: Словения", request["input"])
             self.assertNotIn("Афина", request["input"])
         self.assertIn("NO factual justification", client.requests[1]["instructions"])
+
+    def test_casual_tentative_is_not_a_hedged_command_or_vocative(self):
+        # The V6 30-case live test exposed awkward RU/AR tentative
+        # "I think + take" instructions and a JA vocative ("friend").
+        # Test the *model instruction*, not invented language-specific
+        # rejection regexes that could break perfectly valid sentences.
+        examples = (
+            ("ru", "Russian", "Airplane", "По-моему, Airplane."),
+            ("ar", "Arabic", "Тобайас Смоллетт",
+             "أميل إلى Тобайас Смоллетт."),
+            ("ja", "Japanese", "Ottawa", "Ottawaかな。"),
+        )
+        for ui, language, answer, good_speech in examples:
+            for confidence in ("CONFIDENT", "TENTATIVE"):
+                data = scenario(
+                    answer=answer, language="German", speech_language=ui,
+                    confidence=confidence, presentation_style="CASUAL",
+                )
+                for strict in (False, True):
+                    wrong_instruction, wrong_payload = _prompt(data, strict=strict)
+                    right_instruction, right_payload = _prompt(
+                        {**data, "outcome": "KNOW"}, strict=strict
+                    )
+                    with self.subTest(ui=ui, confidence=confidence, strict=strict):
+                        self.assertEqual(wrong_instruction, right_instruction)
+                        self.assertEqual(wrong_payload, right_payload)
+                        self.assertIn(f"ONLY in {language}", wrong_instruction)
+                        self.assertIn("Avoid commands, imperatives", wrong_instruction)
+                        self.assertIn("second-person directives", wrong_instruction)
+                        self.assertIn("hedge the opinion itself", wrong_instruction)
+                        self.assertIn("equivalent vocative", wrong_instruction)
+                        self.assertNotIn("using natural second-person", wrong_instruction)
+                        self.assertIn(
+                            "Speak directly and confidently" if confidence == "CONFIDENT"
+                            else "Sound mildly uncertain", wrong_instruction
+                        )
+                        self.assertIn(f"Selected option: B: {answer}", wrong_payload)
+                self.assertEqual(
+                    _validate("KEY: B\\nSPEECH: " + good_speech, data),
+                    good_speech,
+                )
+        # Unrelated speech approaches and UNSURE behavior remain unchanged.
+        plain, _ = _prompt(scenario(presentation_style="DIRECT"))
+        personal, _ = _prompt(scenario(presentation_style="PERSONAL"))
+        unsure, _ = _prompt(scenario(presentation_style="CASUAL", outcome="UNSURE"))
+        for prompt in (plain, personal, unsure):
+            self.assertNotIn("equivalent vocative", prompt)
 
     def test_unsure_uses_style_without_revealing_answer(self):
         styles = set()
