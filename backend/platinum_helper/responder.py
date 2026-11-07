@@ -13,6 +13,8 @@ import unicodedata
 
 from openai import OpenAI
 
+from platinum_helper.settings import HelperSettings
+
 
 class HelperUnavailable(RuntimeError):
     pass
@@ -188,15 +190,18 @@ def _fallback(data: dict) -> str:
 
 def talk(data: dict, *, client=None) -> str:
     """One retry with frozen selected key; never charge for network failure."""
-    model = os.environ.get("QUIZ_HELPER_MODEL_ID", "gpt-5.4")
+    settings = HelperSettings.from_env()
     got_rejected_reply = False
-    for attempt in range(2):
+    for attempt in range(settings.max_attempts):
         instructions, prompt = _prompt(data, strict=attempt > 0)
         try:
             sdk = client or OpenAI()
-            response = sdk.with_options(timeout=8.0, max_retries=0).responses.create(
-                model=model, instructions=instructions, input=prompt,
-                reasoning={"effort": "low"}, max_output_tokens=240,
+            response = sdk.with_options(
+                timeout=settings.timeout_seconds, max_retries=0
+            ).responses.create(
+                model=settings.model, instructions=instructions, input=prompt,
+                reasoning={"effort": settings.reasoning_effort},
+                max_output_tokens=settings.max_output_tokens,
             )
             if response.status != "completed":
                 continue
