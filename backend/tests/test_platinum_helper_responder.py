@@ -139,6 +139,26 @@ class HelperResponderTests(unittest.TestCase):
         self.assertEqual(talk(sample(), client=client), "Я выбрал 395.")
         self.assertEqual(client.calls, 2)
 
+    def test_openai_initialization_error_is_unavailable(self):
+        with patch("platinum_helper.responder.OpenAI",
+                   side_effect=RuntimeError("OPENAI_API_KEY not set")) as constructor:
+            with self.assertRaises(HelperUnavailable):
+                talk(sample())
+        self.assertEqual(constructor.call_count, 2)
+
+    def test_safe_fallback_covers_all_supported_languages(self):
+        for language in ("en", "de", "fr", "es", "it", "pt", "ru",
+                         "he", "ar", "ja", "zh"):
+            with self.subTest(language=language):
+                data = sample()
+                data["language"] = language
+                self.assertIn("395", _fallback(data))
+                data["delivery_style"] = "TENTATIVE"
+                self.assertIn("395", _fallback(data))
+                data["outcome"] = "UNSURE"
+                self.assertTrue(_fallback(data))
+                self.assertNotIn("395", _fallback(data))
+
     def test_two_incomplete_responses_are_not_charged(self):
         client = FakeClient([("incomplete", ""), ("incomplete", "")])
         with self.assertRaises(HelperUnavailable):
