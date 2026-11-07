@@ -86,6 +86,8 @@ def _abandon_unpaid_legacy_runs(
     for run in active:
         run.status = "abandoned"
         run.finished_at = datetime.now(timezone.utc)
+    if active:
+        db.flush()  # Free the partial UNIQUE(active user) slot before INSERT.
 
 
 def _topics_ready(db: Session) -> bool:
@@ -414,13 +416,14 @@ def replace_game(run_id: UUID, payload: NewGame, request: Request,
         if successor is not None:
             raise HTTPException(status_code=409, detail="Replacement round already exists")
         _abandon_unpaid_legacy_runs(db, user_id=user.id, exclude_id=run.id)
+        run.status = "abandoned"
+        run.finished_at = datetime.now(timezone.utc)
+        db.flush()  # UPDATE inactive before inserting the only new active run.
         successor = GameRun(
             id=successor_id, user_id=user.id,
             language=payload.language, status="main",
         )
         db.add(successor)
-        run.status = "abandoned"
-        run.finished_at = datetime.now(timezone.utc)
         db.flush()
         result = _game_info(db, successor)
         db.commit()
