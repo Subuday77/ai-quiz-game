@@ -299,6 +299,28 @@ em dashes, explanatory self-contradictions, retries and fallback rates.
 Do not overwrite earlier V4/V5/V6 nine-case directories. No database
 migration, new environment variable, or frontend restart is needed.
 
+## V6 CASUAL micro-fix after 30-case human QA
+
+The 30-case V6 run confirmed no safety failures but revealed unnatural
+**CASUAL** wording: Russian and Arabic TENTATIVE replies combined a hedge
+("I think") with an imperative ("take"), while one Japanese CONFIDENT
+reply called the player "friend" literally.
+
+The **CASUAL recommendation prompt only** now asks for a short, idiomatic
+off-the-cuff opinion, without imperatives/second-person directives or
+vocatives such as "friend" or "buddy". If TENTATIVE, the model softens
+its *opinion*, not a command; if CONFIDENT, it recommends casually without
+artificial doubt. It still preserves the exact selected name and avoids
+facts/explanations. The separate DIRECT, PERSONAL and UNSURE prompts are
+unchanged; KNOW/MISTAKEN receive identical instructions.
+
+Offline regression tests check Russian, Arabic and Japanese CASUAL prompts
+across both KNOW/MISTAKEN, CONFIDENT/TENTATIVE and normal/strict attempts.
+This is prompt-only guidance, not a language-specific grammar filter:
+**actual naturalness needs a new GPT-5.4 sample**. A code-fingerprint change
+means the previous V6 30-case directory is frozen and must not be reused to
+produce paid results under the new prompt. Keep that original report intact.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
