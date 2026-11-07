@@ -10,3 +10,4 @@ SQLAlchemy>=2.0,<3
 alembic>=1.14,<2
 psycopg[binary]>=3.2,<4
 argon2-cffi>=23.1,<26
+Faker>=35,<50
