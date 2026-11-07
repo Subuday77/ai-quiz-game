@@ -135,6 +135,16 @@ class HelperLiveQATests(unittest.TestCase):
                 self.assertEqual(len(plan["scenarios"]), 10)
                 self.assertFalse((Path(temp) / "calls.jsonl").exists())
 
+    def test_updated_responder_code_requires_a_fresh_run_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(qa, "approved_questions", return_value=self.questions):
+                self.assertEqual(qa.main([
+                    "--target", "10", "--limit", "3", "--output-dir", temp,
+                ]), 0)
+            with patch.object(qa, "code_fingerprint", return_value="changed"):
+                with self.assertRaisesRegex(SystemExit, "Use a NEW --output-dir"):
+                    qa.main(["--target", "10", "--limit", "3", "--output-dir", temp])
+
     def test_report_export_and_resume_idempotence(self):
         plan = qa.build_plan(self.questions, 10, 123, "gpt-5.4")
         with tempfile.TemporaryDirectory() as temp:
