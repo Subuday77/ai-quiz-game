@@ -380,6 +380,8 @@ class GlobalPoolTests(unittest.TestCase):
             alternate = _alternate_main_category(db, run, 14, primary)
             self.assertIsNotNone(alternate)
             bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 13
+            db.commit()
             item = candidate(difficulty=13)
             item._review_report = review_report()
             _, stored = offer_question(
