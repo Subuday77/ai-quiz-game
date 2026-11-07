@@ -295,7 +295,10 @@ def active_game(user: User = Depends(authenticated_user),
     run is resumable. Includes pre-Q1 purchases and bonus decision state.
     """
     run = _active_run(db, user.id)
-    return _game_info(db, run) if run is not None else None
+    info = _game_info(db, run) if run is not None else None
+    from platinum_helper.debug import active_round as debug_active_round
+    debug_active_round(info)
+    return info
 
 
 @router.post("/{run_id}/replace", response_model=GameInfo, status_code=201)
