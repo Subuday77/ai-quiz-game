@@ -161,15 +161,50 @@ def _norm(text: str) -> str:
     return unicodedata.normalize("NFKC", text).casefold()
 
 
-def _mentions(text: str, answer: str) -> bool:
-    """Detect a complete option text, including hyphenated combined names.
+def _cjk_script(char: str) -> str:
+    """Distinguish Han characters from Japanese kana at word edges."""
+    if not char:
+        return ""
+    value = ord(char)
+    if 0x3040 <= value <= 0x30FF or 0x31F0 <= value <= 0x31FF:
+        return "kana"
+    if (0x3400 <= value <= 0x4DBF or 0x4E00 <= value <= 0x9FFF
+            or 0xF900 <= value <= 0xFAFF):
+        return "han"
+    return ""
 
-    Word boundaries avoid false positives such as answer '4' within '451'.
+
+def _complete_option_spans(text: str, answer: str) -> list[tuple[int, int]]:
+    """Match entire labels without treating adjacent CJK particles as letters.
+
+    Word boundaries still reject Latin/Cyrillic substrings and numbers inside
+    larger numbers. Japanese/Chinese place particles directly next to names:
+    a Latin answer followed by kana/Han (or Han followed by kana) is a
+    legitimate complete name, not a word continuation.
     """
-    if not answer or not answer.strip():
-        return False
-    return re.search(r"(?<!\w)" + re.escape(_norm(answer.strip())) + r"(?!\w)",
-                     _norm(text)) is not None
+    if not isinstance(answer, str) or not answer.strip():
+        return []
+    haystack = _norm(text)
+    needle = _norm(answer.strip())
+
+    def edge_ok(neighbor: str, label_edge: str) -> bool:
+        if not neighbor or re.match(r"\w", neighbor) is None:
+            return True
+        a, b = _cjk_script(neighbor), _cjk_script(label_edge)
+        return bool(a or b) and a != b
+
+    found = []
+    for match in re.finditer(re.escape(needle), haystack):
+        start, end = match.span()
+        before = haystack[start - 1] if start else ""
+        after = haystack[end] if end < len(haystack) else ""
+        if edge_ok(before, needle[0]) and edge_ok(after, needle[-1]):
+            found.append((start, end))
+    return found
+
+
+def _mentions(text: str, answer: str) -> bool:
+    return bool(_complete_option_spans(text, answer))
 
 
 # Obvious semantic self-negations; not a replacement for offline human/LLM QA.
@@ -251,13 +286,13 @@ def _em_dash_outside_selected_name(speech: str, data: dict) -> bool:
     if not isinstance(selected_text, str) or not selected_text:
         return True
     normalized = _norm(speech)
-    normalized_choice = _norm(selected_text.strip())
-    # Keep lexical boundaries: a subword match may not license punctuation.
-    outside = re.sub(
-        r"(?<!\w)" + re.escape(normalized_choice) + r"(?!\w)",
-        "", normalized,
-    )
-    return "\u2014" in outside
+    # Remove only complete, literal selected-name matches, including a name
+    # followed by a Japanese particle without a separating space.
+    spans = _complete_option_spans(speech, selected_text)
+    outside = list(normalized)
+    for start, end in spans:
+        outside[start:end] = [""] * (end - start)
+    return "\u2014" in "".join(outside)
 
 
 def _single_recommendation_ok(speech: str) -> bool:
