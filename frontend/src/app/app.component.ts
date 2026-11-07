@@ -132,6 +132,11 @@ export class AppComponent implements OnInit, OnDestroy {
   ];
 
   helperCard: HelperCard | null = null;
+  // A saved but not yet resumed round may own a paid helper. Show its card
+  // without activating that round or allowing consultations before Resume.
+  get displayedHelperCard(): HelperCard | null {
+    return this.helperCard ?? (this.resumeAvailable ? this.resumeCandidate?.helper ?? null : null);
+  }
   helperHireOpen = false;
   helperChooseProfession = false;
   gameQuestionIssued = false;
@@ -683,6 +688,17 @@ export class AppComponent implements OnInit, OnDestroy {
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.resumeRunLanguage = '';
+        // Starting a different game must never carry a helper purchased for
+        // the previous run. Only clear it after POST /games succeeds.
+        this.helperCard = null;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = '';
+        this.helperCallQuestionId = '';
+        this.helperDetailsVisible = false;
+        this.helperHireOpen = false;
+        this.helperChooseProfession = false;
+        this.bonusDecisionAvailable = false;
         this.categoryInfo = null;
         this.categoriesToExclude = [];
         this.chosenCategory = '';
@@ -1392,8 +1408,21 @@ export class AppComponent implements OnInit, OnDestroy {
           this.removeSavedGame(accountId);
           return;
         }
-        // The backend confirmed the saved run is still open. Don't bind it to
-        // the UI as the active run until the player explicitly chooses Resume.
+        // A game without an issued first question is still in pregame setup.
+        // Restore it directly: purchasing a helper allocates and charges this
+        // game before Q1, and offering Start New here would strand the purchase.
+        if (run.phase === 'main' && run.question_issued === false) {
+          this.resetGameView();
+          this.gameId = run.game_id;
+          this.gameLanguage = run.language;
+          this.selectedLanguage = run.language;
+          this.gameQuestionIssued = false;
+          this.helperCard = run.helper ?? null;
+          this.loadCategoryInfo();
+          return;
+        }
+        // Once Q1 has been issued, leave Resume / Start New as an explicit
+        // choice; the saved helper is still visible in the setup preview.
         this.resumeCandidate = run;
         this.resumeRunLanguage = run.language;
         this.resumeAvailable = true;
