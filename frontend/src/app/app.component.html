@@ -112,7 +112,7 @@
     </div>
   </section>
 
-  <section class="helper-tablet" *ngIf="helperCard as helper" aria-label="Platinum Helper">
+  <section class="helper-tablet" *ngIf="displayedHelperCard as helper" aria-label="Platinum Helper">
     <button type="button" class="helper-tile" (click)="helperDetailsVisible = true">
       <svg class="helper-avatar" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <circle cx="12" cy="7" r="4" fill="currentColor"></circle>
@@ -123,7 +123,7 @@
       </span><span class="helper-open" aria-hidden="true">ⓘ</span>
     </button>
   </section>
-  <div class="helper-modal-backdrop" *ngIf="helperDetailsVisible && helperCard as helper">
+  <div class="helper-modal-backdrop" *ngIf="helperDetailsVisible && displayedHelperCard as helper">
     <section class="helper-modal" role="dialog" aria-modal="true" aria-label="Helper profile">
       <button class="helper-close" type="button" (click)="helperDetailsVisible = false" aria-label="Close">×</button>
       <h2>{{ helper.name }}</h2>
