@@ -10,9 +10,11 @@ do not need to be started.
 ## Prerequisites
 
 - Backend dependencies installed from backend/requirements.txt.
-- backend/.env contains DATABASE_URL pointing to your PostgreSQL database
-  and OPENAI_API_KEY. Neither value is printed, stored in the report,
-  or uploaded to GitHub.
+- The single **repository-root** `.env` (`../.env` when running from `backend/`)
+  contains `DATABASE_URL` pointing to your PostgreSQL database and
+  `OPENAI_API_KEY`. The script loads this same file as the FastAPI app and
+  Alembic migrations. No `backend/.env` is needed. Neither secret is printed,
+  stored in the report, or uploaded to GitHub.
 - Approved questions with original generator plausibility reviews.
 
 ## Commands (working directory: backend)
