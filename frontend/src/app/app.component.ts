@@ -759,7 +759,12 @@ export class AppComponent implements OnInit, OnDestroy {
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
-        else this.fail('game.startFailed');
+        else if (err instanceof HttpErrorResponse && err.status === 409) {
+          // Another browser may have created an active game meanwhile.
+          // Ask the server for that game instead of hiding it behind an error.
+          this.loading = false;
+          this.restoreActiveGame();
+        } else this.fail('game.startFailed');
       },
     }));
   }
@@ -958,6 +963,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.refreshStats();
     } catch (error) {
       if (this.isUnauthorized(error)) this.sessionExpired();
+      else if (!this.gameId && error instanceof HttpErrorResponse && error.status === 409)
+        this.restoreActiveGame();
       else this.helperError = 'helper.purchaseFailed';
     } finally {
       this.helperBusy = false;
@@ -1576,10 +1583,6 @@ export class AppComponent implements OnInit, OnDestroy {
     const userId = this.account?.id;
     if (!userId) return;
     try { localStorage.setItem(ACTIVE_GAME_KEY + userId, id); } catch { /* private mode */ }
-  }
-  private readActiveGame(userId: string): string | null {
-    try { return localStorage.getItem(ACTIVE_GAME_KEY + userId); }
-    catch { return null; }
   }
   private removeSavedGame(userId: string): void {
     try { localStorage.removeItem(ACTIVE_GAME_KEY + userId); } catch { /* private mode */ }
