@@ -55,6 +55,23 @@ on resume. Stop with Ctrl+C to get a partial ZIP.
 - Production confidence styles, real GPT-5.4 prompt, validation, one retry,
   and fallback. No changes to database state, game wallets, or users.
 
+## Comparing a new responder version with the original 30-case baseline
+
+The initial 30 GPT-5.4 consultations belong to the previous prompt version.
+**Do not resume that directory after code changes**, because a mixed report
+would not be a valid regression. The runner now fingerprints the actual helper
+code and refuses to reuse a plan from another version, including legacy plans
+without a fingerprint.
+
+To start a fresh comparable run with the same seed, run these commands from
+`backend/` after `git pull`:
+
+    python -m scripts.helper_live_regression --limit 30 --output-dir qa_reports/platinum_helper_live_v2
+    python -m scripts.helper_live_regression --execute --limit 30 --output-dir qa_reports/platinum_helper_live_v2
+
+The new ZIP will appear in `backend/qa_reports/platinum_helper_live_v2/`.
+Keep the original `platinum_helper_live/` directory for the before/after QA.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
