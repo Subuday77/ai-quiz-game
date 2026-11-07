@@ -95,6 +95,48 @@ naturalness in **all languages tested** before expanding to 150; the current
 30-case plan is mostly Russian, so two English examples cannot validate
 every supported language.
 
+## V4 — SMALL cross-language speech test (9 cases, not 30)
+
+V4 removes technical expressions from the model-facing instructions that
+caused *"answer label"* and repeated *"вариант"*. It preserves equal
+KNOW/MISTAKEN instructions, the ban on factual justifications, the selected
+answer's exact wording, and UI-language speech even when questions are in
+another language. No morphological engine or per-language case table.
+
+This is a separate, focused smoke test using **nine different approved
+PostgreSQL questions**, with the real production answer/distractor selection,
+speech model, validator, retry and fallback. The 3 × 3 planned matrix is:
+
+| Question language | UI language for KNOW | MISTAKEN | UNSURE |
+| --- | --- | --- | --- |
+| German | Russian | English | German |
+| Russian | German | English | Russian |
+| English | Russian | German | English |
+
+Run from the PyCharm terminal in \`backend/\`. First preview and freeze
+real scenarios for FREE; then explicitly authorize at most **nine model
+consultations and 18 total attempts**:
+
+    python -m scripts.helper_speech_smoke_v4
+    python -m scripts.helper_speech_smoke_v4 --execute
+
+No Angular or running uvicorn is needed. A populated PostgreSQL pool must
+contain at least three eligible questions in each language, including a
+plausible wrong choice for each MISTAKEN slot. If not, preview fails without
+inventing test questions; add more verified questions and rerun.
+
+The paid test has an estimated USD 0.10 ceiling, **not a guarantee of
+billing**, and records every draft and response; it won't modify stars,
+questions or game history. Keep the original V1–V3 run directories untouched.
+Output ZIP:
+
+    backend/qa_reports/platinum_helper_speech_v4_small/platinum_helper_live_results.zip
+
+Review naturalness and correctness manually: avoid stock formulas, accidental
+technical jargon, wrong-language replies and self-disqualifying explanations.
+The script reports token usage and guardrail rejection/fallback counts but
+does **not** certify semantic correctness from deterministic checks alone.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
