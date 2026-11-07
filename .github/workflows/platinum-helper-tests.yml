@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: platinum-helper-\${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -78,9 +82,11 @@ jobs:
       - name: Upgrade temporary PostgreSQL to latest schema
         working-directory: backend
         run: |
+          python -m alembic upgrade 0006_platinum_helper
+          python -m alembic current
           python -m alembic upgrade head
           python -m alembic current
       - name: Validate helper tables and previous star categories
         working-directory: backend
         run: |
-          python -c "from sqlalchemy import inspect; from persistence.database import engine; tables=set(inspect(engine()).get_table_names()); assert {'platinum_helper_purchases','platinum_helper_calls','wallet_transactions','game_runs'}.issubset(tables), tables; print('Schema ready')"
+          python -c "from sqlalchemy import inspect; from persistence.database import engine; db=inspect(engine()); tables=set(db.get_table_names()); assert {'platinum_helper_purchases','platinum_helper_calls','wallet_transactions','game_runs'}.issubset(tables), tables; assert 'bonus_wager_accepted' in {c['name'] for c in db.get_columns('game_runs')}; print('Schema ready')"
