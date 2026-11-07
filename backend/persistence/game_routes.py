@@ -30,6 +30,7 @@ from persistence.categories import (
 )
 from persistence.models import GameRun, Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
+from persistence.star_economy import lock_user_stars
 from persistence.bonus_wager import accept_bonus, decline_bonus
 from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
@@ -52,6 +53,20 @@ def _replacement_id(run_id: UUID, user_id: UUID) -> UUID:
 def _topics_ready(db: Session) -> bool:
     existing = set(db.scalars(select(Topic.slug)))
     return {category_slug(name) for name in QUESTION_CATEGORIES}.issubset(existing)
+
+
+def _active_run(db: Session, user_id: UUID) -> GameRun | None:
+    """Authoritative latest unfinished round, independent of browser storage.
+
+    Historic versions could leave several open runs. Select the most recent
+    rather than treating that legacy state as an error or hiding every run.
+    """
+    return db.scalar(
+        select(GameRun).where(
+            GameRun.user_id == user_id,
+            GameRun.status.in_(("main", "bonus")),
+        ).order_by(GameRun.started_at.desc(), GameRun.id.desc()).limit(1)
+    )
 
 
 class AnswerInput(BaseModel):
@@ -261,8 +276,26 @@ def new_game(payload: NewGame, request: Request,
         raise HTTPException(status_code=422, detail="Unsupported language")
     if not _topics_ready(db):
         raise HTTPException(status_code=503, detail="Topic catalog not initialized")
+    # Serialize creation with replacement and purchases. Returning a conflict
+    # rather than silently creating a second run protects already-paid perks.
+    lock_user_stars(db, user.id)
+    if _active_run(db, user.id) is not None:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Active game already exists")
     run = create_game(db, user_id=user.id, language=payload.language)
     return _game_info(db, run)
+
+
+@router.get("/active", response_model=GameInfo | None)
+def active_game(user: User = Depends(authenticated_user),
+                db: Session = Depends(get_db)):
+    """Return the signed-in user's unfinished round (or JSON null).
+
+    The database, not a client-controlled localStorage key, determines which
+    run is resumable. Includes pre-Q1 purchases and bonus decision state.
+    """
+    run = _active_run(db, user.id)
+    return _game_info(db, run) if run is not None else None
 
 
 @router.post("/{run_id}/replace", response_model=GameInfo, status_code=201)
