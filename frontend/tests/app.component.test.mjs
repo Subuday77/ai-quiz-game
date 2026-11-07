@@ -224,7 +224,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
   assert.equal(posts.length, 1);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   // Setup and category actions are under screen=setup, inaccessible on failure.
-  assert.match(template, /<div \*ngIf="screen === 'setup'" class="setup">/);
+  assert.match(template, /<div \*ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">/);
   assert.match(template, /<div class="question-actions" \*ngIf="canRetryQuestion && !duplicateExhausted">/);
 });
 
