@@ -708,6 +708,31 @@ class TaggedCriticTests(unittest.TestCase):
             )
             return reviewed
 
+    def test_question_competence_selected_during_existing_critic_call(self):
+        q = candidate()
+        review = {**self.verdict, "competence_area": "Physics"}
+        result = self.check(review, item=q)
+        self.assertEqual(result._competence_area, "Physics")
+        self.assertEqual(result._review_report["details"]["verdict"]["competence_area"], "Physics")
+        from platinum_helper.core import TOPICS
+        self.assertEqual(set(tagged_review_schema()["properties"]["competence_area"]["enum"]),
+                         set(TOPICS))
+        with self.assertRaises(ValidationError):
+            TaggedReview.model_validate({**review, "competence_area": "Electromagnetic"})
+
+    def test_specific_canonical_fact_corrects_broad_technology_classification(self):
+        q = candidate()
+        q.fact.subject = "electromagnetic-induction"
+        q.tags.entity = ["electromagnetic-induction"]
+        q.tags.concept = ["electromagnetism"]
+        with patch("tagging.review.event") as telemetry:
+            result = self.check({**self.verdict, "competence_area": "Technology"}, item=q)
+        self.assertEqual(result._competence_area, "Physics")
+        self.assertTrue(any(
+            call.args[0] == "question_competence_area_reconciled"
+            for call in telemetry.call_args_list
+        ))
+
     def test_mandatory_critic_runs_even_if_general_quality_off(self):
         self.check(self.verdict, QualityMode.OFF)
 
