@@ -168,6 +168,8 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             "correct_option_text": question.choices[question.correct_key],
             "topic": broad, "profession": purchase.profession,
             "name": purchase.profile["name"], "language": run.language,
+            "gender": purchase.profile.get("gender", ""),
+            "nationality": purchase.profile.get("nationality", ""),
         }
     except Exception:
         db.rollback()
