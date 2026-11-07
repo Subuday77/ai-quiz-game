@@ -11,6 +11,7 @@ from persistence.database import get_db
 from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import User
 from platinum_helper.core import PROFESSIONAL_SKILLS
+from platinum_helper.identity import generate_identity
 from platinum_helper.responder import HelperUnavailable, talk
 from platinum_helper.service import (
     buy, finish_call, get_purchase, card, reserve_call,
@@ -18,7 +19,6 @@ from platinum_helper.service import (
 
 router = APIRouter(prefix="/api/v2/games", tags=["Platinum Helper"])
 
-FIRST_NAMES = ("Alex", "Sam", "Max", "Mira", "Leo", "Nika", "Dana", "Robin", "Sasha", "Chris")
 
 
 class BuyInput(BaseModel):
@@ -58,14 +58,12 @@ def purchase(run_id: UUID, payload: BuyInput, request: Request,
              db: Session = Depends(get_db)):
     validate_origin(request)
     rng = random.SystemRandom()
-    name = rng.choice(FIRST_NAMES)
-    # The phrase is generated once and persisted with the purchased profile.
-    # No per-view re-generation or paid model call.
-    tagline = ""
+    identity = generate_identity(rng)
     try:
         return buy(db, user_id=user.id, run_id=run_id,
-                   profession=payload.profession, name=name, tagline=tagline,
-                   rng=rng)
+                   profession=payload.profession,
+                   name=identity["name"], gender=identity["gender"],
+                   nationality=identity["nationality"], rng=rng)
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
     except (ValueError, GameConflict) as exc:
