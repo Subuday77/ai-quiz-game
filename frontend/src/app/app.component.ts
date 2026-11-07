@@ -922,13 +922,44 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   restart(): void {
-    if (this.loading) return;
-    this.forgetActiveGame();
-    this.resetGameView();
-    // "Play again" is navigation, not proof that every older run is closed.
-    // Resolve an existing DB-owned unfinished round immediately instead of
-    // unexpectedly surfacing its purchased helper only after a later F5.
-    if (this.account) this.restoreActiveGame();
+    if (this.loading || !this.account || !this.gameId || !this.finishedPhase) return;
+    const terminalRun = this.gameId;
+    const accountId = this.account.id;
+    const language = this.selectedLanguage;
+    this.loading = true;
+    this.error = '';
+    // Play Again is an explicit request for a FRESH empty round. The server
+    // makes it idempotent and never discards another run's paid perks silently.
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + terminalRun + '/replay', { language },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => {
+      if (this.account?.id === accountId) this.loading = false;
+    })).subscribe({
+      next: game => {
+        if (this.account?.id !== accountId) return;
+        this.resetGameView();
+        this.gameId = game.game_id;
+        this.gameLanguage = game.language;
+        this.selectedLanguage = game.language;
+        this.rememberActiveGame(game.game_id);
+        this.loadCategoryInfo();
+        this.refreshSpendableStars();
+      },
+      error: (err: unknown) => {
+        if (this.account?.id !== accountId) return;
+        if (this.isUnauthorized(err)) {
+          this.sessionExpired();
+        } else if (err instanceof HttpErrorResponse && err.status === 409 &&
+                   err.error?.detail?.code === 'saved_paid_round') {
+          // A forgotten round still owns paid perks. Do not forfeit them:
+          // show the existing Resume or confirmed New Game choice.
+          this.resetGameView();
+          this.restoreActiveGame();
+        } else {
+          this.error = 'game.startFailed';
+        }
+      },
+    }));
   }
 
   loadHelperProfessions(): void {
