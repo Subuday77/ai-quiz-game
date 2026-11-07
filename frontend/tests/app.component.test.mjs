@@ -969,28 +969,61 @@ test('reload restores a paid helper before Q1 without buying another or allocati
 });
 
 
-test('Play Again after a loss checks DB for older active runs before another purchase', () => {
-  const { app, requests, posts, patches } = setup({ activeLookupPendingOnRetry: true });
+test('Play Again creates a fresh unstarted DB round and never buys a helper', () => {
+  const { app, requests, posts } = setup();
   const oldHelper = {
     id: 'old-helper', name: 'Old previous helper', profession: 'Historian',
     strong_topics: [], weak_topics: [], erudition: 50,
     consultations_remaining: 0, consultations_total: 3, refunded: false, price: 1,
   };
+  app.screen = 'done';
+  app.gameId = 'terminal-round';
+  app.finishedPhase = 'lost';
+  app.helperCard = oldHelper;
+  app.selectedLanguage = 'Russian';
+  app.restart();
+  assert.equal(app.screen, 'done'); // Keep results visible until server commits.
+  assert.equal(app.loading, true);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
+  assert.deepEqual(posts[0].body, { language: 'Russian' });
+  assert.equal(requests.length, 0);
+  succeed(posts[0], {
+    game_id: 'fresh-run', language: 'Russian', phase: 'main',
+    correct_main_answers: 0, main_question_index: 0, question_issued: false,
+    helper: null,
+  });
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.loading, false);
+  assert.equal(app.gameId, 'fresh-run');
+  assert.equal(app.gameQuestionIssued, false);
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(app.helperCard, null);
+  assert.equal(app.displayedHelperCard, null);
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  assert.equal(posts.length, 1); // No helper repurchase, no second run.
+  assert.equal(requests.length, 0); // Q1 is not generated until Start.
+});
+
+test('Play Again protects an older paid round and offers Resume or confirmed New', () => {
+  const { app, requests, posts, patches } = setup({ activeLookupPendingOnRetry: true });
   const recoveredHelper = {
     id: 'recovered-helper', name: 'Luiz Gustavo Pacheco', profession: 'Doctor',
     strong_topics: ['Medicine'], weak_topics: ['Geography'], erudition: 60,
     consultations_remaining: 3, consultations_total: 3, refunded: false, price: 1,
   };
   app.screen = 'done';
+  app.gameId = 'terminal-round';
   app.finishedPhase = 'lost';
-  app.helperCard = oldHelper;
   app.selectedLanguage = 'English';
   app.restart();
-  assert.equal(app.screen, 'setup');
-  assert.equal(app.helperCard, null);
+  assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
+  posts[0].subject.error(new HttpErrorResponse({
+    status: 409, error: { detail: { code: 'saved_paid_round',
+      game_id: 'older-open-game' } },
+  }));
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '/api/v2/games/active');
-  assert.equal(posts.length, 0); // No new game or helper purchase on replay.
   succeed(requests[0], {
     game_id: 'older-open-game', language: 'Russian', phase: 'main',
     correct_main_answers: 0, main_question_index: 0,
@@ -999,9 +1032,9 @@ test('Play Again after a loss checks DB for older active runs before another pur
   assert.equal(app.restoringGame, false);
   assert.equal(app.resumeAvailable, true);
   assert.equal(app.gameId, '');
-  assert.equal(app.selectedLanguage, 'Russian'); // Never show account default English.
+  assert.equal(app.selectedLanguage, 'Russian');
   assert.equal(app.canEditPregameLanguage, false);
-  assert.equal(app.displayedHelperCard, recoveredHelper); // From same DB run.
+  assert.equal(app.displayedHelperCard, recoveredHelper);
   app.changeQuestionLanguage('English');
   assert.equal(app.selectedLanguage, 'Russian');
   assert.equal(patches.length, 0);
@@ -1010,22 +1043,24 @@ test('Play Again after a loss checks DB for older active runs before another pur
   assert.equal(requests[1].url, '/api/v2/games/older-open-game/question');
   succeed(requests[1], { ...question, question: 'Какой океан?', number: 1 });
   assert.equal(app.selectedLanguage, 'Russian');
-  assert.equal(app.gameQuestionIssued, true);
-  assert.equal(posts.length, 0); // No extra platinum charge.
+  assert.equal(posts.length, 1); // No extra platinum charge.
 });
 
-test('Play Again after terminal result leaves clean setup if DB has no active run', () => {
-  const { app, requests, posts } = setup({ activeLookupPendingOnRetry: true });
+test('Play Again API failure keeps the terminal result and permits retry', () => {
+  const { app, posts } = setup();
   app.screen = 'done';
+  app.gameId = 'terminal-round';
   app.finishedPhase = 'lost';
   app.restart();
-  assert.equal(requests[0].url, '/api/v2/games/active');
-  succeed(requests[0], null);
-  assert.equal(app.screen, 'setup');
-  assert.equal(app.gameId, '');
-  assert.equal(app.resumeCandidate, null);
-  assert.equal(app.resumeAvailable, false);
-  assert.equal(posts.length, 0);
+  posts[0].subject.error(new Error('offline'));
+  assert.equal(app.screen, 'done');
+  assert.equal(app.gameId, 'terminal-round');
+  assert.equal(app.finishedPhase, 'lost');
+  assert.equal(app.loading, false);
+  assert.equal(app.error, 'game.startFailed');
+  app.restart();
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].url, posts[0].url);
 });
 
 test('saved game with issued question previews paid helper before Resume', () => {
