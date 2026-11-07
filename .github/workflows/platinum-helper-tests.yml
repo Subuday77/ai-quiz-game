@@ -8,6 +8,7 @@ on:
     branches:
       - feature/star-perks-shop
       - feature/platinum-helper-star-perks-integration
+      - feature/platinum-helper-54-guardrails
   workflow_dispatch:
 
 permissions:
