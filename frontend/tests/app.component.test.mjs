@@ -3,10 +3,11 @@
 import '@angular/compiler';
 import { createHook } from 'node:async_hooks';
 // Temporary CI timer provenance trace; remove after fixing the leaked handle.
+Error.stackTraceLimit = 28;
 const liveTestTimers = new Map();
 const timerHook = createHook({
-  init(id, type) {
-    if (type === 'Timeout') liveTestTimers.set(id, new Error().stack);
+  init(id, type, trigger, resource) {
+    if (type === 'Timeout') liveTestTimers.set(id, { resource, stack: new Error().stack });
   },
   destroy(id) { liveTestTimers.delete(id); },
 });
@@ -32,7 +33,9 @@ after(() => {
   // CI diagnostic: all assertions can pass while an event-loop handle remains.
   // This is deliberately temporary until the owning resource is identified.
   console.error('CI teardown resource types:', process.getActiveResourcesInfo());
-  console.error('CI timer origins:', [...liveTestTimers.values()].slice(-8).join('\n---\n'));
+  console.error('CI live timer origins:', [...liveTestTimers.values()]
+    .filter(({ resource }) => !resource._destroyed && resource.hasRef?.())
+    .map(({ stack }) => stack).join('\n---\n'));
   timerHook.disable();
 });
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
