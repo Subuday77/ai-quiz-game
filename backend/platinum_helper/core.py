@@ -4,6 +4,7 @@ A purchased helper profile is generated once and must be persisted by its caller
 Consultation attempts are identified by a stable idempotency key so HTTP retries
 cannot reroll the outcome or spend multiple calls.
 """
+import hashlib
 from dataclasses import dataclass, field
 from random import Random
 from typing import Literal
@@ -93,6 +94,19 @@ OUTCOME_WEIGHTS = {
     "LOW": (5, 15, 80),
 }
 MAX_CONSULTATIONS = 3
+
+PresentationStyle = Literal["DIRECT", "PERSONAL", "CASUAL"]
+
+
+def choose_presentation_style(call_id: UUID) -> PresentationStyle:
+    """Stable, correctness-independent verbal frame; no extra DB column.
+
+    Uses a different salted hash from delivery_style, based solely on the
+    random persisted consultation UUID. Retries cannot reroll either style.
+    """
+    digest = hashlib.sha256(b"helper-speech-presentation-v1:" + call_id.bytes).digest()
+    return ("DIRECT", "PERSONAL", "CASUAL")[digest[0] % 3]
+
 
 DeliveryStyle = Literal["CONFIDENT", "TENTATIVE"]
 
