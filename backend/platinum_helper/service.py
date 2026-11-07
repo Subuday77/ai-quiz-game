@@ -19,6 +19,11 @@ from platinum_helper.core import (
     CATEGORY_TOPICS, PROFESSIONAL_SKILLS, MAX_CONSULTATIONS,
     choose_delivery_style, choose_outcome, generate_profile,
 )
+from platinum_helper.debug import (
+    purchased as debug_purchased,
+    reserved as debug_reserved,
+    finished as debug_finished,
+)
 
 
 def available_platinum(db: Session, user_id: UUID) -> int:
@@ -90,6 +95,7 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
             amount=-price, reason="star/platinum/helper-purchase",
         ))
         db.commit()
+        debug_purchased(purchase)
         return card(purchase)
     except Exception:
         db.rollback()
@@ -142,6 +148,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         broad = CATEGORY_TOPICS.get(topic.labels.get("en", "") if topic else "")
         if broad is None:
             raise GameConflict("No helper competence mapping for the question")
+        reused_outcome = old is not None
         if old is None:
             rng = rng or Random()
             # Existing purchased characters predate the revised category map.
@@ -161,6 +168,10 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             old.created_at = datetime.now(timezone.utc)
         # Persist before releasing the lock so a client retry cannot reroll.
         db.commit()
+        debug_reserved(
+            purchase, old, question, topic.labels.get("en", "") if topic else "",
+            run_id, reused=reused_outcome,
+        )
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
             "outcome": old.outcome, "letter": old.selected_key,
@@ -202,11 +213,13 @@ def finish_call(db: Session, *, user_id: UUID, run_id: UUID,
                 or purchase.consultations_used >= MAX_CONSULTATIONS):
             call.status = "failed"
             db.commit()
+            debug_finished(db, purchase, call, reply=reply, charged=False)
             return None
         call.status = "completed"
         call.response_text = reply
         purchase.consultations_used += 1
         db.commit()
+        debug_finished(db, purchase, call, reply=reply, charged=True)
         return {"text": reply, "helper": card(purchase)}
     except Exception:
         db.rollback()
