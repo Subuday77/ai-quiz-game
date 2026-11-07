@@ -112,6 +112,8 @@ class Question(Base):
     generator_model: Mapped[str] = mapped_column(String(130), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
     schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    # Reviewed knowledge domain for Platinum Helper; NULL for old questions.
+    competence_area: Mapped[str | None] = mapped_column(String(40), nullable=True)
     generation_request_id: Mapped[str | None] = mapped_column(String(100))
     created_at = datetime_column()
     __table_args__ = (
