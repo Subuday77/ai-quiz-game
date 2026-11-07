@@ -132,6 +132,7 @@ export class AppComponent implements OnInit, OnDestroy {
   ];
 
   helperCard: HelperCard | null = null;
+  showAbandonConfirm = false;
   // A saved but not yet resumed round may own a paid helper. Show its card
   // without activating that round or allowing consultations before Resume.
   get displayedHelperCard(): HelperCard | null {
@@ -289,9 +290,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   helperProfessionLabel(helper: HelperCard): string {
-    const prefix = helper.gender === 'female' && this.locale.code !== 'en'
-      ? 'helper.professionFemale.' : 'helper.profession.';
-    return this.locale.t(prefix + helper.profession);
+    return this.locale.t('helper.profession.' + helper.profession);
   }
 
   helperTagline(helper: HelperCard): string {
@@ -644,16 +643,55 @@ export class AppComponent implements OnInit, OnDestroy {
       this.loadQuestion();
       return;
     }
-    this.createGame(false);
+    this.createGame(false, true);
   }
 
   startFreshGame(): void {
-    // Keep the saved round intact until the new one is successfully created.
-    // If POST /games fails the player can still choose Resume.
-    if (!this.resumeAvailable || !this.account || this.loading || this.perksBusy ||
-        this.configLoading || this.authLoading || this.authBusy || this.restoringGame ||
-        this.categoryLoading || this.languageSaving) return;
-    this.createGame(false);
+    this.requestNewGame();
+  }
+
+  requestNewGame(): void {
+    if (!this.account || !(this.gameId || this.resumeCandidate) ||
+        this.loading || this.perksBusy || this.helperBusy || this.configLoading ||
+        this.authLoading || this.authBusy || this.restoringGame ||
+        this.categoryLoading || this.languageSaving || this.showAbandonConfirm) return;
+    this.showAbandonConfirm = true;
+  }
+
+  cancelNewGame(): void {
+    if (!this.loading) this.showAbandonConfirm = false;
+  }
+
+  confirmNewGame(): void {
+    if (!this.showAbandonConfirm || !this.account || this.loading ||
+        this.perksBusy || this.helperBusy || this.restoringGame) return;
+    const oldId = this.gameId || this.resumeCandidate?.game_id;
+    if (!oldId) return;
+    const accountId = this.account.id;
+    const language = this.selectedLanguage;
+    this.showAbandonConfirm = false;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + oldId + '/replace', { language },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => { this.loading = false; }))
+      .subscribe({
+        next: (game) => {
+          if (this.account?.id !== accountId) return;
+          this.resetGameView();
+          this.gameId = game.game_id;
+          this.gameLanguage = game.language;
+          this.selectedLanguage = game.language;
+          this.rememberActiveGame(game.game_id);
+          this.loadCategoryInfo();
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.account?.id !== accountId) return;
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.error = 'game.replaceFailed';
+        },
+      }));
   }
 
   openCategoryExclusions(): void {
@@ -664,9 +702,9 @@ export class AppComponent implements OnInit, OnDestroy {
       void this.openAuthDialog('login');
       return;
     }
-    if (!this.gameId || this.resumeAvailable) {
-      // Allocate an empty game before taking payment. No question is issued
-      // until the player explicitly presses Start questions.
+    if (this.resumeAvailable || this.resumeCandidate || this.gameQuestionIssued) return;
+    if (!this.gameId) {
+      // Allocate an empty run; the player can still hire a helper afterwards.
       this.createGame(true);
       return;
     }
@@ -675,7 +713,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.showCategoryExclusions && !this.categoryInfo) this.loadCategoryInfo();
   }
 
-  private createGame(forExclusions: boolean): void {
+  private createGame(forExclusions: boolean, beginQuestions = false): void {
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
@@ -714,8 +752,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.screen = 'setup';
         this.showCategoryExclusions = forExclusions;
-        if (forExclusions) this.loadCategoryInfo();
-        else this.loadQuestion();
+        if (forExclusions || !beginQuestions) this.loadCategoryInfo();
+        if (beginQuestions) this.loadQuestion();
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -907,10 +945,13 @@ export class AppComponent implements OnInit, OnDestroy {
       }
       this.helperCard = await firstValueFrom(this.http.post<HelperCard>(
         GAME_API + '/' + this.gameId + '/helper/purchase',
-        { profession: this.selectedHelperProfession || null },
+        { profession: this.selectedHelperProfession || null, ui_language: this.locale.code },
       ).pipe(timeout(12000)));
       this.helperHireOpen = false;
       this.helperChooseProfession = false;
+      // The purchase pre-allocates a run. Category exclusion must remain
+      // available immediately, without requiring a page reload.
+      this.loadCategoryInfo();
       this.refreshStats();
     } catch (error) {
       if (this.isUnauthorized(error)) this.sessionExpired();
@@ -1404,6 +1445,13 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (run) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
+        if (run.phase === 'abandoned' && run.replacement_game_id) {
+          // The replace POST may have committed before a network timeout/F5.
+          // Follow the idempotent successor instead of losing the new setup.
+          this.rememberActiveGame(run.replacement_game_id);
+          this.restoreActiveGame();
+          return;
+        }
         if (run.phase !== 'main' && run.phase !== 'bonus') {
           this.removeSavedGame(accountId);
           return;
@@ -1492,6 +1540,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.feedback = null;
     this.finishedPhase = null;
     this.helperCard = null;
+    this.showAbandonConfirm = false;
     this.helperReply = '';
     this.helperError = '';
     this.helperCallKey = '';
