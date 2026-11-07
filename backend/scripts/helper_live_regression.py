@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 
 from persistence.database import engine
 from persistence.models import Question, QuestionReview, Topic
-from platinum_helper.core import CATEGORY_TOPICS, PROFESSIONAL_SKILLS, choose_delivery_style, generate_profile
+from platinum_helper.core import CATEGORY_TOPICS, PROFESSIONAL_SKILLS, choose_delivery_style, choose_presentation_style, generate_profile
 from platinum_helper.responder import HelperUnavailable, _DENIAL, _REASK, _mentions, _validate, talk
 from platinum_helper.selection import best_visible_wrong
 from platinum_helper.settings import HelperSettings
@@ -64,7 +64,7 @@ REVIEW_FIELDS = (
 def code_fingerprint() -> str:
     """Pin responder/selection/settings revisions for reproducible paid QA."""
     digest = hashlib.sha256()
-    for name in ("responder.py", "selection.py", "settings.py"):
+    for name in ("responder.py", "selection.py", "settings.py", "core.py"):
         path = BACKEND / "platinum_helper" / name
         digest.update(name.encode("utf-8"))
         digest.update(path.read_bytes())
@@ -176,6 +176,9 @@ def scenario(question: dict, mode: str, index: int, seed: int) -> dict | None:
         "delivery_style": choose_delivery_style(
             uuid5(NAMESPACE_URL, f"platinum-qa:{seed}:{index}")
         ),
+        "presentation_style": choose_presentation_style(
+            uuid5(NAMESPACE_URL, f"platinum-qa:{seed}:{index}")
+        ),
     }
 
 
@@ -242,6 +245,7 @@ def responder_data(s: dict) -> dict:
         "choices": s["choices"],
         "correct_option_text": s["choices"][s["correct_key"]],
         "topic": s["topic"], "delivery_style": s["delivery_style"],
+        "presentation_style": s.get("presentation_style", "DIRECT"),
     }
 
 
@@ -368,6 +372,7 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
             "selected_key": s["selected_key"] or "",
             "selected_answer": s["choices"][s["selected_key"]] if s["selected_key"] else "",
             "delivery_style": s["delivery_style"],
+            "presentation_style": s.get("presentation_style", "DIRECT"),
             **result,
         }
         table.append(row)
