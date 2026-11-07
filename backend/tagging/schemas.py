@@ -2,6 +2,7 @@
 from copy import deepcopy
 from question_transport_schema import quiz_question_schema
 from quality_schema_v3 import quality_review_v3_schema
+from platinum_helper.core import TOPICS
 
 TAGGED_QUESTION_SCHEMA_NAME = "quiz_question_tagged_v3"
 TAGGED_REVIEW_SCHEMA_NAME = "quiz_tagged_review_v5"
@@ -75,10 +76,11 @@ def tagged_review_schema() -> dict:
         "duplicate_match": {"type": "string"},
         "premise": {"type": "string", "enum": ["valid", "invalid", "uncertain"]},
         "option_assessments": deepcopy(_OPTION_ASSESSMENTS),
+        "competence_area": {"type": "string", "enum": list(TOPICS)},
     })
     schema["required"] += [
         "tags_valid", "fact_valid", "semantic_duplicate", "duplicate_match",
-        "premise", "option_assessments",
+        "premise", "option_assessments", "competence_area",
     ]
     return schema
 
