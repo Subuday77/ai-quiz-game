@@ -1,11 +1,13 @@
 """Stale-game cleanup never deletes history or silently forfeits paid perks."""
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from persistence.cleanup_stale_rounds import cleanup
+from persistence.cleanup_stale_rounds import cleanup, load_backend_environment
 from persistence.models import (
     Base, GameRun, PlatinumHelperPurchase, User, WalletTransaction,
 )
@@ -39,6 +41,13 @@ class CleanupStaleRoundsTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         self.engine.dispose()
+
+    def test_cli_loads_backend_dotenv_before_database_connection(self):
+        from persistence import cleanup_stale_rounds as cli
+        expected = Path(cli.__file__).resolve().parents[1] / ".env"
+        with patch("persistence.cleanup_stale_rounds.load_dotenv") as mocked:
+            load_backend_environment()
+        mocked.assert_called_once_with(expected, override=False)
 
     def test_dry_run_no_mutation_and_apply_preserves_paid_round(self):
         result = cleanup(self.db, username="Alice", older_than_days=2, apply=False)
