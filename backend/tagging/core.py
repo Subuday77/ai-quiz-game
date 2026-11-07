@@ -78,12 +78,38 @@ def _exact_question(value: str) -> str:
     return normalized.rstrip("?!").strip()
 
 
+# Explicit semantic aliases for facts confirmed to be equivalent in QA.
+# Never merge all facts about an organ: left-ventricle wall thickness and
+# the heart's role in circulation must remain independently playable.
+_FACT_EQUIVALENCE = {
+    ("human-heart", "pumps", "blood"): ("human-heart", "circulation-pump"),
+    ("heart", "function", "pumps-blood-through-blood-vessels"): ("human-heart", "circulation-pump"),
+    ("human-heart", "primary-function", "pump-blood-through-the-body"): ("human-heart", "circulation-pump"),
+}
+
+
+def semantic_fact_anchor(subject: str, relation: str, object: str) -> tuple[str, str] | None:
+    """Conservative alias normalization for previously observed fact variants.
+
+    Unknown triples retain the existing tag/relation scoring and independent
+    semantic critic. An expanded alias set requires a documented regression.
+    """
+    return _FACT_EQUIVALENCE.get((subject, relation, object))
+
+
 def similarity(candidate: TaggedQuestion, previous: HistoryItem) -> Similarity:
     # Preserve historical diagnostic priority for a matching canonical key,
     # but never trust an old one-to-many author hash if it names OTHER work.
     if candidate.fact.key == previous.fact_key and creator_work_anchor(
         candidate.fact.subject, candidate.fact.relation, candidate.fact.object
     ) == creator_work_anchor(previous.subject, previous.relation, previous.object):
+        return Similarity(100, "same_fact", previous.question_id)
+    candidate_anchor = semantic_fact_anchor(
+        candidate.fact.subject, candidate.fact.relation, candidate.fact.object
+    )
+    if candidate_anchor is not None and candidate_anchor == semantic_fact_anchor(
+        previous.subject, previous.relation, previous.object
+    ):
         return Similarity(100, "same_fact", previous.question_id)
     # Verbatim knowledge remains a duplicate regardless of old or new tags.
     if _exact_question(candidate.question) == _exact_question(previous.question_text):
