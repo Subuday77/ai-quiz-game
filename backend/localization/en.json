@@ -262,5 +262,6 @@
   "game.abandonWarning": "The current round will be closed. All stars you have already earned will remain in your wallet. Your helper, excluded categories, and other purchased perks will not carry over.",
   "game.abandonCost": "Spent stars will not be refunded.",
   "game.startNewConfirm": "Start a new game",
-  "game.replaceFailed": "Could not confirm the new game. Your old round remains available unless the server already completed the change. Retry or reload the page to recover the saved round."
+  "game.replaceFailed": "Could not confirm the new game. Your old round remains available unless the server already completed the change. Retry or reload the page to recover the saved round.",
+  "game.retryRestore": "Retry restoring my saved game"
 }
