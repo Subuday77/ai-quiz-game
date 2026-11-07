@@ -17,6 +17,7 @@ and fallback are used unchanged. These tests do not replace browser QA.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import csv
 import json
 import os
@@ -58,6 +59,16 @@ REVIEW_FIELDS = (
     "invented_fact_0_1", "implicit_answer_leak_0_1",
     "self_contradiction_0_1", "style_natural_1_5", "notes",
 )
+
+
+def code_fingerprint() -> str:
+    """Pin responder/selection/settings revisions for reproducible paid QA."""
+    digest = hashlib.sha256()
+    for name in ("responder.py", "selection.py", "settings.py"):
+        path = BACKEND / "platinum_helper" / name
+        digest.update(name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def save_json(path: Path, value: object) -> None:
@@ -378,6 +389,7 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
     summary = {
         "version": PLAN_VERSION, "model": plan["model"], "target": plan["target"],
         "helper_settings": plan.get("helper_settings"),
+        "code_fingerprint": plan.get("code_fingerprint"),
         "completed": len(results), "remaining": plan["target"] - len(results),
         "statuses": dict(Counter(r.get("status") for r in results.values())),
         "planned_effective_outcomes": dict(Counter(s["effective_outcome"] for s in plan["scenarios"])),
@@ -441,6 +453,9 @@ def main(argv: list[str] | None = None) -> int:
         if (plan.get("version"), plan.get("seed"), plan.get("target"), plan.get("model")) != (
                 PLAN_VERSION, args.seed, args.target, args.model):
             raise SystemExit("Plan settings changed. Use a new --output-dir.")
+        if plan.get("code_fingerprint") != code_fingerprint():
+            raise SystemExit("Platinum Helper code changed since this QA plan was saved. "
+                             "Use a NEW --output-dir; never mix versions in one run.")
         if (plan.get("helper_settings") is not None
                 and plan["helper_settings"] != asdict(helper_settings)):
             raise SystemExit("Platinum Helper settings changed since the plan was saved. "
@@ -449,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
         questions = approved_questions()
         plan = build_plan(questions, args.target, args.seed, args.model)
         plan["helper_settings"] = asdict(helper_settings)
+        plan["code_fingerprint"] = code_fingerprint()
         save_json(plan_path, plan)
         print(f"Saved {args.target} cases from {len(questions)} approved questions.")
     if not args.execute:
