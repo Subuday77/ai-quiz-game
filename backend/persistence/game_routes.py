@@ -869,9 +869,12 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
         context = generator_context(history, category_slug(chosen))
         db.rollback()
         candidate = generate_valid_question(
-            difficulty, language, chosen, tag_history=history, tag_context=context)
+            difficulty, language, chosen, tag_history=history, tag_context=context,
+            question_number=attempt.number)
     else:
-        candidate = generate_valid_question(difficulty, language, chosen)
+        candidate = generate_valid_question(
+            difficulty, language, chosen, question_number=attempt.number,
+        )
     provider, model = _generation_metadata()
     try:
         new_attempt, stored = offer_question(
