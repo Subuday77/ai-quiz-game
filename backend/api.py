@@ -159,10 +159,11 @@ from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
                             tag_history=None, tag_context=None,
-                            too_easy_reserve: list | None = None) -> QuizQuestion:
+                            too_easy_reserve: list | None = None,
+                            question_number: int | None = None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
-        policy = GenerationPolicy.from_env()
+        policy = GenerationPolicy.from_env(question_number=question_number)
         quality_mode = quality_mode_from_env()
         leak_mode = local_leak_mode_from_env()
     except (ValueError, QualityConfigurationError):
@@ -204,10 +205,13 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
           critic_min_remaining_ms=critic_reserve * 1000, sdk_max_retries=0)
     for attempt in range(1, policy.max_attempts + 1):
         remaining = deadline - perf_counter()
-        if remaining <= critic_reserve:
+        # An AI request with a near-zero timeout only wastes a paid attempt.
+        # Require enough time to generate a question AND still review it.
+        generator_minimum = min(policy.provider_timeout_seconds, 5.0)
+        if remaining <= critic_reserve + generator_minimum:
             event("generation_review_budget_insufficient", stage="before_generation",
                   remaining_ms=max(0, round(remaining * 1000)),
-                  minimum_ms=round(critic_reserve * 1000))
+                  minimum_ms=round((critic_reserve + generator_minimum) * 1000))
             raise failure(503, "AI provider unavailable")
         token = generation_attempt.set(attempt)
         timeout_token = provider_timeout.set(min(
@@ -428,9 +432,9 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                 event("generation_retry_suppressed", reason="retry_after_exceeds_limit")
                 raise HTTPException(status_code=failure_status, detail=detail)
             delay = max(delay, delay_hint)
-        if delay + critic_reserve >= deadline - perf_counter():
+        if delay + critic_reserve + generator_minimum >= deadline - perf_counter():
             event("generation_review_budget_insufficient", stage="before_retry",
-                  minimum_ms=round(critic_reserve * 1000))
+                  minimum_ms=round((critic_reserve + generator_minimum) * 1000))
             raise failure(503, "AI provider unavailable")
         event("generation_retry_scheduled", failed_attempt=attempt, delay_ms=delay * 1000)
         sleep(delay)
