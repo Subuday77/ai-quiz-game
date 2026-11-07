@@ -229,18 +229,24 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get canEditPregameLanguage(): boolean {
-    // Prepaid helper/category configuration creates a DB game before Q1.
-    // Language is locked by the first issued question, not by gameId.
-    return this.screen === 'setup' && (
-      !this.gameId || this.resumeAvailable || !this.gameQuestionIssued
-    );
+    // An already-issued question fixes the saved round's language. While the
+    // user decides Resume vs New, show that actual language read-only; after
+    // confirming New, the fresh unstarted run allows changes again.
+    return this.screen === 'setup' && !this.resumeAvailable &&
+      !this.resumeCandidate && (!this.gameId || !this.gameQuestionIssued);
   }
 
   // An excluded-category payment already allocated a game. Update its
   // language in PostgreSQL, not just the dropdown, before Q1 is offered.
   changeQuestionLanguage(language: string): void {
     if (!this.languages.includes(language)) return;
-    if (!this.gameId || this.resumeAvailable) {
+    // Defense in depth: programmatic changes must not make the saved game
+    // appear to have another language than its persisted Question rows.
+    if (this.resumeAvailable || this.resumeCandidate) {
+      this.selectedLanguage = this.resumeCandidate?.language || this.gameLanguage;
+      return;
+    }
+    if (!this.gameId) {
       this.selectedLanguage = language;
       return;
     }
@@ -919,6 +925,10 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.loading) return;
     this.forgetActiveGame();
     this.resetGameView();
+    // "Play again" is navigation, not proof that every older run is closed.
+    // Resolve an existing DB-owned unfinished round immediately instead of
+    // unexpectedly surfacing its purchased helper only after a later F5.
+    if (this.account) this.restoreActiveGame();
   }
 
   loadHelperProfessions(): void {
@@ -1488,11 +1498,13 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         // Once Q1 has been issued, leave Resume / Start New as an explicit
         // choice; the saved helper is still visible in the setup preview.
+        // Clear any old helper/game UI so the card belongs to this run only.
+        this.resetGameView();
         this.resumeCandidate = run;
         this.resumeRunLanguage = run.language;
+        this.gameLanguage = run.language;
+        this.selectedLanguage = run.language;
         this.resumeAvailable = true;
-        this.current = null;
-        this.feedback = null;
         this.screen = 'setup';
       },
       error: (err: unknown) => {
