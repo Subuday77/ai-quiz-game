@@ -51,8 +51,8 @@ class MultilingualSpeechTests(unittest.TestCase):
         names = ("Афродита", "Антон Чехов", "Словения", "Литва", "Brassica napus")
         for name in names:
             for style, expected_prefix in (
-                ("CONFIDENT", "Мой ответ — «"),
-                ("TENTATIVE", "Скорее вариант «"),
+                ("CONFIDENT", "Мой ответ: «"),
+                ("TENTATIVE", "Пожалуй, «"),
             ):
                 with self.subTest(name=name, style=style):
                     data = scenario(answer=name, style=style)
@@ -64,7 +64,7 @@ class MultilingualSpeechTests(unittest.TestCase):
 
     def test_same_answer_is_embeddable_in_idiomatic_languages(self):
         examples = (
-            ("Russian", "Афродита", "Мой ответ — «Афродита»."),
+            ("Russian", "Афродита", "Мой ответ: «Афродита»."),
             ("English", "Aphrodite", "I'd go with the option \"Aphrodite\"."),
             ("German", "Aphrodite", "Mein Tipp ist die Option „Aphrodite“."),
             ("French", "Aphrodite", "Je pense à l’option «Aphrodite»."),
