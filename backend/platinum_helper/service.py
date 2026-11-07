@@ -217,6 +217,10 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         else:
             old.status = "pending"
             old.created_at = datetime.now(timezone.utc)
+        # Read the same purchase's already-completed speech while the
+        # reservation transaction is open; do not keep a new DB read
+        # transaction active while the model generates its reply.
+        speech_history = _recent_speech_history(db, purchase.id)
         # Persist before releasing the lock so a client retry cannot reroll.
         db.commit()
         debug_reserved(
@@ -234,7 +238,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             "name": purchase.profile["name"], "language": run.language,
             "gender": purchase.profile.get("gender", ""),
             "nationality": purchase.profile.get("nationality", ""),
-            "speech_history": _recent_speech_history(db, purchase.id),
+            "speech_history": speech_history,
         }
     except Exception:
         db.rollback()
