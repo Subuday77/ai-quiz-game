@@ -37,8 +37,10 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         return (
             persona +
             "Your friend is ALREADY looking at the question. You cannot recall "
-            "the answer. Admit simply and naturally that you cannot advise. "
-            "Do not ask for the question, hint at an answer, name an option, "
+            "the answer. Admit naturally that you cannot advise; vary "
+            "how you say so rather than repeating a stock apology or always "
+            "starting with 'I' or 'honestly'. Do not invent a reason for "
+            "forgetting. Do not ask for the question, hint at an answer, name an option, "
             "suggest guessing, or invent an explanation. "
             "Output exactly one line: SPEECH: your response.",
             "Question already visible to your friend: " + data["question_text"],
@@ -50,16 +52,26 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     # selected option differs; never expose the actual correct key.
     instructions = (
         persona +
-        "You have settled on the selected option shown below. Recommend that "
-        "option clearly, naming it exactly as supplied. The selection is a "
-        "friendly hunch, not an explanation of the topic. Do NOT add facts, "
-        "attributes, background, domain associations, historical context, "
-        "definitions or reasons about the answer, even if they are true. "
-        "An extra accurate fact can disprove your selection and spoil the game. "
+        "You have settled on the selected option shown below. Clearly "
+        "recommend its exact name, but treat the name as an UNCHANGED label "
+        "from the game, not a noun that must fit after your chosen verb. "
+        "Write a grammatically natural sentence AROUND the label in the game "
+        "language. When a verb or preposition would require changing the "
+        "label's form, rephrase using an option/answer label construction "
+        "instead; do not decline, conjugate, translate or alter the label. "
+        "This is general advice: follow the grammar of the requested language, "
+        "without assuming that every language has noun cases. "
+        "Speak as a friend giving a hunch, not an AI reporting confidence. "
+        "Avoid mechanical formulas such as 'I would confidently choose' and "
+        "their equivalents; don't always begin with 'I'. Vary the natural "
+        "sentence structure, sometimes direct, sometimes personal, while "
+        "keeping the assigned confidence style. "
+        "Do NOT add facts, attributes, background, domain associations, "
+        "historical context, definitions or reasons about the answer, even "
+        "if they are true. An accurate extra fact may disprove your selection. "
         "Do not contrast options or describe why any choice fits or fails. "
-        "Use a natural first-person recommendation with roughly 6 to 16 words "
-        "in the requested game language, with varied conversational phrasing. "
-        "Give both confident and tentative recommendations comparable detail. "
+        "Use a single conversational sentence, usually 5 to 16 words, "
+        "with similar detail for both confidence styles. "
     )
     style = data["delivery_style"]
     if style == "CONFIDENT":
@@ -76,8 +88,9 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
             f"Use ONLY {data['language']}. "
             "Write a single plain sentence: recommend the exact selected "
             "answer with NO factual justification, extra claim, argument "
-            "or comparison. "
-            "Preserve your assigned confidence style. "
+            "or comparison. Use an idiomatic option-label construction, "
+            "without changing the selected text or forcing it into a "
+            "case-dependent verb phrase. Preserve your assigned confidence style. "
         )
     instructions += (
         "Output exactly two lines: KEY: X (the selected letter), then "
@@ -215,7 +228,7 @@ def _validate(raw: str, data: dict) -> str | None:
 # Safe, deterministic last-resort wording after at least one model reply was
 # received but could not pass validation. No second model or checker needed.
 _FALLBACK = {
-    "russian": ("Бери {answer}.", "Мне кажется, {answer}.", "Не уверен, не хочу тебя запутать."),
+    "russian": ("Мой ответ — «{answer}».", "Мне кажется, вариант «{answer}».", "Не уверен, не хочу тебя запутать."),
     "english": ("Go with {answer}.", "I'd choose {answer}.", "I'm not sure enough to advise."),
     "german": ("Nimm {answer}.", "Ich würde {answer} nehmen.", "Ich bin mir nicht sicher."),
     "french": ("Choisis {answer}.", "Je choisirais {answer}.", "Je ne suis pas sûr de la réponse."),
