@@ -29,10 +29,13 @@ def best_visible_wrong(
 ) -> str | None:
     """Return a plausible, currently visible wrong key, or abstain.
 
-    Absent legacy scores use the existing neutral 50 estimate. Corrupt
-    estimates safely abstain rather than triggering a fresh AI evaluation.
+    Unlike the bronze hint, Platinum must abstain if a legacy question has
+    no complete scoring map. It would otherwise recommend random nonsense.
+    Corrupt scores also abstain rather than triggering new AI evaluation.
     A tie is resolved by the caller's RNG; the result is then frozen in DB.
     """
+    if not isinstance(scores, Mapping) or any(key not in scores for key in "ABCD"):
+        return None
     try:
         estimates = normalized_plausibility(correct_key, scores)
     except (PerkUnavailable, TypeError, ValueError):
