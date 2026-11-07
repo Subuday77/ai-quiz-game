@@ -77,8 +77,11 @@ class PlatinumHelperTests(unittest.TestCase):
         self.assertEqual(p.name, "Jean Dupont")
         self.assertEqual(p.gender, "male")
         self.assertEqual(p.nationality, "France")
-        self.assertIn(p.tagline_high, TOPICS)
-        self.assertIn(p.tagline_low, TOPICS)
+        self.assertIn(p.tagline_high, p.featured_high)
+        if p.featured_low:
+            self.assertIn(p.tagline_low, p.featured_low)
+        else:
+            self.assertEqual(p.tagline_low, "")
         self.assertIn(p.tagline_id, (1, 2, 3, 4))
         self.assertFalse(p.tagline, "Do not freeze an English template in the database")
 
