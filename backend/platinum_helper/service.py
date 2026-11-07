@@ -28,6 +28,7 @@ from platinum_helper.debug import (
 )
 from platinum_helper.selection import best_visible_wrong
 from platinum_helper.competence import competence_for_question
+from platinum_helper.speech_history import HISTORY_LIMIT, anonymize_reply
 
 
 
@@ -105,6 +106,31 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
     except Exception:
         db.rollback()
         raise
+
+
+def _recent_speech_history(db: Session, purchase_id: UUID) -> list[str]:
+    """Only earlier completed calls of THIS purchased character in THIS run.
+
+    Purchase IDs already scope calls to one run, and only completed responses
+    are trusted; pending/failed calls must not influence a later consultation.
+    Sort oldest-to-newest in the model prompt, capped at two short utterances.
+    """
+    rows = db.execute(
+        select(PlatinumHelperCall.response_text, PlatinumHelperCall.selected_key,
+               Question.choices)
+        .join(QuestionAttempt,
+              PlatinumHelperCall.question_attempt_id == QuestionAttempt.id)
+        .join(Question, QuestionAttempt.question_id == Question.id)
+        .where(PlatinumHelperCall.purchase_id == purchase_id,
+               PlatinumHelperCall.status == "completed")
+        .order_by(PlatinumHelperCall.created_at.desc(), PlatinumHelperCall.id.desc())
+        .limit(HISTORY_LIMIT)
+    ).all()
+    snippets = [
+        anonymize_reply(speech, choices, key)
+        for speech, key, choices in reversed(rows)
+    ]
+    return [snippet for snippet in snippets if snippet is not None]
 
 
 def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
@@ -208,6 +234,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             "name": purchase.profile["name"], "language": run.language,
             "gender": purchase.profile.get("gender", ""),
             "nationality": purchase.profile.get("nationality", ""),
+            "speech_history": _recent_speech_history(db, purchase.id),
         }
     except Exception:
         db.rollback()
