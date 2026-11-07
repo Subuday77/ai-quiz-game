@@ -129,6 +129,53 @@ class SpeechFrameTests(unittest.TestCase):
             "KEY: B\nSPEECH: По-моему, ANDRÉ-MARIE AMPÈRE.", d
         ), "По-моему, ANDRÉ-MARIE AMPÈRE.")
 
+    def test_em_dash_is_rejected_except_inside_verbatim_answer_name(self):
+        plain = scenario(answer="Quecksilber", language="German", speech_language="ru")
+        instruction, _ = _prompt(plain)
+        self.assertIn("Unicode em dash (U+2014)", instruction)
+        self.assertIsNone(_validate(
+            "KEY: B\\nSPEECH: Выбирай Quecksilber — мой совет.", plain
+        ))
+        self.assertIsNone(_validate(
+            "KEY: B\\nSPEECH: Quecksilber — хорошая ставка.", plain
+        ))
+        # Other punctuation remains valid; we ban ONLY U+2014, not hyphens
+        # in names or incidental commas / colons.
+        self.assertEqual(_validate(
+            "KEY: B\\nSPEECH: Мой совет: «Quecksilber».", plain
+        ), "Мой совет: «Quecksilber».")
+
+        with_dash = scenario(answer="Paris — Lyon", speech_language="ru")
+        self.assertEqual(_validate(
+            "KEY: B\\nSPEECH: Пожалуй, «Paris — Lyon».", with_dash
+        ), "Пожалуй, «Paris — Lyon».")
+        self.assertIsNone(_validate(
+            "KEY: B\\nSPEECH: Paris — Lyon — мой выбор.", with_dash
+        ))
+        self.assertIsNone(_validate(
+            "KEY: B\\nSPEECH: Я за Paris — Lyon — точно.", with_dash
+        ))
+        unsure = scenario(outcome="UNSURE")
+        self.assertIsNone(_validate(
+            "SPEECH: Тут — пас.", unsure
+        ))
+        self.assertEqual(_validate(
+            "SPEECH: Тут, пожалуй, пас.", unsure
+        ), "Тут, пожалуй, пас.")
+
+    def test_em_dash_rejected_on_first_draft_then_retried_with_same_frame(self):
+        d = scenario(answer="Словения", presentation_style="DIRECT")
+        client = FakeClient([
+            "KEY: B\\nSPEECH: Словения — мой выбор.",
+            "KEY: B\\nSPEECH: Я за «Словения».",
+        ])
+        self.assertEqual(talk(d, client=client), "Я за «Словения».")
+        self.assertEqual(len(client.requests), 2)
+        for request in client.requests:
+            self.assertIn("Delivery approach: A direct", request["instructions"])
+            self.assertIn("Unicode em dash (U+2014)", request["instructions"])
+        self.assertIn("Do not use em dashes", client.requests[1]["instructions"])
+
     def test_retry_keeps_style_and_selected_name(self):
         d = scenario(answer="Словения", presentation_style="CASUAL")
         client = FakeClient([
