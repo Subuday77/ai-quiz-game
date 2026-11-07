@@ -84,8 +84,45 @@ jobs:
         run: |
           python -m alembic upgrade 0006_platinum_helper
           python -m alembic current
+          python -m alembic upgrade 0007_bonus_wager
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          from sqlalchemy.orm import Session
+          from persistence.database import engine
+          from persistence.models import User, GameRun
+          with Session(engine()) as db:
+              user = User(username="Migration QA", username_key="migration-qa")
+              db.add(user)
+              db.flush()
+              db.add_all([
+                  GameRun(user_id=user.id, language="English", status="main",
+                          started_at=datetime.now(timezone.utc) - timedelta(days=3)),
+                  GameRun(user_id=user.id, language="Russian", status="main"),
+              ])
+              db.commit()
+          PY
           python -m alembic upgrade head
           python -m alembic current
+          python - <<'PY'
+          from sqlalchemy import select
+          from sqlalchemy.exc import IntegrityError
+          from sqlalchemy.orm import Session
+          from persistence.database import engine
+          from persistence.models import User, GameRun
+          with Session(engine()) as db:
+              uid = db.scalar(select(User.id).where(User.username_key == "migration-qa"))
+              games = list(db.scalars(select(GameRun).where(
+                  GameRun.user_id == uid).order_by(GameRun.started_at)))
+              assert [g.status for g in games] == ["abandoned", "main"], games
+              assert games[0].finished_at is not None
+              db.add(GameRun(user_id=uid, language="French", status="bonus"))
+              try:
+                  db.flush()
+              except IntegrityError:
+                  db.rollback()
+              else:
+                  raise AssertionError("Unique active-round index did not block duplicate")
+          PY
       - name: Validate helper tables and previous star categories
         working-directory: backend
         run: |
