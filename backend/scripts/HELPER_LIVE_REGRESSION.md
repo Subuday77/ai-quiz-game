@@ -10,11 +10,10 @@ do not need to be started.
 ## Prerequisites
 
 - Backend dependencies installed from backend/requirements.txt.
-- The single **repository-root** `.env` (`../.env` when running from `backend/`)
-  contains `DATABASE_URL` pointing to your PostgreSQL database and
-  `OPENAI_API_KEY`. The script loads this same file as the FastAPI app and
-  Alembic migrations. No `backend/.env` is needed. Neither secret is printed,
-  stored in the report, or uploaded to GitHub.
+- The single **repository-root** `.env` (`../.env` from `backend/`) is copied
+  from `.env.example`. Fill `DATABASE_URL` and `OPENAI_API_KEY` there.
+  The script, FastAPI and Alembic use the same file; no `backend/.env`.
+  Neither secret is printed, included in results, or uploaded to GitHub.
 - Approved questions with original generator plausibility reviews.
 
 ## Commands (working directory: backend)
@@ -31,6 +30,12 @@ do not need to be started.
    150 total (already completed cases are skipped):
 
        python -m scripts.helper_live_regression --execute --limit 150
+
+The default model, reasoning effort, token cap, timeout, attempt count and
+plausibility thresholds all come from the **root .env**, just like gameplay.
+Only an EXPLICIT `--model` argument overrides the configured model for that
+run. The saved test plan records the effective settings; changed settings
+require a new `--output-dir` (historical plans without metadata are readable).
 
 Default spending guard: estimated USD 3 total across the run and a maximum
 of 350 actual API attempts including retries. Override using --max-usd or
