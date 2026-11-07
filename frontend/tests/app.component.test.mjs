@@ -1,17 +1,6 @@
 // Offline Angular component tests with mocked HTTP and virtual RxJS time.
 // No browser, PostgreSQL or paid AI calls are required.
 import '@angular/compiler';
-import { createHook } from 'node:async_hooks';
-// Temporary CI timer provenance trace; remove after fixing the leaked handle.
-Error.stackTraceLimit = 28;
-const liveTestTimers = new Map();
-const timerHook = createHook({
-  init(id, type, trigger, resource) {
-    if (type === 'Timeout') liveTestTimers.set(id, { resource, stack: new Error().stack });
-  },
-  destroy(id) { liveTestTimers.delete(id); },
-});
-timerHook.enable();
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -30,13 +19,6 @@ after(() => {
   // Dispose every instance so Node can exit naturally after all assertions.
   for (const app of testComponents) app.ngOnDestroy();
   rmSync(temp, { recursive: true, force: true });
-  // CI diagnostic: all assertions can pass while an event-loop handle remains.
-  // This is deliberately temporary until the owning resource is identified.
-  console.error('CI teardown resource types:', process.getActiveResourcesInfo());
-  console.error('CI live timer origins:', [...liveTestTimers.values()]
-    .filter(({ resource }) => !resource._destroyed && resource.hasRef?.())
-    .map(({ stack }) => stack).join('\n---\n'));
-  timerHook.disable();
 });
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
 const english = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
@@ -439,9 +421,11 @@ test('bonus choice is required before issuing Q16; failed loading still permits 
   app.currentStars.gold = 1;
   app.continue();
   assert.equal(requests.length, 0); // Cannot bypass the explicit gold decision.
-  app.acceptBonus();
-  assert.equal(posts[0].url, '/api/v2/games/existing-game/bonus/accept');
   scheduler.run(() => {
+    // Keep both subscription and completion on the same virtual scheduler.
+    // Crossing to real time leaves RxJS's timeout interval alive after tests.
+    app.acceptBonus();
+    assert.equal(posts[0].url, '/api/v2/games/existing-game/bonus/accept');
     succeed(posts[0], { phase: 'bonus', correct_main_answers: 15 });
     assert.equal(app.bonusDecisionAvailable, false);
     assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
