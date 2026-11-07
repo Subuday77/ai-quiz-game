@@ -364,7 +364,7 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
                 "style_natural_1_5": "", "notes": "",
             })
     for filename, rows in (("results.csv", table), ("blind_review.csv", review)):
-        fields = list(rows[0]) if rows else (REVIEW_FIELDS if filename == "blind_review.csv" else ["id"])
+        fields = list(dict.fromkeys(key for row in rows for key in row)) if rows else (REVIEW_FIELDS if filename == "blind_review.csv" else ["id"])
         with (directory / filename).open("w", encoding="utf-8-sig", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
             writer.writeheader()
