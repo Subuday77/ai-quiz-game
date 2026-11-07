@@ -155,7 +155,17 @@
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
-    <div *ngIf="screen === 'setup'" class="setup">
+    <div *ngIf="bonusDecisionAvailable && screen === 'setup'" class="bonus-decision">
+      <h2>{{ locale.t('helper.bonusChoiceTitle') }}</h2>
+      <p>{{ locale.t('helper.bonusRisk') }}</p>
+      <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
+        {{ locale.t('helper.playBonus') }}
+      </button>
+      <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
+        {{ locale.t('helper.keepGold') }}
+      </button>
+    </div>
+    <div *ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
       <select id="language" [(ngModel)]="selectedLanguage"
               (ngModelChange)="changeQuestionLanguage($event)"
@@ -332,9 +342,19 @@
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
+      <div class="bonus-decision" *ngIf="bonusDecisionAvailable">
+        <h3>{{ locale.t('helper.bonusChoiceTitle') }}</h3>
+        <p>{{ locale.t('helper.bonusRisk') }}</p>
+        <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
+          {{ locale.t('helper.playBonus') }}
+        </button>
+        <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
+          {{ locale.t('helper.keepGold') }}
+        </button>
+      </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="continue()" 
-                *ngIf="!canRetryQuestion && !duplicateExhausted" [disabled]="loading">
+                *ngIf="!canRetryQuestion && !duplicateExhausted && !bonusDecisionAvailable" [disabled]="loading">
           {{ locale.t(feedbackButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
