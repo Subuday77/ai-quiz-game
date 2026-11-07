@@ -25,7 +25,8 @@ from platinum_helper.debug import (
     purchased as debug_purchased,
     reserved as debug_reserved,
     finished as debug_finished,
-)from platinum_helper.selection import best_visible_wrong
+)
+from platinum_helper.selection import best_visible_wrong
 
 
 
