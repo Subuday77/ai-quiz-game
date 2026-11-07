@@ -687,6 +687,94 @@ test('hiring a helper retains category-exclusion setup and uses UI language only
   assert.equal(requests.length, 0); // Q1 never appears on hiring.
 });
 
+test('F5 and fresh browser recover a started round directly from PostgreSQL with no localStorage', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup({ activeLookupPending: true });
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    assert.equal(app.restoringGame, true);
+    scheduler.run(() => app.startGame());
+    assert.equal(posts.length, 0); // Never allocate while server lookup is pending.
+
+    succeed(requests[0], {
+      game_id: 'db-only-run', language: 'Russian', phase: 'main',
+      correct_main_answers: 6, main_question_index: 6, question_issued: true,
+      helper: { id: 'paid', name: 'Ольга Иванова', profession: 'Physicist',
+        erudition: 55, strong_topics: [], weak_topics: [],
+        consultations_remaining: 2, consultations_total: 3,
+        price: 1, refunded: false },
+    });
+    assert.equal(app.restoringGame, false);
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.resumeCandidate.game_id, 'db-only-run');
+    assert.equal(app.displayedHelperCard.id, 'paid');
+    assert.equal(saved.get('ai-quiz-game:active-round:v2:user-1'), 'db-only-run');
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(requests[1].url, '/api/v2/games/db-only-run/question');
+      succeed(requests[1], { ...question, number: 7 });
+    });
+    assert.equal(app.gameId, 'db-only-run');
+    assert.equal(app.progress, 6);
+    assert.equal(app.screen, 'question');
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('server-owned active run overrides an obsolete localStorage ID', () => {
+  const prior = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'obsolete-game']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests } = setup();
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    succeed(requests[0], {
+      game_id: 'actual-db-game', language: 'Hebrew', phase: 'main',
+      correct_main_answers: 0, question_issued: false,
+    });
+    assert.equal(app.gameId, 'actual-db-game');
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.selectedLanguage, 'Hebrew');
+    assert.equal(saved.get(key), 'actual-db-game');
+  } finally {
+    if (prior === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prior;
+  }
+});
+
+test('server recovery error never clears saved ID or permits a silent new game', () => {
+  const { app, requests, posts, scheduler } = setup({ activeLookupPending: true });
+  app.gameId = '';
+  requests[0].subject.error(new HttpErrorResponse({ status: 404 }));
+  assert.equal(app.error, 'game.restoreFailed');
+  scheduler.run(() => app.startGame());
+  assert.equal(posts.length, 0);
+  app.retryRestoreGame();
+  assert.equal(requests[1].url, '/api/v2/games/active');
+  succeed(requests[1], null);
+  assert.equal(app.error, '');
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(posts.length, 1);
+  });
+});
+
 test('transient restore failure never creates new game over a paid round', () => {
   const previous = globalThis.localStorage;
   const key = 'ai-quiz-game:active-round:v2:user-1';
