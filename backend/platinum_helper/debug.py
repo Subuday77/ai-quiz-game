@@ -54,8 +54,37 @@ def purchased(purchase) -> None:
         helper_id=str(purchase.id),
         helper_name=profile["name"],
         profession=purchase.profession,
+        price_platinum=purchase.price,
+        wallet_debit_key=f"helper:{purchase.id}:purchase",
         erudition=profile["erudition"],
         skills=skill_groups(profile),
+    )
+
+
+def active_round(info) -> None:
+    """Read-only restoration trace: explains identity and language on F5/replay.
+
+    A new purchase emits helper_profile_purchased instead; this event proves
+    neither an additional helper roll nor a wallet debit took place.
+    """
+    if not enabled():
+        return
+    if info is None:
+        _emit("helper_active_round_lookup", found=False)
+        return
+    helper = info.helper
+    _emit(
+        "helper_active_round_lookup",
+        found=True,
+        run_id=str(info.game_id),
+        run_language=info.language,
+        run_phase=info.phase,
+        question_issued=info.question_issued,
+        helper_id=helper.get("id") if helper else None,
+        helper_name=helper.get("name") if helper else None,
+        helper_price_platinum=helper.get("price") if helper else None,
+        helper_refunded=helper.get("refunded") if helper else None,
+        helper_consultations_remaining=helper.get("consultations_remaining") if helper else None,
     )
 
 
