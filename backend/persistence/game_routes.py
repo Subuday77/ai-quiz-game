@@ -28,7 +28,7 @@ from persistence.categories import (
     allowed_categories, available_categories, category_snapshot,
     exclude_pregame_categories,
 )
-from persistence.models import GameRun, Question, QuestionAttempt, Topic, User
+from persistence.models import GameRun, Question, QuestionAttempt, Topic, User, WalletTransaction
 from persistence.seed_topics import category_slug
 from persistence.star_economy import lock_user_stars
 from persistence.bonus_wager import accept_bonus, decline_bonus
@@ -48,6 +48,44 @@ def _replacement_id(run_id: UUID, user_id: UUID) -> UUID:
     more than one new round, including after the client reloads.
     """
     return uuid5(NAMESPACE_URL, f"ai-quiz-game/replace/{user_id}/{run_id}")
+
+
+def _replay_id(run_id: UUID, user_id: UUID) -> UUID:
+    """Deterministic new run for a terminal round; safe across HTTP retries."""
+    return uuid5(NAMESPACE_URL, f"ai-quiz-game/replay/{user_id}/{run_id}")
+
+
+def _abandon_unpaid_legacy_runs(
+    db: Session, *, user_id: UUID, exclude_id: UUID | None = None,
+) -> None:
+    """Close duplicate historical rounds only if no paid perks are at risk.
+
+    Caller must hold the User row lock. Never silently discard a helper,
+    purchased exclusions, or other spent stars: direct the player to Resume
+    or the existing explicit abandon confirmation instead.
+    """
+    active = list(db.scalars(select(GameRun).where(
+        GameRun.user_id == user_id,
+        GameRun.status.in_(("main", "bonus")),
+        GameRun.id != exclude_id if exclude_id is not None else True,
+    ).order_by(GameRun.started_at.desc(), GameRun.id.desc()).with_for_update()))
+    for run in active:
+        if get_purchase(db, run.id) is not None or db.scalar(
+            select(WalletTransaction.id).where(
+                WalletTransaction.user_id == user_id,
+                WalletTransaction.run_id == run.id,
+                WalletTransaction.amount < 0,
+                WalletTransaction.reason.like("star/%"),
+            ).limit(1)
+        ) is not None:
+            raise HTTPException(status_code=409, detail={
+                "code": "saved_paid_round",
+                "game_id": str(run.id),
+                "message": "Another unfinished round has paid perks; resume or explicitly replace it.",
+            })
+    for run in active:
+        run.status = "abandoned"
+        run.finished_at = datetime.now(timezone.utc)
 
 
 def _topics_ready(db: Session) -> bool:
@@ -286,6 +324,50 @@ def new_game(payload: NewGame, request: Request,
     return _game_info(db, run)
 
 
+@router.post("/{run_id}/replay", response_model=GameInfo, status_code=201)
+def replay_game(run_id: UUID, payload: NewGame, request: Request,
+                user: User = Depends(authenticated_user),
+                db: Session = Depends(get_db)):
+    """'Play again' is a new empty run, not a rediscovery of older sessions.
+
+    The terminal source run provides idempotency across retries. Obsolete
+    unpaid runs may be abandoned by this explicit action, but purchased
+    helpers and other paid perks require the existing Resume/Replace choice.
+    """
+    validate_origin(request)
+    if payload.language not in LANGUAGE_DICT.values():
+        raise HTTPException(status_code=422, detail="Unsupported language")
+    try:
+        lock_user_stars(db, user.id)
+        finished = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        if finished.status not in ("lost", "completed"):
+            raise HTTPException(status_code=409, detail="Only finished rounds can be replayed")
+        successor_id = _replay_id(finished.id, user.id)
+        successor = db.get(GameRun, successor_id)
+        if successor is not None:
+            result = _game_info(db, successor)
+            db.commit()
+            return result
+        if not _topics_ready(db):
+            raise HTTPException(status_code=503, detail="Topic catalog not initialized")
+        _abandon_unpaid_legacy_runs(db, user_id=user.id)
+        successor = GameRun(
+            id=successor_id, user_id=user.id,
+            language=payload.language, status="main",
+        )
+        db.add(successor)
+        db.flush()
+        result = _game_info(db, successor)
+        db.commit()
+        return result
+    except GameNotFound:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.get("/active", response_model=GameInfo | None)
 def active_game(user: User = Depends(authenticated_user),
                 db: Session = Depends(get_db)):
@@ -331,6 +413,7 @@ def replace_game(run_id: UUID, payload: NewGame, request: Request,
             raise HTTPException(status_code=503, detail="Topic catalog not initialized")
         if successor is not None:
             raise HTTPException(status_code=409, detail="Replacement round already exists")
+        _abandon_unpaid_legacy_runs(db, user_id=user.id, exclude_id=run.id)
         successor = GameRun(
             id=successor_id, user_id=user.id,
             language=payload.language, status="main",
