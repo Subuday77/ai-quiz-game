@@ -481,7 +481,8 @@ def main(argv: list[str] | None = None) -> int:
                  e.get("output_tokens", 0)*args.output_usd_per_m)/1_000_000
                 for e in attempts
             )
-            if spent >= args.max_usd or len(attempts)+2 > args.max_api_requests:
+            if (spent >= args.max_usd or
+                    len(attempts) + helper_settings.max_attempts > args.max_api_requests):
                 print("Budget/API request limit reached; stop before new scenario.")
                 break
             row = evaluate(s, sdk, attempts_file, args.input_usd_per_m,
