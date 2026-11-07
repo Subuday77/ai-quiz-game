@@ -4,7 +4,7 @@ from uuid import UUID
 
 from platinum_helper.core import (
     MAX_CONSULTATIONS, TOPICS, HelperService, generate_profile, CATEGORY_TOPICS,
-    choose_delivery_style,
+    choose_delivery_style, choose_presentation_style,
 )
 
 
@@ -21,6 +21,18 @@ class PlatinumHelperTests(unittest.TestCase):
         for _ in range(3):
             self.assertEqual(choose_delivery_style(confident_id), "CONFIDENT")
             self.assertEqual(choose_delivery_style(tentative_id), "TENTATIVE")
+
+    def test_presentation_style_stable_independent_and_all_three_reachable(self):
+        from uuid import UUID
+        selected = {choose_presentation_style(UUID(int=i)) for i in range(300)}
+        self.assertEqual(selected, {"DIRECT", "PERSONAL", "CASUAL"})
+        for i in range(100):
+            call_id = UUID(int=i)
+            first = choose_presentation_style(call_id)
+            self.assertEqual(first, choose_presentation_style(call_id))
+            self.assertIn(first, selected)
+        # There is no outcome/correctness parameter: UUID is independent of
+        # KNOW/MISTAKEN and based only on the saved consultation identity.
 
     def test_profile_is_stable_and_private(self):
         self.assertEqual(len(self.profile.skills), 20)
