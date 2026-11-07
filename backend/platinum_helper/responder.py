@@ -75,7 +75,8 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
             "Your earlier response did not meet the safety requirements. "
             f"Use ONLY {data['language']}. "
             "Write a single plain sentence: recommend the exact selected "
-            "answer without ANY extra claim, fact, argument or comparison. "
+            "answer with NO factual justification, extra claim, argument "
+            "or comparison. "
             "Preserve your assigned confidence style. "
         )
     instructions += (
