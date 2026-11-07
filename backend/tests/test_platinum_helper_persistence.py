@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from consts import QUESTION_CATEGORIES
 from persistence.gameplay import GameConflict, record_answer
+from persistence.game_routes import _game_info
 from persistence.models import (
     Base, GameRun, WalletTransaction, PlatinumHelperCall, PlatinumHelperPurchase, Question,
     QuestionAttempt, StarAward, Topic, User,
@@ -81,6 +82,18 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertEqual(available_platinum(self.db, self.user.id), 0)
         repeat = self.purchase()
         self.assertEqual(first, repeat)
+        self.assertEqual(available_platinum(self.db, self.user.id), 0)
+
+    def test_saved_unstarted_game_exposes_the_purchased_helper_without_extra_charge(self):
+        purchased = self.purchase()
+        self.db.expire_all()  # Model an HTTP request in a fresh session.
+        run = self.db.get(GameRun, self.run.id)
+        saved = _game_info(self.db, run)
+        self.assertEqual(str(saved.game_id), str(run.id))
+        self.assertEqual(saved.phase, "main")
+        self.assertFalse(saved.question_issued)
+        self.assertEqual(saved.main_question_index, 0)
+        self.assertEqual(saved.helper, purchased)
         self.assertEqual(available_platinum(self.db, self.user.id), 0)
 
     def test_selected_profession_requires_two_platinum(self):
