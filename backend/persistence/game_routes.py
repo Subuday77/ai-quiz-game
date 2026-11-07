@@ -75,6 +75,7 @@ class GameInfo(BaseModel):
     correct_main_answers: int
     main_question_index: int = 0
     skipped_questions: int = 0
+    question_issued: bool = False
     bonus_decision_available: bool = False
     helper: dict | None = None
 
@@ -114,6 +115,9 @@ def _game_info(db: Session, run) -> GameInfo:
         correct_main_answers=run.correct_main_answers,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
+        question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run.id
+        ))),
         bonus_decision_available=(run.status == "bonus" and pending_question(db, run_id=run.id) is None),
         helper=helper_card(purchase) if purchase else None,
     )
