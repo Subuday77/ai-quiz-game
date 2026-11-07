@@ -462,3 +462,38 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .question-generation { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 140px; color: #c9d4f1; font-weight: 650; font-size: 17px; text-align: center; }
 .question-generation .gear-loader { --size: 1.4px; margin-top: 0; --gear-hole: #181a37; }
 @media (max-width: 640px) { .round-summary { flex-direction: column; gap: 5px; } .question-generation { min-height: 110px; } }
+
+/* Platinum helper uses the existing dark quiz palette. */
+.helper-tablet { margin: 0 0 18px; }
+.helper-tile { width: 100%; display: flex; align-items: center; gap: 14px; padding: 13px 18px; color: #f2efff; background: #2b2950; border: 1px solid #a79be4; border-radius: 13px; text-align: start; cursor: pointer; }
+.helper-tile > span:first-child { font-size: 26px; }
+.helper-tile strong, .helper-tile small { display: block; }
+.helper-tile small { color: #c7c0e8; margin-top: 3px; }
+.helper-open { margin-inline-start: auto; font-size: 22px; }
+.helper-modal-backdrop { position: fixed; inset: 0; z-index: 1100; background: #070918b8; display: grid; place-items: center; padding: 18px; }
+.helper-modal { background: #1b1e3e; border: 1px solid #9d8ed9; border-radius: 20px; color: #f1f3ff; padding: 28px; width: min(100%, 490px); max-height: 90vh; overflow: auto; position: relative; }
+.helper-modal h2 { margin: 0 0 6px; }
+.helper-modal h3 { font-size: 14px; margin: 19px 0 5px; color: #b9a9ff; }
+.helper-close { position: absolute; inset-inline-end: 15px; top: 12px; color: #f1f3ff; background: none; border: 0; font-size: 30px; cursor: pointer; }
+.helper-tagline { font-style: italic; line-height: 1.6; }
+.helper-shop { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+.helper-shop h2 { font-size: 20px; margin: 8px 0; }
+.helper-shop p { color: #c8c9e5; }
+.helper-shop label { font-size: 13px; }
+.helper-call { margin-top: 20px; }
+.helper-speech { background: #343159; padding: 15px 18px; border-radius: 12px; color: #e9e4ff; line-height: 1.5; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 18px; }
+.bonus-decision p { flex: 0 0 100%; color: #f1d18a; line-height: 1.5; }
+
+.helper-avatar { flex: none; width: 26px; height: 26px; display: block; }
+.helper-hire-options { display: flex; flex-direction: column; gap: 10px; width: min(100%, 430px); margin-top: 10px; }
+.helper-hire-options > button { text-align: center; }
+.helper-hire-toggle { max-width: 260px; }
+.helper-profession-picker { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #45476f; border-radius: 12px; }
+.helper-profession-picker select { width: 100%; }
+.helper-refund-note { font-size: 13px; line-height: 1.55; opacity: .88; margin: 6px 0 0; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; margin: 16px 0; border: 1px solid #77709f; border-radius: 12px; }
+.bonus-decision h2,.bonus-decision h3,.bonus-decision p { width: 100%; margin: 0 0 5px; }
+.bonus-decision p { line-height: 1.6; }

@@ -78,12 +78,38 @@ def _exact_question(value: str) -> str:
     return normalized.rstrip("?!").strip()
 
 
+# Explicit semantic aliases for facts confirmed to be equivalent in QA.
+# Never merge all facts about an organ: left-ventricle wall thickness and
+# the heart's role in circulation must remain independently playable.
+_FACT_EQUIVALENCE = {
+    ("human-heart", "pumps", "blood"): ("human-heart", "circulation-pump"),
+    ("heart", "function", "pumps-blood-through-blood-vessels"): ("human-heart", "circulation-pump"),
+    ("human-heart", "primary-function", "pump-blood-through-the-body"): ("human-heart", "circulation-pump"),
+}
+
+
+def semantic_fact_anchor(subject: str, relation: str, object: str) -> tuple[str, str] | None:
+    """Conservative alias normalization for previously observed fact variants.
+
+    Unknown triples retain the existing tag/relation scoring and independent
+    semantic critic. An expanded alias set requires a documented regression.
+    """
+    return _FACT_EQUIVALENCE.get((subject, relation, object))
+
+
 def similarity(candidate: TaggedQuestion, previous: HistoryItem) -> Similarity:
     # Preserve historical diagnostic priority for a matching canonical key,
     # but never trust an old one-to-many author hash if it names OTHER work.
     if candidate.fact.key == previous.fact_key and creator_work_anchor(
         candidate.fact.subject, candidate.fact.relation, candidate.fact.object
     ) == creator_work_anchor(previous.subject, previous.relation, previous.object):
+        return Similarity(100, "same_fact", previous.question_id)
+    candidate_anchor = semantic_fact_anchor(
+        candidate.fact.subject, candidate.fact.relation, candidate.fact.object
+    )
+    if candidate_anchor is not None and candidate_anchor == semantic_fact_anchor(
+        previous.subject, previous.relation, previous.object
+    ):
         return Similarity(100, "same_fact", previous.question_id)
     # Verbatim knowledge remains a duplicate regardless of old or new tags.
     if _exact_question(candidate.question) == _exact_question(previous.question_text):
@@ -172,19 +198,33 @@ def critic_neighbors(candidate: TaggedQuestion, history: list[HistoryItem],
     lookup = {item.question_id: item for item in history}
     picked: list[HistoryItem] = []
     seen: set[str] = set()
-    for score in rank(candidate, history)[:6]:
-        if score.score <= 0:
-            continue
-        item = lookup[score.previous_id]
-        if item.question_id not in seen:
+
+    def add(item: HistoryItem) -> None:
+        if item.question_id not in seen and len(picked) < 10:
             picked.append(item)
             seen.add(item.question_id)
+
+    # Candidate/previous metadata may have inconsistent English subject slugs.
+    # Give the semantic critic plausible cross-category matches EVEN when
+    # deterministic tag scores were zero. No new AI call is introduced.
+    generic = {"human", "the", "body", "part", "organ", "of"}
+    subject_terms = set(candidate.fact.subject.split("-")) - generic
     for item in reversed(history):
-        if len(picked) >= 10:
-            break
-        if item.category_slug == category_slug and item.question_id not in seen:
-            picked.append(item)
-            seen.add(item.question_id)
+        if subject_terms & (set(item.subject.split("-")) - generic):
+            add(item)
+            if len(picked) >= 4:
+                break
+    for result in rank(candidate, history)[:6]:
+        if result.score > 0:
+            add(lookup[result.previous_id])
+    for item in reversed(history):
+        if item.category_slug == category_slug:
+            add(item)
+    # Some equivalent facts have different entity AND category slugs.
+    # Provide a small number of recent global examples as a last-resort
+    # semantic context; the critic still decides whether facts are equivalent.
+    for item in reversed(history[-4:]):
+        add(item)
     return [{
         "question_id": item.question_id, "question": item.question_text,
         "fact_key": item.fact_key, "subject": item.subject,

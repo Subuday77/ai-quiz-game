@@ -162,6 +162,7 @@ class GameRun(Base):
     round_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     hints_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     bonus_correct: Mapped[bool | None] = mapped_column(Boolean)
+    bonus_wager_accepted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Persist the bonus topic rotation and eligibility across logout/restart.
     # Advance only after a failed question generation, never after an answer.
     bonus_topic_index: Mapped[int] = mapped_column(
@@ -313,3 +314,42 @@ class UiLocaleSync(Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at = datetime_column()
+
+class PlatinumHelperPurchase(Base):
+    """One purchased helper per run; DB owns spending and refund state."""
+    __tablename__ = "platinum_helper_purchases"
+    id = id_column()
+    run_id = mapped_column(Uuid(as_uuid=True), ForeignKey("game_runs.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    price: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    profession: Mapped[str] = mapped_column(String(80), nullable=False)
+    profile: Mapped[dict] = mapped_column(JsonData, nullable=False)
+    consultations_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    refunded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at = datetime_column()
+    __table_args__ = (
+        CheckConstraint("price IN (1,2)", name="ck_helper_price"),
+        CheckConstraint("consultations_used BETWEEN 0 AND 3", name="ck_helper_used"),
+    )
+
+
+class PlatinumHelperCall(Base):
+    """Idempotent attempt, including frozen outcome and final AI answer."""
+    __tablename__ = "platinum_helper_calls"
+    id = id_column()
+    purchase_id = mapped_column(Uuid(as_uuid=True), ForeignKey("platinum_helper_purchases.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    question_attempt_id = mapped_column(Uuid(as_uuid=True), ForeignKey("question_attempts.id", ondelete="RESTRICT"), nullable=False)
+    topic: Mapped[str] = mapped_column(String(60), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(15), nullable=False)
+    selected_key: Mapped[str | None] = mapped_column(String(1))
+    status: Mapped[str] = mapped_column(String(15), nullable=False, default="pending")
+    response_text: Mapped[str | None] = mapped_column(Text)
+    created_at = datetime_column()
+    __table_args__ = (
+        UniqueConstraint("purchase_id", "request_key", name="uq_helper_call_request"),
+        CheckConstraint("outcome IN ('KNOW','MISTAKEN','UNSURE')", name="ck_helper_outcome"),
+        CheckConstraint("status IN ('pending','completed','failed')", name="ck_helper_status"),
+        CheckConstraint("selected_key IS NULL OR selected_key IN ('A','B','C','D')", name="ck_helper_selected_key"),
+    )
+

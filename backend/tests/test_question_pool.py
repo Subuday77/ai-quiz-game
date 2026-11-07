@@ -343,9 +343,11 @@ class GlobalPoolTests(unittest.TestCase):
             alice = db.get(GameRun, self.run_id)
             alice.status = "bonus"
             alice.correct_main_answers = 15
+            alice.bonus_wager_accepted = True  # Isolate pool QA from wager UI.
             bob_run = create_game(db, user_id=self.bob, language="English")
             bob_run.status = "bonus"
             bob_run.correct_main_answers = 15
+            bob_run.bonus_wager_accepted = True
             db.commit()
             q = candidate(difficulty=15)
             report = review_report()

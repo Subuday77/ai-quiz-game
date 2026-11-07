@@ -40,6 +40,8 @@ app.include_router(auth_router)  # Accounts are DB-backed; game sessions still i
 app.include_router(profile_router)  # Derived statistics are initially empty until game DB migration.
 app.include_router(localization_router)
 app.include_router(localization_dev_router)
+from platinum_helper.routes import router as platinum_helper_router  # noqa: E402
+app.include_router(platinum_helper_router)
 
 
 @app.middleware("http")

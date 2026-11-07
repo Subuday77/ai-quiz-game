@@ -54,6 +54,13 @@ class TaggedEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["game_id"]
 
+    def replace_game(self, old_id, language):
+        response = self.client.post(
+            f"/api/v2/games/{old_id}/replace", json={"language": language},
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()["game_id"]
+
     def test_tagged_mode_persists_tags_without_leaking_them_to_browser(self):
         game_id = self.new_game("English")
         with patch("api.generate_valid_question", return_value=candidate()) as gen:
@@ -72,7 +79,7 @@ class TaggedEndpointTests(unittest.TestCase):
         first = self.new_game("English")
         with patch("api.generate_valid_question", return_value=candidate()):
             self.assertEqual(self.client.get(f"/api/v2/games/{first}/question").status_code, 200)
-        second = self.new_game("German")
+        second = self.replace_game(first, "German")
         with patch("api.generate_valid_question",
                    return_value=candidate(language="German")) as gen:
             response = self.client.get(f"/api/v2/games/{second}/question")
@@ -138,7 +145,7 @@ class TaggedEndpointTests(unittest.TestCase):
                 # is acceptable to offer_question but is saved without metadata.
                 response = self.client.get(f"/api/v2/games/{first}/question")
                 self.assertEqual(response.status_code, 200, response.text)
-        second = self.new_game("German")
+        second = self.replace_game(first, "German")
         with patch("api.generate_valid_question") as gen:
             response = self.client.get(f"/api/v2/games/{second}/question")
             gen.assert_not_called()

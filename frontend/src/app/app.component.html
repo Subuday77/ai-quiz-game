@@ -112,11 +112,52 @@
     </div>
   </section>
 
+  <section class="helper-tablet" *ngIf="displayedHelperCard as helper" aria-label="Platinum Helper">
+    <button type="button" class="helper-tile" (click)="helperDetailsVisible = true">
+      <svg class="helper-avatar" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="7" r="4" fill="currentColor"></circle>
+        <path d="M2.5 22c.2-5.2 4.1-8.5 9.5-8.5s9.3 3.3 9.5 8.5z" fill="currentColor"></path>
+      </svg>
+      <span><strong>{{ helper.name }} · {{ helperProfessionLabel(helper) }}</strong>
+        <small>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</small>
+      </span><span class="helper-open" aria-hidden="true">ⓘ</span>
+    </button>
+  </section>
+  <div class="helper-modal-backdrop" *ngIf="helperDetailsVisible && displayedHelperCard as helper">
+    <section class="helper-modal" role="dialog" aria-modal="true" aria-label="Helper profile">
+      <button class="helper-close" type="button" (click)="helperDetailsVisible = false" aria-label="Close">×</button>
+      <h2>{{ helper.name }}</h2>
+      <p>{{ helperProfessionLabel(helper) }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
+      <p class="helper-tagline">“{{ helperTagline(helper) }}”</p>
+      <h3>{{ locale.t('helper.strong') }}</h3>
+      <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <h3>{{ locale.t('helper.weak') }}</h3>
+      <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
+      <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
+    </section>
+  </div>
+  <div class="helper-modal-backdrop" *ngIf="showAbandonConfirm">
+    <section class="helper-modal" role="dialog" aria-modal="true"
+             [attr.aria-label]="locale.t('game.abandonTitle')">
+      <h2>{{ locale.t('game.abandonTitle') }}</h2>
+      <p>{{ locale.t('game.abandonWarning') }}</p>
+      <p><strong>{{ locale.t('game.abandonCost') }}</strong></p>
+      <div class="question-actions">
+        <button type="button" class="primary" (click)="confirmNewGame()">
+          {{ locale.t('game.startNewConfirm') }}
+        </button>
+        <button type="button" class="outline-button" (click)="cancelNewGame()">
+          {{ locale.t('auth.cancel') }}
+        </button>
+      </div>
+    </section>
+  </div>
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
-    <h1 *ngIf="screen === 'question' && questionLoading && generatingNextQuestion">{{ locale.t('hero.nextQuestion') }}</h1>
-    <h1 *ngIf="screen === 'question' && !(questionLoading && generatingNextQuestion) && (current || questionLoading || canRetryQuestion)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
+    <h1 *ngIf="screen === 'question' && questionLoading">{{ locale.t('game.loading') }}</h1>
+    <h1 *ngIf="screen === 'question' && !questionLoading && (current || canRetryQuestion)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
     <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
@@ -130,7 +171,20 @@
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
-    <div *ngIf="screen === 'setup'" class="setup">
+    <div *ngIf="bonusDecisionAvailable && screen === 'setup'" class="bonus-decision">
+      <h2>{{ locale.t('helper.bonusChoiceTitle') }}</h2>
+      <p>{{ locale.t('helper.bonusRisk') }}</p>
+      <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
+        {{ locale.t('helper.playBonus') }}
+      </button>
+      <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
+        {{ locale.t('helper.keepGold') }}
+      </button>
+      <button type="button" class="outline-button" (click)="requestNewGame()" [disabled]="loading || restoringGame">
+        {{ locale.t('game.startNew') }}
+      </button>
+    </div>
+    <div *ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
       <select id="language" [(ngModel)]="selectedLanguage"
               (ngModelChange)="changeQuestionLanguage($event)"
@@ -139,7 +193,7 @@
       </select>
       <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
       <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
-      <div class="category-pregame-action" *ngIf="account && (!gameId || resumeAvailable || categoryInfo?.can_exclude)">
+      <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && error !== 'game.restoreFailed' && (categoryInfo === null || categoryInfo.can_exclude)">
         <button class="outline-button" type="button" (click)="openCategoryExclusions()"
                 [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
           {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
@@ -170,18 +224,57 @@
           {{ locale.t('perks.confirmExclusions') }}
         </button>
       </div>
+      <div class="helper-shop" *ngIf="account && !helperCard && !resumeAvailable && !resumeCandidate && progress === 0 && error !== 'game.restoreFailed'">
+        <button type="button" class="outline-button helper-hire-toggle"
+                (click)="showHelperHire()" [disabled]="helperBusy || loading || languageSaving"
+                [attr.aria-expanded]="helperHireOpen">
+          {{ locale.t('helper.buy') }}
+        </button>
+        <div class="helper-hire-options" *ngIf="helperHireOpen">
+          <button type="button" class="outline-button" (click)="selectRandomHelper()"
+                  [disabled]="helperBusy || loading || spendableStars.platinum < 1">
+            {{ locale.t('helper.randomCost') }}
+          </button>
+          <button type="button" class="outline-button" (click)="showChooseHelper()"
+                  [disabled]="helperBusy || loading || spendableStars.platinum < 2"
+                  [attr.aria-expanded]="helperChooseProfession">
+            {{ locale.t('helper.chooseCost') }}
+          </button>
+          <div class="helper-profession-picker" *ngIf="helperChooseProfession">
+            <label for="helper-profession">{{ locale.t('helper.chooseProfession') }}</label>
+            <select id="helper-profession" [(ngModel)]="selectedHelperProfession"
+                    [disabled]="helperBusy || helperProfessionsLoading">
+              <option value="">{{ locale.t('helper.selectProfession') }}</option>
+              <option *ngFor="let profession of helperProfessions" [value]="profession">
+                {{ locale.t('helper.profession.' + profession) }}
+              </option>
+            </select>
+            <button type="button" class="outline-button"
+                    (click)="buyHelper()" [disabled]="helperBusy || !selectedHelperProfession">
+              {{ locale.t('helper.confirmHire') }}
+            </button>
+          </div>
+          <p *ngIf="helperHireOpen" class="helper-refund-note">{{ locale.t('helper.refundCondition') }}</p>
+        </div>
+        <p class="error" role="alert" *ngIf="helperError">{{ locale.t(helperError) }}</p>
+      </div>
+      <button type="button" class="outline-button" *ngIf="error === 'game.restoreFailed'"
+              (click)="retryRestoreGame()" [disabled]="loading || restoringGame">
+        {{ locale.t('game.retryRestore') }}
+      </button>
       <div class="question-actions">
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
-        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startFreshGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
+        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
+          {{ locale.t(setupButtonLabelKey) }}
+        </button>
+        <button *ngIf="account && (gameQuestionIssued || resumeCandidate)" class="outline-button"
+                type="button" (click)="requestNewGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
           {{ locale.t('game.startNew') }}
-        </button>
-        <button *ngIf="resumeAvailable" class="outline-button" type="button" (click)="startGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
-          {{ locale.t(setupButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
@@ -210,6 +303,16 @@
                slides C into B's old position when a bronze hint removes B. -->
           <span *ngIf="!question.answers[choice]" class="hidden-answer-slot" aria-hidden="true"></span>
         </ng-container>
+      </div>
+      <div class="helper-call" *ngIf="helperCard && !question.bonus">
+        <button *ngIf="!helperReply" class="outline-button" type="button" (click)="consultHelper()"
+                [disabled]="loading || perksBusy || helperBusy ||
+                  (helperCard.consultations_remaining < 1 && !helperCallKey)">
+          {{ locale.t(helperCallButtonKey) }}
+        </button>
+        <p *ngIf="helperBusy" role="status">{{ locale.t('helper.calling') }}</p>
+        <p *ngIf="helperReply" class="helper-speech">{{ helperReply }}</p>
+        <p *ngIf="helperError" role="alert" class="error">{{ locale.t(helperError) }}</p>
       </div>
       <div class="perk-shop" *ngIf="!question.bonus">
         <button type="button" class="shop-toggle" (click)="shopOpen = !shopOpen"
@@ -263,9 +366,19 @@
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
+      <div class="bonus-decision" *ngIf="bonusDecisionAvailable">
+        <h3>{{ locale.t('helper.bonusChoiceTitle') }}</h3>
+        <p>{{ locale.t('helper.bonusRisk') }}</p>
+        <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
+          {{ locale.t('helper.playBonus') }}
+        </button>
+        <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
+          {{ locale.t('helper.keepGold') }}
+        </button>
+      </div>
       <div class="question-actions">
         <button class="primary" type="button" (click)="continue()" 
-                *ngIf="!canRetryQuestion && !duplicateExhausted" [disabled]="loading">
+                *ngIf="!canRetryQuestion && !duplicateExhausted && !bonusDecisionAvailable" [disabled]="loading">
           {{ locale.t(feedbackButtonLabelKey) }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>

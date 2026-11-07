@@ -16,6 +16,7 @@ type AuthMode = 'login' | 'register';
 const GAME_API = '/api/v2/games';
 const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
@@ -44,6 +45,10 @@ interface GameInfo {
   correct_main_answers: number;
   main_question_index?: number;
   skipped_questions?: number;
+  question_issued?: boolean;
+  helper?: HelperCard | null;
+  replacement_game_id?: string | null;
+  bonus_decision_available?: boolean;
 }
 interface PublicQuestion {
   question_id: string;
@@ -65,6 +70,25 @@ interface CategoryInfo {
   can_exclude: boolean;
   minimum_allowed: number;
 }
+interface HelperCard {
+  id: string;
+  name: string;
+  profession: string;
+  erudition: number;
+  strong_topics: string[];
+  weak_topics: string[];
+  tagline: string;
+  tagline_id?: number;
+  tagline_high?: string;
+  tagline_low?: string;
+  gender?: string;
+  nationality?: string;
+  consultations_remaining: number;
+  consultations_total: number;
+  refunded: boolean;
+  price: number;
+}
+interface HelperReply { text: string; helper: HelperCard; }
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -107,6 +131,27 @@ export class AppComponent implements OnInit, OnDestroy {
     { key: 'gold', label: 'Gold' },
     { key: 'platinum', label: 'Platinum' },
   ];
+
+  helperCard: HelperCard | null = null;
+  showAbandonConfirm = false;
+  // A saved but not yet resumed round may own a paid helper. Show its card
+  // without activating that round or allowing consultations before Resume.
+  get displayedHelperCard(): HelperCard | null {
+    return this.helperCard ?? (this.resumeAvailable ? this.resumeCandidate?.helper ?? null : null);
+  }
+  helperHireOpen = false;
+  helperChooseProfession = false;
+  gameQuestionIssued = false;
+  helperProfessions: string[] = [];
+  selectedHelperProfession = '';
+  helperBusy = false;
+  helperProfessionsLoading = false;
+  helperDetailsVisible = false;
+  helperReply = '';
+  helperError = '';
+  helperCallKey = '';
+  private helperCallQuestionId = '';
+  bonusDecisionAvailable = false;
 
   account: Account | null = null;
   authLoading = true;
@@ -184,17 +229,24 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get canEditPregameLanguage(): boolean {
-    return this.screen === 'setup' && (
-      !this.gameId || this.resumeAvailable ||
-      (this.progress === 0 && this.categoryInfo?.current === null)
-    );
+    // An already-issued question fixes the saved round's language. While the
+    // user decides Resume vs New, show that actual language read-only; after
+    // confirming New, the fresh unstarted run allows changes again.
+    return this.screen === 'setup' && !this.resumeAvailable &&
+      !this.resumeCandidate && (!this.gameId || !this.gameQuestionIssued);
   }
 
   // An excluded-category payment already allocated a game. Update its
   // language in PostgreSQL, not just the dropdown, before Q1 is offered.
   changeQuestionLanguage(language: string): void {
     if (!this.languages.includes(language)) return;
-    if (!this.gameId || this.resumeAvailable) {
+    // Defense in depth: programmatic changes must not make the saved game
+    // appear to have another language than its persisted Question rows.
+    if (this.resumeAvailable || this.resumeCandidate) {
+      this.selectedLanguage = this.resumeCandidate?.language || this.gameLanguage;
+      return;
+    }
+    if (!this.gameId) {
       this.selectedLanguage = language;
       return;
     }
@@ -236,9 +288,51 @@ export class AppComponent implements OnInit, OnDestroy {
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
     if (this.loading) return 'game.loading';
-    if (this.gameId && this.categoryInfo && this.categoryInfo.current === null && this.progress === 0)
-      return 'perks.startQuestions';
-    return this.gameId || this.resumeCandidate ? 'game.resume' : 'game.start';
+    // Buying a helper (or excluding categories) allocates a game ID before Q1.
+    // The first question, not the database row, defines the start of play.
+    if (this.resumeCandidate) {
+      return this.resumeCandidate.question_issued ? 'game.resume' : 'game.start';
+    }
+    return this.gameQuestionIssued ? 'game.resume' : 'game.start';
+  }
+
+  helperProfessionLabel(helper: HelperCard): string {
+    return this.locale.t('helper.profession.' + helper.profession);
+  }
+
+  helperTagline(helper: HelperCard): string {
+    const high = helper.tagline_high || helper.strong_topics[0] || '';
+    const low = helper.tagline_low || helper.weak_topics[0] || '';
+    const id = Math.min(4, Math.max(1, helper.tagline_id || 1));
+    const kind = low ? 'balanced' : 'strong';
+    return this.locale.format('helper.phrase.' + id + '.' + kind, {
+      strong: this.locale.t('helper.topic.' + high),
+      weak: this.locale.t('helper.topic.' + low),
+    });
+  }
+
+  get helperCallButtonKey(): string {
+    if (this.helperError) return 'helper.repeatCall';
+    return this.helperCallKey ? 'helper.recoverCall' : 'helper.call';
+  }
+
+  showHelperHire(): void {
+    this.helperHireOpen = !this.helperHireOpen;
+    this.helperChooseProfession = false;
+    this.selectedHelperProfession = '';
+    this.helperError = '';
+  }
+
+  selectRandomHelper(): void {
+    this.helperChooseProfession = false;
+    this.selectedHelperProfession = '';
+    void this.buyHelper();
+  }
+
+  showChooseHelper(): void {
+    this.helperChooseProfession = true;
+    this.selectedHelperProfession = '';
+    this.loadHelperProfessions();
   }
 
   ngOnInit(): void {
@@ -504,9 +598,10 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   startGame(): void {
-    if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
+    if (this.loading || this.perksBusy || this.helperBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.languageSaving || this.categoriesToExclude.length > 0) return;
+        this.languageSaving || this.categoriesToExclude.length > 0 ||
+        this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -515,6 +610,9 @@ export class AppComponent implements OnInit, OnDestroy {
       const run = this.resumeCandidate;
       this.resumeCandidate = null;
       this.gameId = run.game_id;
+      this.gameQuestionIssued = run.question_issued ?? (run.main_question_index ?? 0) > 0;
+      this.helperCard = run.helper ?? null;
+      this.bonusDecisionAvailable = run.bonus_decision_available === true;
       this.gameLanguage = run.language;
       this.selectedLanguage = run.language;
       this.progress = run.main_question_index ?? run.correct_main_answers;
@@ -528,6 +626,11 @@ export class AppComponent implements OnInit, OnDestroy {
       };
       this.stars = this.starTiers.filter(tier => this.currentStars[tier.key] > 0)
         .map(tier => tier.key);
+      if (this.bonusDecisionAvailable) {
+        this.screen = 'setup';
+        this.resumeAvailable = false;
+        return;
+      }
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
@@ -540,33 +643,76 @@ export class AppComponent implements OnInit, OnDestroy {
       this.resumeRunLanguage = '';
       this.showCategoryExclusions = false;
       this.resumeAvailable = false;
+      if (this.bonusDecisionAvailable) {
+        this.screen = 'setup';
+        return;
+      }
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
     }
-    this.createGame(false);
+    this.createGame(false, true);
   }
 
   startFreshGame(): void {
-    // Keep the saved round intact until the new one is successfully created.
-    // If POST /games fails the player can still choose Resume.
-    if (!this.resumeAvailable || !this.account || this.loading || this.perksBusy ||
-        this.configLoading || this.authLoading || this.authBusy || this.restoringGame ||
-        this.categoryLoading || this.languageSaving) return;
-    this.createGame(false);
+    this.requestNewGame();
+  }
+
+  requestNewGame(): void {
+    if (!this.account || !(this.gameId || this.resumeCandidate) ||
+        this.loading || this.perksBusy || this.helperBusy || this.configLoading ||
+        this.authLoading || this.authBusy || this.restoringGame ||
+        this.categoryLoading || this.languageSaving || this.showAbandonConfirm) return;
+    this.showAbandonConfirm = true;
+  }
+
+  cancelNewGame(): void {
+    if (!this.loading) this.showAbandonConfirm = false;
+  }
+
+  confirmNewGame(): void {
+    if (!this.showAbandonConfirm || !this.account || this.loading ||
+        this.perksBusy || this.helperBusy || this.restoringGame) return;
+    const oldId = this.gameId || this.resumeCandidate?.game_id;
+    if (!oldId) return;
+    const accountId = this.account.id;
+    const language = this.selectedLanguage;
+    this.showAbandonConfirm = false;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + oldId + '/replace', { language },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => { this.loading = false; }))
+      .subscribe({
+        next: (game) => {
+          if (this.account?.id !== accountId) return;
+          this.resetGameView();
+          this.gameId = game.game_id;
+          this.gameLanguage = game.language;
+          this.selectedLanguage = game.language;
+          this.rememberActiveGame(game.game_id);
+          this.loadCategoryInfo();
+          this.refreshSpendableStars();
+        },
+        error: (err: unknown) => {
+          if (this.account?.id !== accountId) return;
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else this.error = 'game.replaceFailed';
+        },
+      }));
   }
 
   openCategoryExclusions(): void {
     if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.languageSaving) return;
+        this.languageSaving || this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
     }
-    if (!this.gameId || this.resumeAvailable) {
-      // Allocate an empty game before taking payment. No question is issued
-      // until the player explicitly presses Start questions.
+    if (this.resumeAvailable || this.resumeCandidate || this.gameQuestionIssued) return;
+    if (!this.gameId) {
+      // Allocate an empty run; the player can still hire a helper afterwards.
       this.createGame(true);
       return;
     }
@@ -575,7 +721,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (this.showCategoryExclusions && !this.categoryInfo) this.loadCategoryInfo();
   }
 
-  private createGame(forExclusions: boolean): void {
+  private createGame(forExclusions: boolean, beginQuestions = false): void {
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
@@ -583,10 +729,22 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.resumeRunLanguage = '';
+        // Starting a different game must never carry a helper purchased for
+        // the previous run. Only clear it after POST /games succeeds.
+        this.helperCard = null;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = '';
+        this.helperCallQuestionId = '';
+        this.helperDetailsVisible = false;
+        this.helperHireOpen = false;
+        this.helperChooseProfession = false;
+        this.bonusDecisionAvailable = false;
         this.categoryInfo = null;
         this.categoriesToExclude = [];
         this.chosenCategory = '';
@@ -602,12 +760,17 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.screen = 'setup';
         this.showCategoryExclusions = forExclusions;
-        if (forExclusions) this.loadCategoryInfo();
-        else this.loadQuestion();
+        if (forExclusions || !beginQuestions) this.loadCategoryInfo();
+        if (beginQuestions) this.loadQuestion();
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
-        else this.fail('game.startFailed');
+        else if (err instanceof HttpErrorResponse && err.status === 409) {
+          // Another browser may have created an active game meanwhile.
+          // Ask the server for that game instead of hiding it behind an error.
+          this.loading = false;
+          this.restoreActiveGame();
+        } else this.fail('game.startFailed');
       },
     }));
   }
@@ -644,6 +807,11 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.gameQuestionIssued = true;
+        this.helperReply = '';
+        this.helperError = '';
+        this.helperCallKey = this.readHelperCallKey(question.question_id);
+        this.helperCallQuestionId = question.question_id;
         this.progress = Math.max(this.progress, Math.min(15, question.number - 1));
         this.feedback = null;
         this.screen = 'question';
@@ -711,6 +879,11 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
         this.feedback = result;
+        this.bonusDecisionAvailable = result.phase === 'bonus';
+        if (this.current?.bonus && !result.correct) {
+          this.currentStars.gold = Math.max(0, this.currentStars.gold - 1);
+          this.stars = this.stars.filter(tier => tier !== 'gold');
+        }
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
         this.gameCorrectAnswers = result.correct_main_answers;
@@ -739,7 +912,7 @@ export class AppComponent implements OnInit, OnDestroy {
   continue(): void {
     // Error recovery owns navigation; never silently issue a second request
     // while the Retry action is visible.
-    if (this.loading || this.canRetryQuestion) return;
+    if (this.loading || this.canRetryQuestion || this.bonusDecisionAvailable) return;
     if (this.gameEnded) {
       this.screen = 'done';
     } else {
@@ -749,9 +922,182 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   restart(): void {
-    if (this.loading) return;
-    this.forgetActiveGame();
-    this.resetGameView();
+    if (this.loading || !this.account || !this.gameId || !this.finishedPhase) return;
+    const terminalRun = this.gameId;
+    const accountId = this.account.id;
+    const language = this.selectedLanguage;
+    this.loading = true;
+    this.error = '';
+    // Play Again is an explicit request for a FRESH empty round. The server
+    // makes it idempotent and never discards another run's paid perks silently.
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + terminalRun + '/replay', { language },
+    ).pipe(timeout(this.requestTimeoutMs), finalize(() => {
+      if (this.account?.id === accountId) this.loading = false;
+    })).subscribe({
+      next: game => {
+        if (this.account?.id !== accountId) return;
+        this.resetGameView();
+        this.gameId = game.game_id;
+        this.gameLanguage = game.language;
+        this.selectedLanguage = game.language;
+        this.rememberActiveGame(game.game_id);
+        this.loadCategoryInfo();
+        this.refreshSpendableStars();
+      },
+      error: (err: unknown) => {
+        if (this.account?.id !== accountId) return;
+        if (this.isUnauthorized(err)) {
+          this.sessionExpired();
+        } else if (err instanceof HttpErrorResponse && err.status === 409 &&
+                   err.error?.detail?.code === 'saved_paid_round') {
+          // A forgotten round still owns paid perks. Do not forfeit them:
+          // show the existing Resume or confirmed New Game choice.
+          this.resetGameView();
+          this.restoreActiveGame();
+        } else {
+          this.error = 'game.startFailed';
+        }
+      },
+    }));
+  }
+
+  loadHelperProfessions(): void {
+    if (!this.account || this.helperProfessionsLoading || this.helperProfessions.length) return;
+    this.helperProfessionsLoading = true;
+    this.subscriptions.add(this.http.get<{ professions: string[] }>(
+      GAME_API + '/helper/professions',
+    ).pipe(timeout(10000), finalize(() => { this.helperProfessionsLoading = false; })).subscribe({
+      next: data => { this.helperProfessions = data.professions; },
+      error: () => { this.helperProfessions = []; },
+    }));
+  }
+
+  async buyHelper(): Promise<void> {
+    if (!this.account || this.helperCard || this.helperBusy || this.loading ||
+        this.restoringGame || this.resumeAvailable || this.resumeCandidate ||
+        this.error === 'game.restoreFailed' ||
+        this.screen !== 'setup' || this.progress !== 0) return;
+    this.helperBusy = true;
+    this.helperError = '';
+    try {
+      if (!this.gameId) {
+        const game = await firstValueFrom(this.http.post<GameInfo>(
+          GAME_API, { language: this.selectedLanguage },
+        ).pipe(timeout(this.requestTimeoutMs)));
+        this.gameId = game.game_id;
+        this.gameQuestionIssued = false;
+        this.gameLanguage = game.language;
+        this.rememberActiveGame(game.game_id);
+        this.resumeCandidate = null;
+        this.categoryInfo = null;
+      }
+      this.helperCard = await firstValueFrom(this.http.post<HelperCard>(
+        GAME_API + '/' + this.gameId + '/helper/purchase',
+        { profession: this.selectedHelperProfession || null, ui_language: this.locale.code },
+      ).pipe(timeout(12000)));
+      this.helperHireOpen = false;
+      this.helperChooseProfession = false;
+      // The purchase pre-allocates a run. Category exclusion must remain
+      // available immediately, without requiring a page reload.
+      this.loadCategoryInfo();
+      this.refreshStats();
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else if (!this.gameId && error instanceof HttpErrorResponse && error.status === 409)
+        this.restoreActiveGame();
+      else this.helperError = 'helper.purchaseFailed';
+    } finally {
+      this.helperBusy = false;
+    }
+  }
+
+  private helperCallStorageKey(questionId: string): string {
+    return HELPER_CALL_KEY + this.account?.id + ':' + this.gameId + ':' + questionId;
+  }
+
+  private readHelperCallKey(questionId: string): string {
+    try { return localStorage.getItem(this.helperCallStorageKey(questionId)) || ''; }
+    catch { return ''; }
+  }
+
+  consultHelper(): void {
+    if (!this.account || !this.gameId || !this.current || this.current.bonus ||
+        this.screen !== 'question' || !this.helperCard || this.helperBusy || this.loading ||
+        (this.helperCard.consultations_remaining <= 0 && !this.helperCallKey) ||
+        !!this.helperReply) return;
+    if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
+      this.helperCallKey = crypto.randomUUID();
+      this.helperCallQuestionId = this.current.question_id;
+      try {
+        localStorage.setItem(this.helperCallStorageKey(this.current.question_id), this.helperCallKey);
+      } catch { /* private mode */ }
+    }
+    this.helperBusy = true;
+    this.helperError = '';
+    const gameId = this.gameId;
+    const questionId = this.current.question_id;
+    this.subscriptions.add(this.http.post<HelperReply>(
+      GAME_API + '/' + gameId + '/helper/call',
+      { question_id: questionId, request_key: this.helperCallKey },
+    ).pipe(timeout(22000), finalize(() => { this.helperBusy = false; })).subscribe({
+      next: result => {
+        if (this.gameId !== gameId || this.current?.question_id !== questionId) return;
+        this.helperReply = result.text;
+        this.helperCard = result.helper;
+      },
+      error: () => {
+        if (this.gameId === gameId && this.current?.question_id === questionId)
+          this.helperError = 'helper.callFailed';
+      },
+    }));
+  }
+
+  acceptBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading || !this.account || !this.gameId) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/accept', {},
+    ).pipe(timeout(12000)).subscribe({
+      next: () => {
+        this.loading = false;
+        this.bonusDecisionAvailable = false;
+        this.refreshSpendableStars();
+        this.generatingNextQuestion = true;
+        this.loadQuestion();
+      },
+      error: (err: unknown) => {
+        this.loading = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'helper.bonusDecisionFailed';
+      },
+    }));
+  }
+
+  declineBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading || !this.account || !this.gameId) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/decline', {},
+    ).pipe(timeout(12000)).subscribe({
+      next: () => {
+        this.loading = false;
+        this.bonusDecisionAvailable = false;
+        this.finishedPhase = 'completed';
+        this.current = null;
+        this.feedback = null;
+        this.screen = 'done';
+        this.forgetActiveGame();
+        this.refreshStats();
+      },
+      error: (err: unknown) => {
+        this.loading = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'helper.bonusDecisionFailed';
+      },
+    }));
   }
 
   private signedIn(account: Account): void {
@@ -1137,41 +1483,67 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  retryRestoreGame(): void {
+    if (!this.account || this.restoringGame || this.loading ||
+        this.error !== 'game.restoreFailed') return;
+    this.error = '';
+    this.restoreActiveGame();
+  }
+
   private restoreActiveGame(): void {
     const accountId = this.account?.id;
     if (!accountId) return;
-    const savedId = this.readActiveGame(accountId);
-    if (!savedId) return;
+    // Always ask PostgreSQL. Browser storage is only a best-effort cache:
+    // it may be missing after switching localhost <-> 127.0.0.1, browsers,
+    // cookies, or clearing site data. The authenticated server owns the run.
     const version = ++this.restoreVersion;
     this.restoringGame = true;
-    this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + savedId).pipe(
+    this.subscriptions.add(this.http.get<GameInfo | null>(GAME_API + '/active').pipe(
       timeout(10000),
       finalize(() => { if (this.restoreVersion === version) this.restoringGame = false; }),
     ).subscribe({
       next: (run) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
-        if (run.phase !== 'main' && run.phase !== 'bonus') {
+        this.error = '';
+        if (!run) {
           this.removeSavedGame(accountId);
           return;
         }
-        // The backend confirmed the saved run is still open. Don't bind it to
-        // the UI as the active run until the player explicitly chooses Resume.
+        if (run.phase !== 'main' && run.phase !== 'bonus') {
+          this.error = 'game.restoreFailed';
+          return;
+        }
+        this.rememberActiveGame(run.game_id);
+        // A game without an issued first question is still in pregame setup.
+        // Restore it directly: purchasing a helper allocates and charges this
+        // game before Q1, and offering Start New here would strand the purchase.
+        if (run.phase === 'main' && run.question_issued === false) {
+          this.resetGameView();
+          this.gameId = run.game_id;
+          this.gameLanguage = run.language;
+          this.selectedLanguage = run.language;
+          this.gameQuestionIssued = false;
+          this.helperCard = run.helper ?? null;
+          this.loadCategoryInfo();
+          return;
+        }
+        // Once Q1 has been issued, leave Resume / Start New as an explicit
+        // choice; the saved helper is still visible in the setup preview.
+        // Clear any old helper/game UI so the card belongs to this run only.
+        this.resetGameView();
         this.resumeCandidate = run;
         this.resumeRunLanguage = run.language;
+        this.gameLanguage = run.language;
+        this.selectedLanguage = run.language;
         this.resumeAvailable = true;
-        this.current = null;
-        this.feedback = null;
         this.screen = 'setup';
       },
       error: (err: unknown) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
-        if (err instanceof HttpErrorResponse && err.status === 404) {
-          this.removeSavedGame(accountId);
-        } else if (this.isUnauthorized(err)) {
-          this.sessionExpired();
-        } else {
-          this.error = 'game.restoreFailed';
-        }
+        // A 404 here is an API mismatch/error, not proof that the saved
+        // round disappeared. Never clear its cache on a failed lookup.
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'game.restoreFailed';
       },
     }));
   }
@@ -1186,6 +1558,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.canRetryQuestion = false;
         this.progress = run.main_question_index ?? run.correct_main_answers;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
+        this.gameQuestionIssued = run.question_issued === true;
         this.gameCorrectAnswers = run.correct_main_answers;
         this.skippedQuestions = run.skipped_questions ?? 0;
         if (run.phase === 'completed' || run.phase === 'lost') {
@@ -1222,6 +1596,17 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.helperCard = null;
+    this.showAbandonConfirm = false;
+    this.helperReply = '';
+    this.helperError = '';
+    this.helperCallKey = '';
+    this.helperCallQuestionId = '';
+    this.helperHireOpen = false;
+    this.helperChooseProfession = false;
+    this.gameQuestionIssued = false;
+    this.helperDetailsVisible = false;
+    this.bonusDecisionAvailable = false;
     this.error = '';
     this.progress = 0;
     this.gameCorrectAnswers = 0;
@@ -1241,10 +1626,6 @@ export class AppComponent implements OnInit, OnDestroy {
     const userId = this.account?.id;
     if (!userId) return;
     try { localStorage.setItem(ACTIVE_GAME_KEY + userId, id); } catch { /* private mode */ }
-  }
-  private readActiveGame(userId: string): string | null {
-    try { return localStorage.getItem(ACTIVE_GAME_KEY + userId); }
-    catch { return null; }
   }
   private removeSavedGame(userId: string): void {
     try { localStorage.removeItem(ACTIVE_GAME_KEY + userId); } catch { /* private mode */ }

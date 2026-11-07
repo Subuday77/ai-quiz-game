@@ -13,7 +13,13 @@ import { TestScheduler } from 'rxjs/testing';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const temp = mkdtempSync(join(root, '.quiz-tests-'));
-after(() => rmSync(temp, { recursive: true, force: true }));
+const testComponents = [];
+after(() => {
+  // Mock component instances own RxJS subscriptions and timer-based i18n polls.
+  // Dispose every instance so Node can exit naturally after all assertions.
+  for (const app of testComponents) app.ngOnDestroy();
+  rmSync(temp, { recursive: true, force: true });
+});
 const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
 const english = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
 const compilerOptions = {
@@ -49,8 +55,10 @@ const question = {
 };
 
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
-                  signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false } = {}) {
+                  signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
+                  activeLookupPending = false, activeLookupPendingOnRetry = false } = {}) {
   const requests = [];
+  let activeLookupCount = 0;
   const posts = [];
   const patches = [];
   const profile = {
@@ -82,6 +90,14 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
       }
+      if (url === '/api/v2/games/active') {
+        activeLookupCount++;
+        if (!activeLookupPending &&
+            !(activeLookupPendingOnRetry && activeLookupCount > 1) &&
+            !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
+          return of(null); // No active game in the default mock database.
+        }
+      }
       if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
         return of({
           allowed: ['Ancient history', 'Biology', 'Physics', 'Poetry'],
@@ -107,6 +123,7 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
     },
   };
   const app = new AppComponent(http);
+  testComponents.push(app);
   app.ngOnInit();
   app.gameId = 'existing-game';
   const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
@@ -148,6 +165,26 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(modalOpened, true);
   assert.equal(app.account, null);
   assert.equal(posts.length, 0);
+});
+
+test('question heading displays preparation during first and later question generation', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /<h1 \*ngIf="screen === 'question' && questionLoading">\{\{ locale\.t\('game\.loading'\) \}\}<\/h1>/);
+  assert.match(template, /<h1 \*ngIf="screen === 'question' && !questionLoading && \(current \|\| canRetryQuestion\)">/);
+  assert.doesNotMatch(template, /<h1[^>]*generatingNextQuestion/);
+
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.progress = 0;
+    app.generatingNextQuestion = false; // First question: the old title bug.
+    app.loadQuestion();
+    assert.equal(app.questionLoading, true);
+    assert.equal(app.current, null);
+    assert.equal(app.screen, 'question');
+    succeed(requests[0]);
+  });
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.current.question_id, question.question_id);
 });
 
 test('long-wait warning appears at 15 seconds and clears on success', () => {
@@ -224,7 +261,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
   assert.equal(posts.length, 1);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   // Setup and category actions are under screen=setup, inaccessible on failure.
-  assert.match(template, /<div \*ngIf="screen === 'setup'" class="setup">/);
+  assert.match(template, /<div \*ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">/);
   assert.match(template, /<div class="question-actions" \*ngIf="canRetryQuestion && !duplicateExhausted">/);
 });
 
@@ -401,56 +438,60 @@ test('failed question hides Next and offers one Retry without losing progress', 
   assert.equal(app.canRetryQuestion, false);
   assert.equal(app.progress, 10);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted"/);
+  assert.match(template, /\*ngIf="!canRetryQuestion && !duplicateExhausted && !bonusDecisionAvailable"/);
 });
 
-test('bonus failure keeps 15/15; only ordinary Retry is visible', () => {
+test('bonus choice is required before issuing Q16; failed loading still permits retry', () => {
   const { app, requests, posts, scheduler } = setup();
   app.screen = 'feedback';
   app.progress = 15;
+  app.bonusDecisionAvailable = true;
   app.feedback = { phase: 'bonus', correct: true, correct_answer: 'B',
     correct_main_answers: 15, achievement: 'gold' };
   app.currentStars.gold = 1;
+  app.continue();
+  assert.equal(requests.length, 0); // Cannot bypass the explicit gold decision.
   scheduler.run(() => {
-    app.continue();
+    // Keep both subscription and completion on the same virtual scheduler.
+    // Crossing to real time leaves RxJS's timeout interval alive after tests.
+    app.acceptBonus();
+    assert.equal(posts[0].url, '/api/v2/games/existing-game/bonus/accept');
+    succeed(posts[0], { phase: 'bonus', correct_main_answers: 15 });
+    assert.equal(app.bonusDecisionAvailable, false);
+    assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
     requests[0].subject.error(new HttpErrorResponse({ status: 503 }));
     assert.equal(app.canRetryQuestion, true);
     assert.equal(app.progress, 15);
-    assert.equal(app.currentStars.gold, 1);
-    app.continue(); // "Next question" cannot issue a second request.
+    app.continue();
     assert.equal(requests.length, 1);
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, '/api/v2/games/existing-game/question');
     succeed(requests[1], { ...question, number: 16, difficulty: 15, bonus: true });
   });
-  assert.equal(posts.length, 0); // Player has no topic-switch endpoint.
   assert.equal(app.current.bonus, true);
   assert.equal(app.canRetryQuestion, false);
-  assert.equal(app.progress, 15);
   assert.equal(app.currentStars.gold, 1);
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.doesNotMatch(template, /changeBonusTopic|game.changeBonusTopic/);
-  assert.doesNotMatch(source, /changeBonusTopic|canChangeBonusTopic|bonus\/change-topic/);
 });
 
-test('bonus network errors do not offer any topic selection', () => {
+test('bonus chooser network errors do not issue a question or charge again', () => {
   for (const error of [
-    new HttpErrorResponse({ status: 0 }), new Error('connection error')
+    new HttpErrorResponse({ status: 0 }), new Error('connection error'),
   ]) {
-    const { app, requests, posts, scheduler } = setup();
+    const { app, requests, posts } = setup();
+    app.bonusDecisionAvailable = true;
     app.progress = 15;
     app.screen = 'feedback';
     app.feedback = { phase: 'bonus', correct: true, correct_answer: 'B',
       correct_main_answers: 15, achievement: 'gold' };
-    scheduler.run(() => {
-      app.continue();
-      requests[0].subject.error(error);
-    });
-    assert.equal(app.canRetryQuestion, true);
-    assert.equal(posts.length, 0);
+    app.acceptBonus();
+    assert.equal(posts.length, 1);
+    posts[0].subject.error(error);
+    assert.equal(requests.length, 0);
+    assert.equal(app.bonusDecisionAvailable, true);
+    assert.equal(app.error, 'helper.bonusDecisionFailed');
   }
-  assert.equal(english['game.changeBonusTopic'], undefined);
 });
 
 test('results button keeps results label and does not generate a new question', () => {
@@ -585,7 +626,7 @@ test('visible pregame exclusion button creates empty round and defers Q1 until S
     assert.equal(app.screen, 'setup');
     assert.equal(app.showCategoryExclusions, true);
     assert.equal(app.categoryInfo.can_exclude, true);
-    assert.equal(app.setupButtonLabelKey, 'perks.startQuestions');
+    assert.equal(app.setupButtonLabelKey, 'game.start');
     assert.equal(requests.length, 0);
     app.startGame();
     assert.equal(app.showCategoryExclusions, false);
@@ -621,6 +662,7 @@ test('adjacent star arrows exchange exactly one bundle in either direction', () 
 
 test('setup button shows loading during resume and start again after failed creation', () => {
   const { app, requests, posts, scheduler } = setup();
+  app.gameQuestionIssued = true;
   assert.equal(app.setupButtonLabelKey, 'game.resume');
   scheduler.run(() => {
     app.startGame();
@@ -629,6 +671,7 @@ test('setup button shows loading during resume and start again after failed crea
   });
   assert.equal(app.screen, 'question');
   app.gameId = '';
+  app.gameQuestionIssued = false;
   app.screen = 'setup';
   assert.equal(app.setupButtonLabelKey, 'game.start');
   scheduler.run(() => {
@@ -640,7 +683,477 @@ test('setup button shows loading during resume and start again after failed crea
   assert.equal(app.setupButtonLabelKey, 'game.start');
 });
 
-test('offers a saved round without locking language and resumes only on choice', () => {
+test('hiring a helper retains category-exclusion setup and uses UI language only', async () => {
+  const { app, requests, posts } = setup();
+  app.gameId = 'existing-game';
+  app.gameQuestionIssued = false;
+  app.selectedLanguage = 'Italian'; // Question language must not influence names.
+  app.locale.code = 'ru';
+  app.spendableStars.platinum = 1;
+  app.openCategoryExclusions(); // Can exclude before buying the helper.
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.categoryInfo.can_exclude, true);
+  app.selectRandomHelper();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/games/existing-game/helper/purchase');
+  assert.deepEqual(posts[0].body, { profession: null, ui_language: 'ru' });
+  succeed(posts[0], {
+    id: 'saved-helper', name: 'Мария Иванова', profession: 'Physicist',
+    gender: 'female', strong_topics: [], weak_topics: [],
+    consultations_remaining: 3, consultations_total: 3,
+    erudition: 57, price: 1, refunded: false,
+  });
+  await Promise.resolve();
+  assert.equal(app.helperCard.name, 'Мария Иванова');
+  assert.equal(app.categoryInfo.can_exclude, true);
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.selectedLanguage, 'Italian');
+  assert.equal(app.helperBusy, false);
+  assert.equal(requests.length, 0); // Q1 never appears on hiring.
+});
+
+test('concurrent browser game creation conflict restores already-active DB round', () => {
+  const { app, posts, requests, scheduler } = setup({ activeLookupPendingOnRetry: true });
+  app.gameId = '';
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(posts[0].url, '/api/v2/games');
+    posts[0].subject.error(new HttpErrorResponse({ status: 409 }));
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    assert.equal(app.restoringGame, true);
+    // Resolve the server lookup inside virtual time so its 10s timeout
+    // cannot expire while the TestScheduler flushes pending timers.
+    succeed(requests[0], {
+      game_id: 'other-browser-active', language: 'German', phase: 'main',
+      question_issued: true, correct_main_answers: 2, main_question_index: 3,
+    });
+  });
+  assert.equal(app.error, '');
+  assert.equal(app.restoringGame, false);
+  assert.equal(app.resumeCandidate.game_id, 'other-browser-active');
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(posts.length, 1);
+});
+
+test('F5 and fresh browser recover a started round directly from PostgreSQL with no localStorage', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup({ activeLookupPending: true });
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    assert.equal(app.restoringGame, true);
+    scheduler.run(() => app.startGame());
+    assert.equal(posts.length, 0); // Never allocate while server lookup is pending.
+
+    succeed(requests[0], {
+      game_id: 'db-only-run', language: 'Russian', phase: 'main',
+      correct_main_answers: 6, main_question_index: 6, question_issued: true,
+      helper: { id: 'paid', name: 'Ольга Иванова', profession: 'Physicist',
+        erudition: 55, strong_topics: [], weak_topics: [],
+        consultations_remaining: 2, consultations_total: 3,
+        price: 1, refunded: false },
+    });
+    assert.equal(app.restoringGame, false);
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.resumeCandidate.game_id, 'db-only-run');
+    assert.equal(app.displayedHelperCard.id, 'paid');
+    assert.equal(saved.get('ai-quiz-game:active-round:v2:user-1'), 'db-only-run');
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(requests[1].url, '/api/v2/games/db-only-run/question');
+      succeed(requests[1], { ...question, number: 7 });
+    });
+    assert.equal(app.gameId, 'db-only-run');
+    assert.equal(app.progress, 6);
+    assert.equal(app.screen, 'question');
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('server-owned active run overrides an obsolete localStorage ID', () => {
+  const prior = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'obsolete-game']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests } = setup();
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    succeed(requests[0], {
+      game_id: 'actual-db-game', language: 'Hebrew', phase: 'main',
+      correct_main_answers: 0, question_issued: false,
+    });
+    assert.equal(app.gameId, 'actual-db-game');
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.selectedLanguage, 'Hebrew');
+    assert.equal(saved.get(key), 'actual-db-game');
+  } finally {
+    if (prior === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prior;
+  }
+});
+
+test('server recovery error never clears saved ID or permits a silent new game', () => {
+  const { app, requests, posts, scheduler } = setup({ activeLookupPending: true });
+  app.gameId = '';
+  requests[0].subject.error(new HttpErrorResponse({ status: 404 }));
+  assert.equal(app.error, 'game.restoreFailed');
+  scheduler.run(() => app.startGame());
+  assert.equal(posts.length, 0);
+  app.retryRestoreGame();
+  assert.equal(requests[1].url, '/api/v2/games/active');
+  succeed(requests[1], null);
+  assert.equal(app.error, '');
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(posts.length, 1);
+  });
+});
+
+test('transient restore failure never creates new game over a paid round', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'paid-pregame']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, v) => saved.set(k, v),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup();
+    app.gameId = '';
+    requests[0].subject.error(new Error('offline'));
+    assert.equal(app.error, 'game.restoreFailed');
+    scheduler.run(() => {
+      app.startGame();
+      app.openCategoryExclusions();
+    });
+    assert.equal(posts.length, 0);
+    assert.equal(saved.get(key), 'paid-pregame');
+    app.retryRestoreGame();
+    assert.equal(requests[1].url, '/api/v2/games/active');
+    succeed(requests[1], {
+      game_id: 'paid-pregame', language: 'Russian',
+      phase: 'main', correct_main_answers: 0, question_issued: false,
+      helper: {
+        id: 'one-paid-helper', name: 'Андрей Петров', profession: 'Physicist',
+        consultations_remaining: 3,
+      },
+    });
+    assert.equal(app.error, '');
+    assert.equal(app.gameId, 'paid-pregame');
+    assert.equal(app.helperCard.id, 'one-paid-helper');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('abandoned round reload follows committed replacement instead of losing setup', () => {
+  const prior = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'old-game']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, v) => saved.set(k, v),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts } = setup();
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    // The server is authoritative: it returns the successor directly even
+    // when the browser still remembers the old abandoned run.
+    succeed(requests[0], {
+      game_id: 'new-game', phase: 'main', language: 'Hebrew',
+      correct_main_answers: 0, question_issued: false,
+    });
+    assert.equal(saved.get(key), 'new-game');
+    assert.equal(app.gameId, 'new-game');
+    assert.equal(app.selectedLanguage, 'Hebrew');
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.gameQuestionIssued, false);
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(posts.length, 0);
+  } finally {
+    if (prior === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prior;
+  }
+});
+
+test('profession display always uses neutral profession key without a gender prefix', () => {
+  const { app } = setup();
+  for (const gender of ['male', 'female', '']) {
+    assert.equal(app.helperProfessionLabel({ gender, profession: 'Physicist' }), 'Physicist');
+  }
+  assert.doesNotMatch(source, /helper\\.professionFemale\\./);
+  assert.equal(english['helper.professionFemale.Physicist'], undefined);
+});
+
+test('reload restores a paid helper before Q1 without buying another or allocating a new run', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'paid-pregame']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  const helper = {
+    id: 'persisted-helper', name: 'Maria Sample', profession: 'Historian',
+    erudition: 67, strong_topics: ['History'], weak_topics: ['Sports'],
+    consultations_remaining: 3, consultations_total: 3, refunded: false, price: 1,
+  };
+  try {
+    const { app, requests, posts, patches, scheduler } = setup();
+    app.gameId = ''; // setup() supplies a dummy ID after initialization.
+    assert.equal(requests[0].url, '/api/v2/games/active');
+    succeed(requests[0], {
+      game_id: 'paid-pregame', language: 'English', phase: 'main',
+      correct_main_answers: 0, main_question_index: 0,
+      question_issued: false, helper,
+    });
+    assert.equal(app.restoringGame, false);
+    assert.equal(app.gameId, 'paid-pregame');
+    assert.equal(app.resumeCandidate, null);
+    assert.equal(app.resumeAvailable, false);
+    assert.equal(app.helperCard, helper);
+    assert.equal(app.displayedHelperCard, helper);
+    assert.equal(app.gameQuestionIssued, false);
+    assert.equal(app.setupButtonLabelKey, 'game.start');
+    assert.equal(app.canEditPregameLanguage, true);
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(saved.get(key), 'paid-pregame');
+    assert.equal(posts.length, 0); // A reload NEVER repurchases the helper.
+
+    // Language remains editable before Q1, even when a helper was already paid for.
+    app.changeQuestionLanguage('Russian');
+    assert.equal(patches[0].url, '/api/v2/games/paid-pregame/language');
+    assert.deepEqual(patches[0].body, { language: 'Russian' });
+    succeed(patches[0], {
+      game_id: 'paid-pregame', language: 'Russian', phase: 'main',
+      correct_main_answers: 0, question_issued: false, helper,
+    });
+    assert.equal(app.selectedLanguage, 'Russian');
+
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(requests[1].url, '/api/v2/games/paid-pregame/question');
+      succeed(requests[1], { ...question, number: 1, difficulty: 0 });
+    });
+    assert.equal(app.gameQuestionIssued, true);
+    assert.equal(app.helperCard, helper);
+    assert.equal(posts.length, 0);
+    const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+    assert.match(template, /class="helper-tablet" \*ngIf="displayedHelperCard as helper"/);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+
+test('Play Again creates a fresh unstarted DB round and never buys a helper', () => {
+  const { app, requests, posts } = setup();
+  const oldHelper = {
+    id: 'old-helper', name: 'Old previous helper', profession: 'Historian',
+    strong_topics: [], weak_topics: [], erudition: 50,
+    consultations_remaining: 0, consultations_total: 3, refunded: false, price: 1,
+  };
+  app.screen = 'done';
+  app.gameId = 'terminal-round';
+  app.finishedPhase = 'lost';
+  app.helperCard = oldHelper;
+  app.selectedLanguage = 'Russian';
+  app.restart();
+  assert.equal(app.screen, 'done'); // Keep results visible until server commits.
+  assert.equal(app.loading, true);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
+  assert.deepEqual(posts[0].body, { language: 'Russian' });
+  assert.equal(requests.length, 0);
+  succeed(posts[0], {
+    game_id: 'fresh-run', language: 'Russian', phase: 'main',
+    correct_main_answers: 0, main_question_index: 0, question_issued: false,
+    helper: null,
+  });
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.loading, false);
+  assert.equal(app.gameId, 'fresh-run');
+  assert.equal(app.gameQuestionIssued, false);
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(app.helperCard, null);
+  assert.equal(app.displayedHelperCard, null);
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  assert.equal(posts.length, 1); // No helper repurchase, no second run.
+  assert.equal(requests.length, 0); // Q1 is not generated until Start.
+});
+
+test('Play Again protects an older paid round and offers Resume or confirmed New', () => {
+  const { app, requests, posts, patches } = setup({ activeLookupPendingOnRetry: true });
+  const recoveredHelper = {
+    id: 'recovered-helper', name: 'Luiz Gustavo Pacheco', profession: 'Doctor',
+    strong_topics: ['Medicine'], weak_topics: ['Geography'], erudition: 60,
+    consultations_remaining: 3, consultations_total: 3, refunded: false, price: 1,
+  };
+  app.screen = 'done';
+  app.gameId = 'terminal-round';
+  app.finishedPhase = 'lost';
+  app.selectedLanguage = 'English';
+  app.restart();
+  assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
+  posts[0].subject.error(new HttpErrorResponse({
+    status: 409, error: { detail: { code: 'saved_paid_round',
+      game_id: 'older-open-game' } },
+  }));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/v2/games/active');
+  succeed(requests[0], {
+    game_id: 'older-open-game', language: 'Russian', phase: 'main',
+    correct_main_answers: 0, main_question_index: 0,
+    question_issued: true, helper: recoveredHelper,
+  });
+  assert.equal(app.restoringGame, false);
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(app.gameId, '');
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(app.canEditPregameLanguage, false);
+  assert.equal(app.displayedHelperCard, recoveredHelper);
+  app.changeQuestionLanguage('English');
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(patches.length, 0);
+  app.startGame();
+  assert.equal(app.helperCard, recoveredHelper);
+  assert.equal(requests[1].url, '/api/v2/games/older-open-game/question');
+  succeed(requests[1], { ...question, question: 'Какой океан?', number: 1 });
+  assert.equal(app.selectedLanguage, 'Russian');
+  assert.equal(posts.length, 1); // No extra platinum charge.
+});
+
+test('Play Again API failure keeps the terminal result and permits retry', () => {
+  const { app, posts } = setup();
+  app.screen = 'done';
+  app.gameId = 'terminal-round';
+  app.finishedPhase = 'lost';
+  app.restart();
+  posts[0].subject.error(new Error('offline'));
+  assert.equal(app.screen, 'done');
+  assert.equal(app.gameId, 'terminal-round');
+  assert.equal(app.finishedPhase, 'lost');
+  assert.equal(app.loading, false);
+  assert.equal(app.error, 'game.startFailed');
+  app.restart();
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].url, posts[0].url);
+});
+
+test('saved game with issued question previews paid helper before Resume', () => {
+  const previous = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'already-started']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, value) => saved.set(k, value),
+    removeItem: k => saved.delete(k),
+  };
+  const helper = {
+    id: 'helper-from-db', name: 'Henri Example', profession: 'Chef',
+    erudition: 42, strong_topics: ['Chemistry'], weak_topics: ['Music'],
+    consultations_remaining: 2, consultations_total: 3, refunded: false, price: 1,
+  };
+  try {
+    const { app, requests, posts, scheduler } = setup();
+    app.gameId = '';
+    succeed(requests[0], {
+      game_id: 'already-started', language: 'French', phase: 'main',
+      correct_main_answers: 3, main_question_index: 4,
+      question_issued: true, helper,
+    });
+    assert.equal(app.gameId, '');
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.helperCard, null); // Preview is not yet the active game.
+    assert.equal(app.displayedHelperCard, helper);
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(app.gameId, 'already-started');
+      assert.equal(app.helperCard, helper);
+      assert.equal(requests[1].url, '/api/v2/games/already-started/question');
+      succeed(requests[1], { ...question, number: 5 });
+    });
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('new-round cancellation and failed POST preserve purchases; success opens clean SETUP', () => {
+  const { app, posts, requests, scheduler } = setup();
+  const oldHelper = {
+    id: 'old-helper', name: 'Old Helper', profession: 'Engineer',
+    erudition: 50, strong_topics: [], weak_topics: [],
+    consultations_remaining: 2, consultations_total: 3, refunded: false, price: 1,
+  };
+  app.helperCard = oldHelper;
+  app.helperReply = 'Old reply';
+  app.helperCallKey = 'old-call';
+  app.resumeAvailable = true;
+  app.selectedLanguage = 'Spanish';
+
+  app.startFreshGame();
+  assert.equal(app.showAbandonConfirm, true);
+  assert.equal(posts.length, 0);
+  app.cancelNewGame();
+  assert.equal(app.showAbandonConfirm, false);
+  assert.equal(app.helperCard, oldHelper);
+
+  scheduler.run(() => {
+    app.startFreshGame();
+    app.confirmNewGame();
+    assert.equal(posts[0].url, '/api/v2/games/existing-game/replace');
+    assert.deepEqual(posts[0].body, { language: 'Spanish' });
+    assert.equal(app.helperCard, oldHelper);
+    posts[0].subject.error(new Error('network error'));
+  });
+  assert.equal(app.helperCard, oldHelper);
+  assert.equal(app.error, 'game.replaceFailed');
+  assert.equal(app.gameId, 'existing-game');
+  scheduler.run(() => {
+    app.startFreshGame();
+    app.confirmNewGame();
+    succeed(posts[1], {
+      game_id: 'another-game', language: 'Spanish', phase: 'main',
+      correct_main_answers: 0,
+    });
+  });
+  assert.equal(app.gameId, 'another-game');
+  assert.equal(app.screen, 'setup');
+  assert.equal(app.gameQuestionIssued, false);
+  assert.equal(app.categoryInfo.can_exclude, true);
+  assert.equal(app.helperCard, null);
+  assert.equal(app.displayedHelperCard, null);
+  assert.equal(app.helperReply, '');
+  assert.equal(app.helperCallKey, '');
+  assert.equal(requests.length, 0); // Must not issue Q1 automatically.
+});
+
+test('saved round shows its real question language and resumes only on choice', () => {
   const previous = globalThis.localStorage;
   const saved = new Map([['ai-quiz-game:active-round:v2:user-1', 'saved-game-id']]);
   globalThis.localStorage = {
@@ -651,13 +1164,13 @@ test('offers a saved round without locking language and resumes only on choice',
   try {
     const { app, requests, posts } = setup();
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].url, '/api/v2/games/saved-game-id');
+    assert.equal(requests[0].url, '/api/v2/games/active');
     assert.equal(app.restoringGame, true);
     app.gameId = '';
     app.startGame();
     assert.equal(posts.length, 0);
     succeed(requests[0], { game_id: 'saved-game-id', language: 'German',
-      phase: 'main', correct_main_answers: 7 });
+      phase: 'main', correct_main_answers: 7, question_issued: true });
     assert.equal(app.restoringGame, false);
     assert.equal(app.resumeAvailable, true);
     assert.equal(app.gameId, '');
@@ -665,7 +1178,10 @@ test('offers a saved round without locking language and resumes only on choice',
     assert.equal(app.progress, 0);
     assert.equal(app.currentStars.bronze, 0);
     assert.equal(app.setupButtonLabelKey, 'game.resume');
-    app.selectedLanguage = 'Spanish'; // Available for a fresh game.
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, false);
+    app.changeQuestionLanguage('Spanish'); // Saved language cannot be changed.
+    assert.equal(app.selectedLanguage, 'German');
     app.startGame();
     assert.equal(app.gameId, 'saved-game-id');
     assert.equal(app.selectedLanguage, 'German'); // Resume uses saved run language.
@@ -679,7 +1195,7 @@ test('offers a saved round without locking language and resumes only on choice',
   }
 });
 
-test('saved round can be replaced by a fresh game in the selected language', () => {
+test('saved started round replacement requires warning and opens unstarted setup', () => {
   const previous = globalThis.localStorage;
   const key = 'ai-quiz-game:active-round:v2:user-1';
   const saved = new Map([[key, 'saved-game-id']]);
@@ -689,49 +1205,71 @@ test('saved round can be replaced by a fresh game in the selected language', () 
     removeItem: k => saved.delete(k),
   };
   try {
-    const { app, requests, posts, scheduler } = setup();
+    const { app, requests, posts, patches, scheduler } = setup();
     app.gameId = '';
-    succeed(requests[0], { game_id: 'saved-game-id', language: 'German',
-      phase: 'main', correct_main_answers: 7, main_question_index: 8 });
+    succeed(requests[0], {
+      game_id: 'saved-game-id', language: 'German', phase: 'main',
+      correct_main_answers: 7, main_question_index: 8, question_issued: true,
+    });
     assert.equal(app.resumeAvailable, true);
     assert.equal(saved.get(key), 'saved-game-id');
-    app.selectedLanguage = 'Hebrew';
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, false);
+    app.startFreshGame();
+    assert.equal(app.showAbandonConfirm, true);
+    assert.equal(posts.length, 0);
+    app.cancelNewGame();
+    assert.equal(app.showAbandonConfirm, false);
+    assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
     scheduler.run(() => {
       app.startFreshGame();
+      app.confirmNewGame();
       assert.equal(posts.length, 1);
-      assert.equal(posts[0].url, '/api/v2/games');
-      assert.equal(posts[0].body.language, 'Hebrew');
-      assert.equal(app.loading, true);
-      assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
+      assert.equal(posts[0].url, '/api/v2/games/saved-game-id/replace');
+      assert.equal(posts[0].body.language, 'German');
       assert.equal(saved.get(key), 'saved-game-id');
-      succeed(posts[0], { game_id: 'new-game-id', language: 'Hebrew',
-        phase: 'main', correct_main_answers: 0 });
-      assert.equal(app.gameId, 'new-game-id');
-      assert.equal(saved.get(key), 'new-game-id');
-      assert.equal(app.resumeAvailable, false);
-      assert.equal(app.resumeCandidate, null);
-      assert.equal(app.selectedLanguage, 'Hebrew');
-      assert.equal(app.progress, 0);
-      assert.equal(requests[1].url, '/api/v2/games/new-game-id/question');
-      succeed(requests[1], { ...question, number: 1 });
+      succeed(posts[0], {
+        game_id: 'new-game-id', language: 'German',
+        phase: 'main', correct_main_answers: 0, question_issued: false,
+      });
     });
-    assert.equal(posts.length, 1);
-    assert.equal(app.screen, 'question');
+    assert.equal(app.gameId, 'new-game-id');
+    assert.equal(saved.get(key), 'new-game-id');
+    assert.equal(app.resumeAvailable, false);
+    assert.equal(app.resumeCandidate, null);
+    assert.equal(app.selectedLanguage, 'German');
+    assert.equal(app.canEditPregameLanguage, true);
+    // New unstarted run can now choose a different language in PostgreSQL.
+    app.changeQuestionLanguage('Hebrew');
+    assert.equal(patches[0].url, '/api/v2/games/new-game-id/language');
+    assert.deepEqual(patches[0].body, { language: 'Hebrew' });
+    succeed(patches[0], { game_id: 'new-game-id', language: 'Hebrew',
+      phase: 'main', correct_main_answers: 0, question_issued: false });
+    assert.equal(app.selectedLanguage, 'Hebrew');
+    assert.equal(app.progress, 0);
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(requests.length, 1);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
   }
 });
 
-test('failed start-new request leaves the saved game resumable', () => {
+test('failed confirmed new-game request keeps the saved started round resumable', () => {
   const { app, posts, scheduler } = setup();
   app.gameId = '';
-  app.resumeCandidate = { game_id: 'saved-game-id', language: 'Russian',
-    phase: 'main', correct_main_answers: 3 };
+  app.resumeCandidate = {
+    game_id: 'saved-game-id', language: 'Russian',
+    phase: 'main', correct_main_answers: 3,
+  };
   app.resumeAvailable = true;
   app.selectedLanguage = 'French';
   scheduler.run(() => {
     app.startFreshGame();
+    assert.equal(posts.length, 0);
+    app.confirmNewGame();
+    assert.equal(posts[0].url, '/api/v2/games/saved-game-id/replace');
     assert.equal(posts[0].body.language, 'French');
     posts[0].subject.error(new Error('offline'));
   });
@@ -741,7 +1279,7 @@ test('failed start-new request leaves the saved game resumable', () => {
   assert.equal(app.resumeCandidate.game_id, 'saved-game-id');
 });
 
-test('closed and missing saved games do not block a new round', () => {
+test('server reports no active game after terminal runs or missing cache', () => {
   for (const mode of ['lost', 'completed', 'abandoned', 'missing']) {
     const previous = globalThis.localStorage;
     const key = 'ai-quiz-game:active-round:v2:user-1';
@@ -754,12 +1292,8 @@ test('closed and missing saved games do not block a new round', () => {
     try {
       const { app, requests, posts, scheduler } = setup();
       app.gameId = '';
-      if (mode === 'missing') {
-        requests[0].subject.error(new HttpErrorResponse({ status: 404 }));
-      } else {
-        succeed(requests[0], { game_id: 'saved-game-id',
-          language: 'English', phase: mode, correct_main_answers: 7 });
-      }
+      assert.equal(requests[0].url, '/api/v2/games/active');
+      succeed(requests[0], null); // Active endpoint returns JSON null.
       assert.equal(app.resumeCandidate, null);
       assert.equal(app.resumeAvailable, false);
       assert.equal(saved.has(key), false);
@@ -779,67 +1313,91 @@ test('closed and missing saved games do not block a new round', () => {
   }
 });
 
-test('restored-game choice keeps the pregame exclusion workflow available', () => {
+test('saved started round cannot silently open exclusions; after new SETUP it can', () => {
   const { app, posts, scheduler } = setup();
   app.gameId = '';
   app.resumeAvailable = true;
-  app.resumeCandidate = { game_id: 'old-game-id', language: 'English',
-    phase: 'main', correct_main_answers: 4 };
+  app.resumeCandidate = {
+    game_id: 'old-game-id', language: 'English',
+    phase: 'main', correct_main_answers: 4, question_issued: true,
+  };
   app.selectedLanguage = 'Spanish';
+  app.openCategoryExclusions(); // May not skip confirmation.
+  assert.equal(posts.length, 0);
   scheduler.run(() => {
-    app.openCategoryExclusions();
-    assert.equal(posts[0].body.language, 'Spanish');
-    succeed(posts[0], { game_id: 'new-game-id', language: 'Spanish',
-      phase: 'main', correct_main_answers: 0 });
+    app.startFreshGame();
+    app.confirmNewGame();
+    assert.equal(posts[0].url, '/api/v2/games/old-game-id/replace');
+    succeed(posts[0], {
+      game_id: 'new-game-id', language: 'Spanish',
+      phase: 'main', correct_main_answers: 0,
+    });
   });
   assert.equal(app.resumeCandidate, null);
   assert.equal(app.resumeAvailable, false);
   assert.equal(app.gameId, 'new-game-id');
-  assert.equal(app.showCategoryExclusions, true);
   assert.equal(app.screen, 'setup');
+  assert.equal(app.showCategoryExclusions, false);
+  app.openCategoryExclusions();
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.categoryInfo.can_exclude, true);
+  assert.equal(posts.length, 1);
 });
 
-test('template exposes both choices and does not disable language for a saved candidate', () => {
+test('template shows New Game only after Q1 is issued, preserving pregame perks', () => {
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startFreshGame\(\)"/);
-  assert.match(html, /\*ngIf="resumeAvailable" class="outline-button"[^>]*\(click\)="startGame\(\)"/);
+  assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startGame\(\)"/);
+  assert.match(html, /\*ngIf="account && \(gameQuestionIssued \|\| resumeCandidate\)"/);
+  assert.doesNotMatch(html, /\*ngIf="account && \(gameId \|\| resumeCandidate\)"/);
+  assert.match(html, /\(click\)="requestNewGame\(\)"/);
+  assert.match(html, /\*ngIf="showAbandonConfirm"/);
+  assert.match(html, /\(click\)="confirmNewGame\(\)"/);
+  assert.match(html, /\(click\)="cancelNewGame\(\)"/);
   assert.match(html, /\(ngModelChange\)="changeQuestionLanguage\(\$event\)"/);
-  assert.match(html, /\[disabled\]="loading \|\| languageSaving \|\| perksBusy \|\| categoryLoading \|\| !canEditPregameLanguage/);
-  assert.match(html, /locale\.t\('game\.startNew'\)/);
+  assert.match(html, /!canEditPregameLanguage/);
+  assert.match(html, /!gameQuestionIssued && error !== 'game.restoreFailed' && \(categoryInfo === null \|\| categoryInfo.can_exclude\)/);
   assert.equal(english['game.startNew'], 'Start a new game →');
   assert.match(english['hero.resumed'], /continue it or start a new game/i);
+  assert.match(english['game.abandonWarning'], /all stars you have already earned/i);
+  assert.match(english['game.abandonCost'], /not be refunded/i);
 });
 
-test('recoverable in-memory game also lets the player select a new language', () => {
+test('recovery menu requires explicit new game before exposing paid pregame setup', () => {
   const { app, requests, posts, scheduler } = setup();
   app.screen = 'question';
   app.selectedLanguage = 'English';
   app.progress = 3;
-  app.returnToMenuAfterDuplicate(); // No duplicate flag; no change.
+  app.returnToMenuAfterDuplicate();
   app.duplicateExhausted = true;
   app.returnToMenuAfterDuplicate();
   assert.equal(app.resumeAvailable, true);
   assert.equal(app.gameId, 'existing-game');
   app.selectedLanguage = 'Italian';
   scheduler.run(() => {
-    app.startGame(); // Resume must keep original English questions.
+    app.startGame(); // Resume keeps the original language.
     assert.equal(app.selectedLanguage, 'English');
     assert.equal(requests[0].url, '/api/v2/games/existing-game/question');
     succeed(requests[0]);
   });
-
   app.screen = 'setup';
   app.resumeAvailable = true;
   app.selectedLanguage = 'German';
+  app.openCategoryExclusions(); // No silent creation or abandonment.
+  assert.equal(posts.length, 0);
   scheduler.run(() => {
-    app.openCategoryExclusions(); // Exclusions must belong to a NEW run.
-    assert.equal(posts[0].url, '/api/v2/games');
+    app.startFreshGame();
+    app.confirmNewGame();
+    assert.equal(posts[0].url, '/api/v2/games/existing-game/replace');
     assert.equal(posts[0].body.language, 'German');
-    succeed(posts[0], { game_id: 'new-game-id', language: 'German',
-      phase: 'main', correct_main_answers: 0 });
+    succeed(posts[0], {
+      game_id: 'new-game-id', language: 'German',
+      phase: 'main', correct_main_answers: 0,
+    });
   });
   assert.equal(app.gameId, 'new-game-id');
   assert.equal(app.screen, 'setup');
+  assert.equal(app.showCategoryExclusions, false);
+  app.openCategoryExclusions();
   assert.equal(app.showCategoryExclusions, true);
 });
 
@@ -1621,3 +2179,59 @@ test('collapsed shop uses tier-colored prices and only opens category changes in
   assert.ok(template.includes("locale.format('stats.roundSkipped'"));
   assert.ok(source.includes('if (selected.isDenied) continue'));
 });
+
+test('helper setup shows collapsed hiring, two price choices and person silhouette', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\(click\)="showHelperHire\(\)"/);
+  assert.match(template, /\*ngIf="helperHireOpen"/);
+  assert.match(template, /\(click\)="selectRandomHelper\(\)"/);
+  assert.match(template, /\(click\)="showChooseHelper\(\)"/);
+  assert.match(template, /\*ngIf="helperChooseProfession"/);
+  assert.match(template, /class="helper-avatar"/);
+  assert.doesNotMatch(template, /☎/);
+  assert.doesNotMatch(template, /helper\.shopDescription/);
+  assert.match(template, /\*ngIf="!helperReply"/);
+  assert.equal(english['helper.call'], 'Ask for help');
+});
+
+test('helper card uses localizable templates and does not translate the literal name', () => {
+  const { app } = setup();
+  const helper = {
+    name: 'Мария Смирнова', profession: 'Doctor', gender: 'female',
+    strong_topics: ['Biology'], weak_topics: ['Mythology'],
+    tagline_id: 1, tagline_high: 'Biology', tagline_low: 'Mythology',
+  };
+  assert.equal(app.helperProfessionLabel(helper), 'Doctor');
+  assert.match(app.helperTagline(helper), /Biology/);
+  assert.match(app.helperTagline(helper), /Mythology/);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\{\{ helper\.name \}\}/);
+  assert.match(template, /helperTagline\(helper\)/);
+  assert.doesNotMatch(template, /helper\.tagline \}\}/);
+});
+
+test('pre-question hiring state is Start, actual issued Q1 state is Resume', () => {
+  const { app } = setup();
+  app.helperCard = {
+    name: 'Test Person', profession: 'Historian',
+    strong_topics: [], weak_topics: [], consultations_remaining: 3,
+  };
+  app.gameQuestionIssued = false;
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  app.gameQuestionIssued = true;
+  assert.equal(app.setupButtonLabelKey, 'game.resume');
+});
+
+test('successful helper reply hides request button and retry label is context-aware', () => {
+  const { app } = setup();
+  app.helperCallKey = '';
+  app.helperError = '';
+  assert.equal(app.helperCallButtonKey, 'helper.call');
+  app.helperCallKey = 'previous-request';
+  assert.equal(app.helperCallButtonKey, 'helper.recoverCall');
+  app.helperError = 'helper.callFailed';
+  assert.equal(app.helperCallButtonKey, 'helper.repeatCall');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\*ngIf="!helperReply"/);
+});
+
