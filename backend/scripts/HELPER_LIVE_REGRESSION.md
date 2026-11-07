@@ -321,6 +321,24 @@ This is prompt-only guidance, not a language-specific grammar filter:
 means the previous V6 30-case directory is frozen and must not be reused to
 produce paid results under the new prompt. Keep that original report intact.
 
+A dedicated, cheap A/B recheck reuses **exactly the three problematic
+scenarios S007 (RU/TENTATIVE), S016 (JA/CONFIDENT) and S023
+(AR/TENTATIVE)** from the original local V6/30 plan, including the same
+chosen options, confidence and outcome. It does not query PostgreSQL.
+Run from backend/ in PyCharm, after git pull:
+
+    python -m scripts.helper_casual_smoke_v6
+    python -m scripts.helper_casual_smoke_v6 --execute
+
+The first command is FREE. The second explicitly enables three paid
+GPT-5.4 consultations (at most six API attempts, default **USD 0.04
+estimated** budget guard). Requires the original unmodified
+`qa_reports/platinum_helper_speech_v6_30/plan.json`.
+Results: `qa_reports/platinum_helper_speech_v6_casual_fix/platinum_helper_live_results.zip`.
+On resume, the runner skips completed cases and refuses to automatically
+repeat an interrupted, possibly billed API attempt.
+Do not run the 30-case V6 script again in its original output directory.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
