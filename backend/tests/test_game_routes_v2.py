@@ -107,6 +107,100 @@ class PersistentGameAPITests(unittest.TestCase):
         self.register("Bob", client=third)
         self.assertIsNone(third.get("/api/v2/games/active").json())
 
+    @patch("api.create_question", return_value=QUESTION)
+    def test_play_again_from_loss_creates_new_setup_and_is_idempotent(self, gen):
+        self.register("Alice")
+        finished_id = self.start("Russian")
+        q = self.client.get(f"/api/v2/games/{finished_id}/question")
+        self.assertEqual(q.status_code, 200, q.text)
+        loss = self.client.post(f"/api/v2/games/{finished_id}/answer", json={
+            "question_id": q.json()["question_id"], "answer": "A",
+        })
+        self.assertEqual(loss.status_code, 200, loss.text)
+        self.assertEqual(loss.json()["phase"], "lost")
+        self.assertIsNone(self.client.get("/api/v2/games/active").json())
+
+        url = f"/api/v2/games/{finished_id}/replay"
+        result = self.client.post(url, json={"language": "English"})
+        self.assertEqual(result.status_code, 201, result.text)
+        fresh = result.json()
+        self.assertNotEqual(fresh["game_id"], finished_id)
+        self.assertEqual(fresh["language"], "English")
+        self.assertEqual(fresh["main_question_index"], 0)
+        self.assertFalse(fresh["question_issued"])
+        self.assertIsNone(fresh["helper"])
+        self.assertEqual(self.client.get("/api/v2/games/active").json()["game_id"],
+                         fresh["game_id"])
+        second = self.client.post(url, json={"language": "German"})
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(second.json()["game_id"], fresh["game_id"])
+        self.assertEqual(second.json()["language"], "English")
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 2)
+            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+        gen.assert_called_once()
+
+    def test_play_again_archives_unpaid_legacy_runs_not_the_history(self):
+        user_id = UUID(self.register("Alice"))
+        stale_id = self.start("English")
+        with Session(self.engine) as db:
+            terminal = GameRun(user_id=user_id, language="Russian", status="lost")
+            db.add(terminal)
+            db.commit()
+            terminal_id = str(terminal.id)
+        created = self.client.post(f"/api/v2/games/{terminal_id}/replay",
+                                   json={"language": "Spanish"})
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["language"], "Spanish")
+        with Session(self.engine) as db:
+            prior = db.get(GameRun, UUID(stale_id))
+            self.assertEqual(prior.status, "abandoned")
+            self.assertIsNotNone(prior.finished_at)
+            self.assertEqual(db.get(GameRun, UUID(terminal_id)).status, "lost")
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 3)
+        self.assertEqual(self.client.get("/api/v2/games/active").json()["game_id"],
+                         created.json()["game_id"])
+
+    def test_play_again_rejects_unseen_paid_round_without_extra_debit(self):
+        user_id = UUID(self.register("Alice"))
+        paid_id = self.start("Russian")
+        with Session(self.engine) as db:
+            db.add(StarAward(user_id=user_id, run_id=UUID(paid_id), tier="platinum"))
+            terminal = GameRun(user_id=user_id, language="Russian", status="lost")
+            db.add(terminal)
+            db.commit()
+            terminal_id = str(terminal.id)
+        purchase = self.client.post(f"/api/v2/games/{paid_id}/helper/purchase",
+                                    json={"profession": None, "ui_language": "ru"})
+        self.assertEqual(purchase.status_code, 201, purchase.text)
+        before = self.client.get("/api/v2/stars").json()
+        response = self.client.post(f"/api/v2/games/{terminal_id}/replay",
+                                    json={"language": "English"})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "saved_paid_round")
+        self.assertEqual(response.json()["detail"]["game_id"], paid_id)
+        saved = self.client.get("/api/v2/games/active").json()
+        self.assertEqual(saved["game_id"], paid_id)
+        self.assertEqual(saved["helper"]["id"], purchase.json()["id"])
+        self.assertEqual(self.client.get("/api/v2/stars").json(), before)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 2)
+            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 1)
+
+    def test_play_again_requires_owner_completed_run_and_valid_origin(self):
+        user_id = UUID(self.register("Alice"))
+        live = self.start("English")
+        uri = f"/api/v2/games/{live}/replay"
+        self.assertEqual(self.client.post(uri, json={"language": "English"}).status_code, 409)
+        self.assertEqual(self.client.post(uri, json={"language": "Invalid"}).status_code, 422)
+        self.assertEqual(self.client.post(uri, json={"language": "English"},
+                                          headers={"Origin": "https://evil.example"}).status_code, 403)
+        with TestClient(app) as other:
+            self.register("Bob", client=other)
+            self.assertEqual(other.post(uri, json={"language": "English"}).status_code, 404)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 1)
+
     def test_active_round_restores_purchased_helper_and_category_exclusions(self):
         user_id = UUID(self.register("Alice"))
         run_id = self.start("English")
@@ -166,7 +260,9 @@ class PersistentGameAPITests(unittest.TestCase):
                          updated.json()["game_id"])
 
         with Session(self.engine) as db:
-            db.get(GameRun, UUID(first)).status = "completed"
+            # Explicit replacement also archives old unpaid legacy duplicates
+            # so a completed successor cannot reveal an unexpected old round.
+            self.assertEqual(db.get(GameRun, UUID(first)).status, "abandoned")
             db.get(GameRun, UUID(updated.json()["game_id"])).status = "completed"
             db.commit()
         self.assertIsNone(self.client.get("/api/v2/games/active").json())
