@@ -56,8 +56,9 @@ const question = {
 
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
                   signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
-                  activeLookupPending = false } = {}) {
+                  activeLookupPending = false, activeLookupPendingOnRetry = false } = {}) {
   const requests = [];
+  let activeLookupCount = 0;
   const posts = [];
   const patches = [];
   const profile = {
@@ -89,9 +90,13 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
       }
-      if (url === '/api/v2/games/active' && !activeLookupPending &&
-          !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
-        return of(null); // No active game in the default mock database.
+      if (url === '/api/v2/games/active') {
+        activeLookupCount++;
+        if (!activeLookupPending &&
+            !(activeLookupPendingOnRetry && activeLookupCount > 1) &&
+            !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
+          return of(null); // No active game in the default mock database.
+        }
       }
       if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
         return of({
@@ -688,7 +693,7 @@ test('hiring a helper retains category-exclusion setup and uses UI language only
 });
 
 test('concurrent browser game creation conflict restores already-active DB round', () => {
-  const { app, posts, requests, scheduler } = setup({ activeLookupPending: true });
+  const { app, posts, requests, scheduler } = setup({ activeLookupPendingOnRetry: true });
   app.gameId = '';
   scheduler.run(() => {
     app.startGame();
