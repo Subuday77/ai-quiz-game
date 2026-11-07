@@ -137,6 +137,52 @@ technical jargon, wrong-language replies and self-disqualifying explanations.
 The script reports token usage and guardrail rejection/fallback counts but
 does **not** certify semantic correctness from deterministic checks alone.
 
+## V5 — frozen speaking-frame diversity and exact answer text (9 cases)
+
+Why: in V4, all 6 recommendation samples independently started with
+"I would", "Я бы" or "Ich würde" despite generic naturalness instructions.
+
+The backend now picks one of three *language-neutral speaking approaches*,
+entirely from the saved random call UUID: **DIRECT**, **PERSONAL**, **CASUAL**.
+This style is independent of KNOW/MISTAKEN and the 50/50
+CONFIDENT/TENTATIVE confidence style; a retry reuses exactly the same frame.
+No user-facing "label", "variant", or inflection templates. The model still
+must speak in the current **UI language** and preserve the chosen option text.
+
+The mandatory validator now requires the COMPLETE selected option text in
+a recommendation (Unicode-normalized, case-insensitive), beyond merely
+matching the hidden KEY. If a model omits it, the usual bounded retry and
+deterministic fallback apply. No extra model or critic call was added.
+
+Small test: 9 real, distinct approved questions from PostgreSQL:
+3 each in German/Russian/English; 3 KNOW, 3 MISTAKEN, 3 UNSURE;
+each style is covered once per question language AND once per outcome.
+For the six recommendations, every style appears in one confident and one
+tentative scenario. The tester overrides only the *test's presentation styles*
+to ensure coverage; production still hashes the stored UUID.
+
+In PyCharm from \`backend/\`:
+
+    git pull
+    python -m scripts.helper_speech_smoke_v5
+    python -m scripts.helper_speech_smoke_v5 --execute
+
+Default preview makes **ZERO API calls**. Explicit \`--execute\` allows
+9 GPT-5.4 consultations, at most 18 requests with retries and an estimated
+USD 0.10 guard (not a hard billing guarantee). Repeated runs in the same
+version-frozen directory skip completed calls. The script does NOT modify
+the game, question pool, stars, outcomes, or database records.
+
+V5 results will appear in:
+
+    backend/qa_reports/platinum_helper_speech_v5_frames/platinum_helper_live_results.zip
+
+Do not reuse V4's directory; V4's nine replies are the baseline. Examine
+the new ZIP for repetition, naturalness, literal option preservation,
+wrong-language speech and implicit factual self-disclosure. The model may
+still independently choose identical natural words even with new frames;
+the smoke run measures whether the variation actually helps.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
