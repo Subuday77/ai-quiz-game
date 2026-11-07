@@ -27,6 +27,7 @@ from platinum_helper.debug import (
     finished as debug_finished,
 )
 from platinum_helper.selection import best_visible_wrong
+from platinum_helper.competence import competence_for_question
 
 
 
@@ -147,11 +148,18 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         if purchase.consultations_used >= MAX_CONSULTATIONS or (
                 purchase.consultations_used + in_flight >= MAX_CONSULTATIONS and old is None):
             raise GameConflict("No helper consultations remaining")
-        # Authoritative category comes from the stored question topic, never the client.
+        # Game category is for question selection; skill is based on the
+        # REVIEWED question-level knowledge, never the client's label.
         topic = db.get(Topic, question.topic_id)
-        broad = CATEGORY_TOPICS.get(topic.labels.get("en", "") if topic else "")
-        if broad is None:
-            raise GameConflict("No helper competence mapping for the question")
+        category = topic.labels.get("en", "") if topic else ""
+        if old is None:
+            try:
+                broad, competence_source = competence_for_question(db, question, category)
+            except ValueError as exc:
+                raise GameConflict("No valid helper competence mapping") from exc
+        else:
+            # Preserve the paid consultation's frozen selection after retries.
+            broad, competence_source = old.topic, "frozen_call"
         reused_outcome = old is not None
         if old is None:
             rng = rng or Random()
@@ -186,8 +194,8 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         # Persist before releasing the lock so a client retry cannot reroll.
         db.commit()
         debug_reserved(
-            purchase, old, question, topic.labels.get("en", "") if topic else "",
-            run_id, reused=reused_outcome,
+            purchase, old, question, category,
+            run_id, reused=reused_outcome, competence_source=competence_source,
         )
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
