@@ -26,6 +26,36 @@ class PlatinumHelperDebugTests(unittest.TestCase):
             self.assertIs(record["selected_answer_correct"], False)
             self.assertIn("timestamp", record)
 
+    def test_restored_round_debug_identifies_original_helper_without_purchase(self):
+        from types import SimpleNamespace
+        from platinum_helper.debug import active_round
+
+        saved = SimpleNamespace(
+            game_id="round-from-db", language="Russian",
+            phase="main", question_issued=True,
+            helper={
+                "id": "original-purchase", "name": "Luiz Gustavo Pacheco",
+                "price": 1, "refunded": False, "consultations_remaining": 3,
+            },
+        )
+        with patch.dict(os.environ, {"QUIZ_HELPER_DEBUG": "true"}):
+            with self.assertLogs("quiz.helper.debug", level="DEBUG") as captured:
+                active_round(saved)
+                active_round(None)
+        rows = [
+            json.loads(line.split("HELPER_DEBUG: ", 1)[1])
+            for line in captured.output
+        ]
+        self.assertEqual([r["event"] for r in rows],
+                         ["helper_active_round_lookup", "helper_active_round_lookup"])
+        self.assertEqual(rows[0]["run_id"], "round-from-db")
+        self.assertEqual(rows[0]["run_language"], "Russian")
+        self.assertEqual(rows[0]["helper_id"], "original-purchase")
+        self.assertEqual(rows[0]["helper_price_platinum"], 1)
+        self.assertIs(rows[0]["question_issued"], True)
+        self.assertIs(rows[1]["found"], False)
+        self.assertTrue(all("correct_key" not in row for row in rows))
+
     def test_all_twenty_levels_included_even_for_legacy_profile(self):
         # Legacy purchases may predate a competency area: it defaults to MEDIUM.
         groups = skill_groups({"skills": {"History": "HIGH", "Geography": "LOW"}})
