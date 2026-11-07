@@ -594,7 +594,8 @@ export class AppComponent implements OnInit, OnDestroy {
   startGame(): void {
     if (this.loading || this.perksBusy || this.helperBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.languageSaving || this.categoriesToExclude.length > 0) return;
+        this.languageSaving || this.categoriesToExclude.length > 0 ||
+        this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -698,7 +699,7 @@ export class AppComponent implements OnInit, OnDestroy {
   openCategoryExclusions(): void {
     if (this.loading || this.perksBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.languageSaving) return;
+        this.languageSaving || this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
       return;
@@ -929,6 +930,7 @@ export class AppComponent implements OnInit, OnDestroy {
   async buyHelper(): Promise<void> {
     if (!this.account || this.helperCard || this.helperBusy || this.loading ||
         this.restoringGame || this.resumeAvailable || this.resumeCandidate ||
+        this.error === 'game.restoreFailed' ||
         this.screen !== 'setup' || this.progress !== 0) return;
     this.helperBusy = true;
     this.helperError = '';
@@ -1433,6 +1435,13 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  retryRestoreGame(): void {
+    if (!this.account || this.restoringGame || this.loading ||
+        this.error !== 'game.restoreFailed') return;
+    this.error = '';
+    this.restoreActiveGame();
+  }
+
   private restoreActiveGame(): void {
     const accountId = this.account?.id;
     if (!accountId) return;
@@ -1446,6 +1455,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (run) => {
         if (this.account?.id !== accountId || this.restoreVersion !== version) return;
+        this.error = '';
         if (run.phase === 'abandoned' && run.replacement_game_id) {
           // The replace POST may have committed before a network timeout/F5.
           // Follow the idempotent successor instead of losing the new setup.
