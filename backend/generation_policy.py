@@ -36,11 +36,17 @@ class GenerationPolicy:
     critic_min_remaining_seconds: float = 8
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls, *, question_number: int | None = None):
+        budget = env_number("AI_GENERATION_BUDGET_SECONDS", 30)
+        if question_number is not None:
+            if not 1 <= question_number <= 16:
+                raise ValueError("Invalid question number for generation policy")
+            if question_number >= 13:
+                budget = max(budget, env_number("AI_LATE_GAME_BUDGET_SECONDS", 60))
         return cls(
             env_number("AI_PROVIDER_TIMEOUT_SECONDS", 12),
             env_number("AI_GENERATION_MAX_ATTEMPTS", 3, integer=True),
-            env_number("AI_GENERATION_BUDGET_SECONDS", 30),
+            budget,
             env_number("AI_RETRY_BACKOFF_BASE_SECONDS", 0.5),
             env_number("AI_RETRY_BACKOFF_MAX_SECONDS", 2),
             env_number("AI_CRITIC_MIN_REMAINING_SECONDS", 8),
@@ -105,10 +111,13 @@ def retry_after_seconds(exc: Exception) -> float | None:
 def client_settings() -> dict[str, int]:
     warning = env_number("QUIZ_LONG_WAIT_WARNING_SECONDS", 15)
     timeout = env_number("QUIZ_HTTP_TIMEOUT_SECONDS", 45)
-    if not 0 < warning < timeout <= 2_147_483.647:
+    late_timeout = env_number("QUIZ_LATE_QUESTION_TIMEOUT_SECONDS", 140)
+    if not 0 < warning < timeout <= late_timeout <= 2_147_483.647:
         raise ValueError("Invalid browser timing settings")
     warning_ms = round(warning * 1000)
     timeout_ms = round(timeout * 1000)
-    if not 0 < warning_ms < timeout_ms <= 2_147_483_647:
+    late_timeout_ms = round(late_timeout * 1000)
+    if not 0 < warning_ms < timeout_ms <= late_timeout_ms <= 2_147_483_647:
         raise ValueError("Invalid browser timing settings")
-    return {"long_wait_warning_ms": warning_ms, "request_timeout_ms": timeout_ms}
+    return {"long_wait_warning_ms": warning_ms, "request_timeout_ms": timeout_ms,
+            "late_question_timeout_ms": late_timeout_ms}
