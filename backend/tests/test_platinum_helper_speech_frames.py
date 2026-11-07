@@ -229,7 +229,7 @@ class SpeechFrameTests(unittest.TestCase):
                         )
                         self.assertIn(f"Selected option: B: {answer}", wrong_payload)
                 self.assertEqual(
-                    _validate("KEY: B\\nSPEECH: " + good_speech, data),
+                    _validate("KEY: B\nSPEECH: " + good_speech, data),
                     good_speech,
                 )
         # Unrelated speech approaches and UNSURE behavior remain unchanged.
