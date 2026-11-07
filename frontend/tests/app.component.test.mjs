@@ -687,6 +687,27 @@ test('hiring a helper retains category-exclusion setup and uses UI language only
   assert.equal(requests.length, 0); // Q1 never appears on hiring.
 });
 
+test('concurrent browser game creation conflict restores already-active DB round', () => {
+  const { app, posts, requests, scheduler } = setup();
+  app.gameId = '';
+  scheduler.run(() => {
+    app.startGame();
+    assert.equal(posts[0].url, '/api/v2/games');
+    posts[0].subject.error(new HttpErrorResponse({ status: 409 }));
+  });
+  assert.equal(requests[0].url, '/api/v2/games/active');
+  assert.equal(app.restoringGame, true);
+  succeed(requests[0], {
+    game_id: 'other-browser-active', language: 'German', phase: 'main',
+    question_issued: true, correct_main_answers: 2, main_question_index: 3,
+  });
+  assert.equal(app.error, '');
+  assert.equal(app.restoringGame, false);
+  assert.equal(app.resumeCandidate.game_id, 'other-browser-active');
+  assert.equal(app.resumeAvailable, true);
+  assert.equal(posts.length, 1);
+});
+
 test('F5 and fresh browser recover a started round directly from PostgreSQL with no localStorage', () => {
   const previous = globalThis.localStorage;
   const saved = new Map();
