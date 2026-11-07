@@ -17,7 +17,7 @@ from persistence.models import (
 from persistence.star_economy import lock_user_stars, star_balance
 from platinum_helper.core import (
     CATEGORY_TOPICS, PROFESSIONAL_SKILLS, MAX_CONSULTATIONS,
-    choose_outcome, generate_profile,
+    choose_delivery_style, choose_outcome, generate_profile,
 )
 
 
@@ -164,6 +164,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
             "outcome": old.outcome, "letter": old.selected_key,
+            "delivery_style": choose_delivery_style(old.id),
             "question_text": question.text, "choices": question.choices,
             "correct_option_text": question.choices[question.correct_key],
             "topic": broad, "profession": purchase.profession,
