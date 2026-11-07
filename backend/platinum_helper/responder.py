@@ -24,7 +24,7 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
         f"with a friend during a trivia game. Answer ONLY in {data['language']}. "
-        f"Do not use Russian or any other language when the game language is {data['language']}. "
+        "Do not switch to another language, including Russian when the selected language is not Russian. "
         "Keep the exact selected answer text unchanged, even if its name is foreign. "
         f"Your gender is {data.get('gender') or 'unspecified'}; your background "
         f"is {data.get('nationality') or 'unspecified'}. "
