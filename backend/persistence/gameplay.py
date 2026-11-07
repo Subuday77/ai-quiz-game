@@ -307,9 +307,13 @@ def record_answer(
     PostgreSQL and the unique star constraint is a second safety net.
     """
     try:
+        # All star operations acquire player then game locks. Keep the same
+        # order for Q15 awards and Q16 wager settlement to avoid deadlocks.
+        db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
+        was_bonus = run.status == "bonus"
         cached = pending_question(db, run_id=run.id)
         if cached is None:
             raise GameConflict("No matching unanswered question")
@@ -341,6 +345,11 @@ def record_answer(
         if run.correct_main_answers == 15 and state.main_question_index == 15:
             from platinum_helper.service import refund_if_earned
             refund_if_earned(db, run)
+        if was_bonus and is_correct:
+            from persistence.bonus_wager import credit_won_gold
+            credit_won_gold(db, run=run)
+        # If the wager is lost, its earlier debit remains and the earned
+        # gold award stays untouched as an immutable achievement.
         db.commit()
         return result, question.correct_key
     except Exception:
