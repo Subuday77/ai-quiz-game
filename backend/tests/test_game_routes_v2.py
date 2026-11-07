@@ -147,6 +147,53 @@ class PersistentGameAPITests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count(GameRun.id))), 2)
             self.assertIsNotNone(db.get(GameRun, UUID(run_id)).finished_at)
 
+    def test_category_exclusions_first_then_helper_and_question_language_changes(self):
+        user_id = UUID(self.register("Alice"))
+        run_id = self.start("Spanish")
+        with Session(self.engine) as db:
+            db.add(StarAward(user_id=user_id, run_id=UUID(run_id), tier="platinum"))
+            db.add(WalletTransaction(
+                user_id=user_id, run_id=UUID(run_id),
+                reason="star/silver/test-grant", amount=5,
+                idempotency_key="setup-test-silver-before-helper",
+            ))
+            db.commit()
+        exclude = self.client.post(f"/api/v2/games/{run_id}/categories/exclude", json={
+            "categories": ["Physics"], "request_id": str(uuid4()),
+        })
+        self.assertEqual(exclude.status_code, 200, exclude.text)
+        language = self.client.patch(f"/api/v2/games/{run_id}/language", json={
+            "language": "German",
+        })
+        self.assertEqual(language.status_code, 200, language.text)
+        helper = self.client.post(f"/api/v2/games/{run_id}/helper/purchase", json={
+            "profession": None, "ui_language": "ru",
+        })
+        self.assertEqual(helper.status_code, 201, helper.text)
+        self.assertRegex(helper.json()["name"], r"[А-Яа-яЁё]")
+        saved = self.client.get(f"/api/v2/games/{run_id}").json()
+        self.assertEqual(saved["helper"], helper.json())
+        self.assertEqual(saved["language"], "German")
+        self.assertFalse(saved["question_issued"])
+        self.assertNotIn(
+            "Physics",
+            self.client.get(f"/api/v2/games/{run_id}/categories").json()["allowed"],
+        )
+        self.assertEqual(self.client.get("/api/v2/stars").json()["platinum"], 0)
+
+        # The helper's stored name never changes when the question language does.
+        changed = self.client.patch(f"/api/v2/games/{run_id}/language", json={
+            "language": "Italian",
+        })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["helper"], helper.json())
+        self.assertEqual(changed.json()["language"], "Italian")
+        invalid_locale = self.client.post(f"/api/v2/games/{run_id}/helper/purchase", json={
+            "profession": None, "ui_language": "unsupported",
+        })
+        self.assertEqual(invalid_locale.status_code, 422)
+        self.assertEqual(self.client.get("/api/v2/stars").json()["platinum"], 0)
+
     def test_abandon_invalid_language_and_cross_user_are_non_mutating(self):
         self.register("Alice")
         run_id = self.start("English")
