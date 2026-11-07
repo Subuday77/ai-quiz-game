@@ -187,6 +187,7 @@ export class AppComponent implements OnInit, OnDestroy {
   duplicateExhausted = false;
   private warningMs = 15000;
   private requestTimeoutMs = 45000;
+  private lateQuestionTimeoutMs = 140000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
   private restoreVersion = 0;
@@ -339,6 +340,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.locale.load('en');
     this.subscriptions.add(this.http.get<{
       long_wait_warning_ms: number; request_timeout_ms: number;
+      late_question_timeout_ms?: number;
     }>('/api/client-config').pipe(
       timeout(5000), finalize(() => { this.configLoading = false; }),
     ).subscribe({
@@ -349,6 +351,10 @@ export class AppComponent implements OnInit, OnDestroy {
             settings.request_timeout_ms > settings.long_wait_warning_ms) {
           this.warningMs = settings.long_wait_warning_ms;
           this.requestTimeoutMs = settings.request_timeout_ms;
+          if (Number.isFinite(settings.late_question_timeout_ms) &&
+              (settings.late_question_timeout_ms ?? 0) >= settings.request_timeout_ms) {
+            this.lateQuestionTimeoutMs = settings.late_question_timeout_ms!;
+          }
         }
       },
       error: () => {},
@@ -793,10 +799,14 @@ export class AppComponent implements OnInit, OnDestroy {
     this.duplicateExhausted = false;
     this.error = '';
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
+    // Q13–Q16 can try a different vetted category on generation failure.
+    const questionTimeoutMs = this.progress >= 12
+      ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
+      : this.requestTimeoutMs;
     this.subscriptions.add(this.http.get<PublicQuestion>(
       GAME_API + '/' + this.gameId + '/question',
     ).pipe(
-      timeout(this.requestTimeoutMs),
+      timeout(questionTimeoutMs),
       finalize(() => {
         warning.unsubscribe();
         this.loading = false;
@@ -1316,7 +1326,9 @@ export class AppComponent implements OnInit, OnDestroy {
       { question_id: current.question_id, mode,
         category: mode === 'manual' ? this.chosenCategory : null,
         request_id: crypto.randomUUID() },
-    ).pipe(timeout(this.requestTimeoutMs),
+    ).pipe(timeout(current.number >= 13
+                      ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
+                      : this.requestTimeoutMs),
            finalize(() => {
              warning.unsubscribe();
              // Session expiry clears the account and game, but must still
