@@ -29,6 +29,7 @@ from persistence.categories import (
 )
 from persistence.models import Question, QuestionAttempt, Topic, User
 from persistence.seed_topics import category_slug
+from persistence.bonus_wager import accept_bonus, decline_bonus
 from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
 from star_perks import PerkUnavailable
@@ -118,7 +119,11 @@ def _game_info(db: Session, run) -> GameInfo:
         question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run.id
         ))),
-        bonus_decision_available=(run.status == "bonus" and pending_question(db, run_id=run.id) is None),
+        bonus_decision_available=(
+            run.status == "bonus"
+            and not run.bonus_wager_accepted
+            and pending_question(db, run_id=run.id) is None
+        ),
         helper=helper_card(purchase) if purchase else None,
     )
 
@@ -290,6 +295,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         event("question_cache", hit=True)
         return _public(*cached, phase=run.status, db=db)
 
+    if run.status == "bonus" and not run.bonus_wager_accepted:
+        raise HTTPException(status_code=409, detail="Choose whether to risk your gold before Q16")
     event("question_cache", hit=False)
     game_progress = game_state(run, db)
     difficulty = game_progress.current_difficulty
@@ -598,3 +605,31 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
     except (GameConflict, PerkUnavailable) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     return _public(new_attempt, stored, phase="main", db=db)
+
+
+@router.post("/{run_id}/bonus/accept", response_model=GameInfo)
+def accept_optional_bonus(run_id: UUID, request: Request,
+                          user: User = Depends(authenticated_user),
+                          db: Session = Depends(get_db)):
+    validate_origin(request)
+    try:
+        run = accept_bonus(db, user_id=user.id, run_id=run_id)
+        return _game_info(db, run)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except GameConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/{run_id}/bonus/decline", response_model=GameInfo)
+def decline_optional_bonus(run_id: UUID, request: Request,
+                           user: User = Depends(authenticated_user),
+                           db: Session = Depends(get_db)):
+    validate_origin(request)
+    try:
+        run = decline_bonus(db, user_id=user.id, run_id=run_id)
+        return _game_info(db, run)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    except GameConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
