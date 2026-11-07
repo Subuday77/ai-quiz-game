@@ -235,7 +235,9 @@ def responder_data(s: dict) -> dict:
     return {
         "name": s["name"], "profession": s["profession"],
         "gender": s["gender"], "nationality": s["nationality"],
-        "language": s["language"], "outcome": s["effective_outcome"],
+        "language": s["language"],
+        **({"speech_language": s["speech_language"]} if "speech_language" in s else {}),
+        "outcome": s["effective_outcome"],
         "letter": s["selected_key"], "question_text": s["question"],
         "choices": s["choices"],
         "correct_option_text": s["choices"][s["correct_key"]],
@@ -350,7 +352,9 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
         result = results.get(s["id"], {})
         row = {
             "id": s["id"], "question_id": s["question_id"],
-            "language": s["language"], "difficulty": s["difficulty"],
+            "language": s["language"],
+            "ui_language": s.get("speech_language", s["language"]),
+            "difficulty": s["difficulty"],
             "category": s["category"], "topic": s["topic"],
             "question": s["question"],
             **{f"choice_{k.lower()}": s["choices"][k] for k in "ABCD"},
@@ -370,6 +374,8 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
         if result:
             review.append({
                 "review_id": s["id"], "question": s["question"],
+                "ui_language": s.get("speech_language", s["language"]),
+                "question_language": s["language"],
                 "options": " | ".join(f"{k}: {s['choices'][k]}" for k in "ABCD"),
                 "speech": result.get("speech", ""),
                 "naturalness_1_5": "", "invented_fact_0_1": "",
@@ -387,13 +393,15 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
         / 1_000_000 for a in attempts
     )
     summary = {
-        "version": PLAN_VERSION, "model": plan["model"], "target": plan["target"],
+        "version": plan["version"], "model": plan["model"], "target": plan["target"],
         "helper_settings": plan.get("helper_settings"),
         "code_fingerprint": plan.get("code_fingerprint"),
         "completed": len(results), "remaining": plan["target"] - len(results),
         "statuses": dict(Counter(r.get("status") for r in results.values())),
         "planned_effective_outcomes": dict(Counter(s["effective_outcome"] for s in plan["scenarios"])),
         "languages": dict(Counter(s["language"] for s in plan["scenarios"])),
+        "ui_languages": dict(Counter(s.get("speech_language", s["language"])
+                                      for s in plan["scenarios"])),
         "api_attempts": len(attempts),
         "guard_rejections": sum(r.get("guard_rejections", 0) for r in results.values()),
         "fallbacks": sum(bool(r.get("is_fallback")) for r in results.values()),
@@ -473,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Languages:", dict(Counter(s["language"] for s in plan["scenarios"][:args.limit])))
         return 0
     if not os.environ.get("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY missing (configure backend/.env)")
+        raise SystemExit("OPENAI_API_KEY missing (configure the repository-root .env)")
     sdk = OpenAI()
     results_file = directory / "calls.jsonl"
     attempts_file = directory / "attempts.jsonl"
