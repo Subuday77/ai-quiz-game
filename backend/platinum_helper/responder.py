@@ -35,17 +35,35 @@ def _prompt(data: dict) -> tuple[str, str]:
     if outcome == "KNOW":
         mode = (
             f"You know the answer: option {data['letter']}. "
-            "Explain it naturally and accurately in one sentence."
+            "Explain naturally and accurately why you chose it. "
         )
-    else:
+    elif outcome == "MISTAKEN":
         mode = (
             f"You genuinely but mistakenly believe option {data['letter']} "
             "is correct. Give a short, plausible reason for thinking so. "
             "Do NOT mention or reveal any alternative or the actual correct answer. "
-            "Sound tentative rather than certain."
         )
+    else:
+        raise ValueError("Unsupported helper outcome")
+
+    # Voice confidence is a separate, frozen coin flip, not a correctness clue.
+    style = data["delivery_style"]
+    if style == "CONFIDENT":
+        tone = (
+            "State your selected answer directly and with natural confidence. "
+            "Do not hedge or qualify it. "
+        )
+    elif style == "TENTATIVE":
+        tone = (
+            "Sound naturally uncertain (for example, 'I think' or 'if I recall'), "
+            "but still clearly recommend your selected option. "
+            "Do not suggest any alternative. "
+        )
+    else:
+        raise ValueError("Unsupported helper delivery style")
     return (
-        persona + mode + " Output exactly two lines: first KEY: X with your "
+        persona + mode + tone + "Vary your wording naturally; avoid stock phrases. "
+        "Output exactly two lines: first KEY: X with your "
         "selected letter, then SPEECH: followed by your spoken sentence.",
         question,
     )
