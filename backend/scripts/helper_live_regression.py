@@ -26,6 +26,7 @@ import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from dataclasses import asdict
 from uuid import UUID, NAMESPACE_URL, uuid5
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -39,6 +40,7 @@ from persistence.models import Question, QuestionReview, Topic
 from platinum_helper.core import CATEGORY_TOPICS, PROFESSIONAL_SKILLS, choose_delivery_style, generate_profile
 from platinum_helper.responder import HelperUnavailable, _DENIAL, _REASK, _mentions, _validate, talk
 from platinum_helper.selection import best_visible_wrong
+from platinum_helper.settings import HelperSettings
 from star_perks import PerkUnavailable, choose_to_hide
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -375,6 +377,7 @@ def export(directory: Path, plan: dict, input_price: float, output_price: float)
     )
     summary = {
         "version": PLAN_VERSION, "model": plan["model"], "target": plan["target"],
+        "helper_settings": plan.get("helper_settings"),
         "completed": len(results), "remaining": plan["target"] - len(results),
         "statuses": dict(Counter(r.get("status") for r in results.values())),
         "planned_effective_outcomes": dict(Counter(s["effective_outcome"] for s in plan["scenarios"])),
@@ -411,7 +414,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Cumulative target for this run; 30 first, then 150")
     parser.add_argument("--target", type=int, default=150)
     parser.add_argument("--seed", type=int, default=20261107)
-    parser.add_argument("--model", default="gpt-5.4")
+    parser.add_argument("--model", default=None,
+                        help="Explicit override; otherwise read QUIZ_HELPER_MODEL_ID from the root .env")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--max-usd", type=float, default=3.0)
     parser.add_argument("--max-api-requests", type=int, default=350)
@@ -424,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
             or args.output_usd_per_m < 0):
         parser.error("Invalid limit, target or budget")
     load_dotenv(BACKEND.parent / ".env", override=False)
+    if args.model is not None:
+        # Only an explicit CLI argument may override the shared environment.
+        os.environ["QUIZ_HELPER_MODEL_ID"] = args.model
+    helper_settings = HelperSettings.from_env()
+    args.model = helper_settings.model
     directory = args.output_dir.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     plan_path = directory / "plan.json"
@@ -432,9 +441,14 @@ def main(argv: list[str] | None = None) -> int:
         if (plan.get("version"), plan.get("seed"), plan.get("target"), plan.get("model")) != (
                 PLAN_VERSION, args.seed, args.target, args.model):
             raise SystemExit("Plan settings changed. Use a new --output-dir.")
+        if (plan.get("helper_settings") is not None
+                and plan["helper_settings"] != asdict(helper_settings)):
+            raise SystemExit("Platinum Helper settings changed since the plan was saved. "
+                             "Use a new --output-dir for a comparable run.")
     else:
         questions = approved_questions()
         plan = build_plan(questions, args.target, args.seed, args.model)
+        plan["helper_settings"] = asdict(helper_settings)
         save_json(plan_path, plan)
         print(f"Saved {args.target} cases from {len(questions)} approved questions.")
     if not args.execute:
@@ -444,12 +458,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not os.environ.get("OPENAI_API_KEY"):
         raise SystemExit("OPENAI_API_KEY missing (configure backend/.env)")
-    os.environ["QUIZ_HELPER_MODEL_ID"] = args.model
     sdk = OpenAI()
     results_file = directory / "calls.jsonl"
     attempts_file = directory / "attempts.jsonl"
     done = latest(directory)
-    print(f"REAL API: {args.model}; requested {args.limit}/{args.target} scenarios.")
+    print(f"REAL API: {args.model}; reasoning={helper_settings.reasoning_effort}, "
+          f"max_tokens={helper_settings.max_output_tokens}, "
+          f"timeout={helper_settings.timeout_seconds}s, "
+          f"max_attempts={helper_settings.max_attempts}, "
+          f"plausibility={helper_settings.threshold_level_0}/"
+          f"{helper_settings.threshold_levels_1_3}/"
+          f"{helper_settings.threshold_levels_4_15}; "
+          f"requested {args.limit}/{args.target} scenarios.")
     try:
         for s in plan["scenarios"][:args.limit]:
             previous = done.get(s["id"])
