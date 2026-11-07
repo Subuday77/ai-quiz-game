@@ -67,11 +67,15 @@ _LEGACY_SUBJECT_CUES: dict[str, tuple[str, ...]] = {
 assert set(_LEGACY_SUBJECT_CUES) <= set(TOPICS)
 
 
-def infer_legacy_area(subject: str | None, concepts: list[str] | tuple[str, ...] = ()) -> str | None:
+def infer_legacy_area(
+    subject: str | None,
+    concepts: list[str] | tuple[str, ...] = (),
+    *, object_slug: str | None = None,
+) -> str | None:
     """Return a single high-confidence area, or None if weak/contradictory."""
     # Subject is the *tested fact's* target, unlike other entity tags which
     # can mention distractors. Concepts can corroborate but never vote twice.
-    evidence = (subject or "", *concepts)
+    evidence = (subject or "", object_slug or "", *concepts)
     matches = {
         area for area, cues in _LEGACY_SUBJECT_CUES.items()
         if any(cue in slug for slug in evidence for cue in cues)
@@ -100,7 +104,8 @@ def competence_for_question(
     ).all()
     inferred = infer_legacy_area(
         fact.subject if fact else None,
-        [slug.partition(":")[2] for slug in concepts],
+        [slug.split(":", 1)[-1] for slug in concepts],
+        object_slug=fact.object if fact else None,
     )
     if inferred is not None:
         return inferred, "legacy_metadata"
