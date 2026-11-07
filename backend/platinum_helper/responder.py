@@ -40,10 +40,15 @@ _PRESENTATION_RECOMMENDATION = {
         "Keep it friendly and brief, without a canned slogan. "
     ),
     "CASUAL": (
-        "Delivery approach: A quick friendly suggestion addressed TO your "
-        "friend, using natural second-person or imperative phrasing where "
-        "idiomatic. Do not report what YOU would hypothetically choose. "
-        "Keep it informal, not theatrical or jokey. "
+        "Delivery approach: A short, relaxed, off-the-cuff opinion about "
+        "the selected answer, as in an ordinary conversation with a peer. "
+        "Keep it informal and idiomatic, but do NOT address the player as "
+        "'friend', 'buddy', or an equivalent vocative. Avoid commands, "
+        "imperatives and second-person directives; a recommendation is not "
+        "an instruction to the player. If mildly uncertain, hedge the "
+        "opinion itself instead of attaching 'I think' or 'maybe' to a "
+        "command. If confident, give the pick without forced hesitation. "
+        "Do not use a theatrical catchphrase, joke, or stock formula. "
     ),
 }
 _PRESENTATION_UNSURE = {
