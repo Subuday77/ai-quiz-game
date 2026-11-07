@@ -237,6 +237,68 @@ and question pool are not modified. \`--execute\` is the only way to authorize
 real paid model calls. Review the ZIP manually for speech naturalness and
 remaining conditionals: CI tests the guardrails but cannot prove prose quality.
 
+## V6 extended QA: 30 multilingual live consultations (NEW run)
+
+The V6 nine-case smoke was reviewed and accepted for expanded testing:
+no unwanted em dashes, no visible correctness leaks and no repeated
+conditional 'I would' constructions in the small sample. This **30-case**
+regression checks generalization on real, approved database questions and
+all 11 interface languages. It does **not** change the V6 helper prompt.
+
+Design:
+- **10 KNOW, 10 MISTAKEN, 10 UNSURE**, with server-selected answers
+  frozen before any LLM call; at least three question rows in each of
+  **German, Russian and English** (covering all three outcomes per language).
+  All 30 question IDs are distinct within the run.
+- 11 UI locales: \`en\`, \`de\`, \`ru\`, \`fr\`, \`es\`, \`it\`, \`pt\`,
+  \`he\`, \`ar\`, \`ja\`, \`zh\`. This exercises the unchanged choice text
+  inside foreign-language speech, including RTL and East Asian scripts.
+- QA-only balanced presentation frames: **10 DIRECT, 10 PERSONAL,
+  10 CASUAL**. Among 20 recommendation samples, **10 CONFIDENT and
+  10 TENTATIVE**. This explicitly measures whether outcomes, speaking
+  frames, and confidence can coexist naturally; the actual game still
+  derives speaking frame from saved consultation UUID.
+- Source question languages for the final 21 slots are preferences; if
+  the eligible German pool is small, the planner fills them from approved
+  Russian/English questions rather than inventing German questions.
+  If the initial 3×3 minimum cannot be filled, free preview aborts.
+- QA covers the production scorer/distractor selection, helper GPT-5.4
+  responder, validator, up to one retry, fallback, and exact named answers.
+
+In **PyCharm**, working directory \`backend/\`, with repository-root
+\`../.env\` configured as before:
+
+    git pull
+    python -m scripts.helper_speech_regression_v6_30
+    python -m scripts.helper_speech_regression_v6_30 --execute
+
+The preview is **FREE**: it reads approved PostgreSQL questions and saves
+a deterministic, fingerprinted 30-case plan, with NO OpenAI calls and NO DB
+writes. The execute command opts in to **30 paid consultations**, at most
+60 API attempts (including retry), with a default **estimated USD 0.25
+spending guard**. Token-pricing estimates are not a guarantee of charges.
+
+The separate output folder is:
+
+    backend/qa_reports/platinum_helper_speech_v6_30/
+
+Send \`platinum_helper_live_results.zip\` from that folder. The archive
+includes source questions and answer keys for independent QA; treat it as
+private, not a public GitHub artifact. It contains a blind review CSV and
+traces of each model draft. The runner saves completed cases in JSONL and
+does not make repeat paid calls for them. A crash after a logged API
+attempt but before the completed-case record is written stops with a
+clear error instead of silently re-billing that case; preserve the report
+folder and resolve the interrupted scenario deliberately.
+
+Review questions: whether the three speaking frames are distinct, whether
+UNSURE replies avoid repeating the same formulas, whether foreign answer
+names remain unchanged and natural, wrong script, unnatural combinations,
+em dashes, explanatory self-contradictions, retries and fallback rates.
+
+Do not overwrite earlier V4/V5/V6 nine-case directories. No database
+migration, new environment variable, or frontend restart is needed.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
