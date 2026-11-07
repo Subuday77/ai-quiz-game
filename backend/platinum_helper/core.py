@@ -7,7 +7,7 @@ cannot reroll the outcome or spend multiple calls.
 from dataclasses import dataclass, field
 from random import Random
 from typing import Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 Skill = Literal["HIGH", "MEDIUM", "LOW"]
 Outcome = Literal["KNOW", "MISTAKEN", "UNSURE"]
@@ -93,6 +93,18 @@ OUTCOME_WEIGHTS = {
     "LOW": (5, 15, 80),
 }
 MAX_CONSULTATIONS = 3
+
+DeliveryStyle = Literal["CONFIDENT", "TENTATIVE"]
+
+
+def choose_delivery_style(call_id: UUID) -> DeliveryStyle:
+    """Stable 50/50 speech style, independent of correctness and competence.
+
+    Each persisted consultation has a random UUID. Deriving style from it
+    freezes the style across failures and retries without a schema migration.
+    """
+    return "CONFIDENT" if call_id.int & 1 == 0 else "TENTATIVE"
+
 
 
 @dataclass(frozen=True)
