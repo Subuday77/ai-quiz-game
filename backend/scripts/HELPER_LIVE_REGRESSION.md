@@ -339,6 +339,54 @@ On resume, the runner skips completed cases and refuses to automatically
 repeat an interrupted, possibly billed API attempt.
 Do not run the 30-case V6 script again in its original output directory.
 
+## Same-hire speech history: stop repeating openings in one game
+
+The browser E2E test (AI_Tester) showed three successive consultations by the
+same hired helper:
+
+    Мне кажется, тут Лев Толстой.
+    По-моему, тут Ионический.
+    Мне кажется, тут это Рулевая рейка.
+
+All three repeated "тут". The helper previously had no knowledge of earlier
+lines: each request was generated in isolation.
+
+New behavior, without additional frontend API payloads or DB migrations:
+- Before reserving the next consultation, the backend reads **up to two**
+  already **completed** PlatinumHelperCall replies from the **same purchase
+  ID**. That purchase belongs to one GameRun, hence there is no leakage
+  across users, runs, new hires or previous games.
+- The previous question text, answer keys, correct answer and outcome are
+  **never** sent as history. All four previous option labels are replaced
+  with \`[ANSWER]\`. If the selected label is not safely maskable, that
+  historical line is dropped. Pending/failed consultations are excluded.
+- The prompt treats previous lines only as **untrusted phrasing examples**.
+  GPT-5.4 is asked to avoid copying the same opening, filler words ("тут",
+  "here", "I think"), and sentence construction, while preserving the
+  *current* UI language, persona, confidence, frozen selected answer and
+  answer-safety rules. It is a model-guidance mechanism, **not an absolute
+  guarantee** of zero lexical repetition.
+- Conversation memory is in PostgreSQL, not browser local storage. A page
+  reload does not lose it. An idempotent retry of a completed consultation
+  returns its exact cached response and never invokes GPT again.
+- No raw previous answers are exposed to the language model; no hidden
+  KNOW/MISTAKEN correctness metadata is part of the speech history.
+- A single consultation still uses the same maximum attempts and same
+  existing fallback behavior. No extra paid model call is made simply to
+  enforce lexical uniqueness.
+
+Offline tests in \`test_platinum_helper_speech_history.py\` and
+\`test_platinum_helper_persistence.py\` cover anonymization, history
+after a simulated reload, same-hire scoping, exclusion of pending/failed
+calls, idempotency and unchanged model safety checks.
+
+**E2E validation:** pull the current branch in PyCharm; buy one helper in a
+new game, use its three consultations on different questions (with a page
+reload after the second), and inspect whether its phrasing is genuinely more
+varied. This is a real **speech-quality** check; unit tests cannot guarantee
+how GPT phrases the result. Older QA plans are fingerprinted and should not
+be reused after responder code changes.
+
 ## Result files
 
 The script creates backend/qa_reports/platinum_helper_live/ (ignored by Git):
