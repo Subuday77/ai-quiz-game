@@ -29,6 +29,7 @@ from tagging.core import SemanticDuplicateError
 from tagging.review_safeguards import find_safeguards, SafeguardFindings
 from tagging.quality_skill.config import EditorialSettings
 from platinum_helper.core import TOPICS
+from platinum_helper.competence import infer_legacy_area
 
 from agents.critic_v3 import QUALITY_REVIEW_V3_PROMPT
 from independent_answer_check import AnswerStatus, OptionAssessment, PremiseStatus
@@ -381,7 +382,14 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
 
     # Reuse this same independent critic call for question-level competence.
     # Rejected questions never persist the candidate.
-    question._competence_area = verdict.competence_area
+    inferred_area = infer_legacy_area(
+        question.fact.subject, question.tags.concept,
+    )
+    question._competence_area = inferred_area or verdict.competence_area
+    if inferred_area is not None and inferred_area != verdict.competence_area:
+        event("question_competence_area_reconciled",
+              reviewer_area=verdict.competence_area,
+              selected_area=inferred_area)
 
     # Score and log EVERY well-formed review, including rejected candidates.
     # Preserve the model's untouched verdict for inspection; the reconciled
