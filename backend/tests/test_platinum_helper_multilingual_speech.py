@@ -38,8 +38,8 @@ class MultilingualSpeechTests(unittest.TestCase):
                     i2, p2 = _prompt(mistaken)
                     self.assertEqual(i1, i2)
                     self.assertEqual(p1, p2)
-                    self.assertIn("UNCHANGED label", i1)
-                    self.assertIn("without assuming that every language has noun cases", i1)
+                    self.assertIn("Include the chosen text exactly as printed", i1)
+                    self.assertIn("with or without noun cases", i1)
                     self.assertIn(f"ONLY in {language}", i1)
                     self.assertIn("Do NOT add facts", i1)
                     self.assertNotIn("MISTAKEN", i1)
@@ -82,7 +82,7 @@ class MultilingualSpeechTests(unittest.TestCase):
     def test_unsure_remains_answer_free_and_allows_conversational_variation(self):
         data = scenario(outcome="UNSURE")
         prompt, user = _prompt(data)
-        self.assertIn("vary", prompt)
+        self.assertIn("using your own casual, human wording", prompt)
         self.assertNotIn("Словения", user)
         for speech in ("Не помню, подсказать не смогу.", "Тут, пожалуй, пас."):
             with self.subTest(speech=speech):
