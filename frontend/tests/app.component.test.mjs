@@ -1237,10 +1237,11 @@ test('saved started round cannot silently open exclusions; after new SETUP it ca
   assert.equal(posts.length, 1);
 });
 
-test('template shows warning, Resume and New, while keeping pregame perks available', () => {
+test('template shows New Game only after Q1 is issued, preserving pregame perks', () => {
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(html, /\*ngIf="resumeAvailable" class="primary"[^>]*\(click\)="startGame\(\)"/);
-  assert.match(html, /\*ngIf="account && \(gameId \|\| resumeCandidate\)"/);
+  assert.match(html, /\*ngIf="account && \(gameQuestionIssued \|\| resumeCandidate\)"/);
+  assert.doesNotMatch(html, /\*ngIf="account && \(gameId \|\| resumeCandidate\)"/);
   assert.match(html, /\(click\)="requestNewGame\(\)"/);
   assert.match(html, /\*ngIf="showAbandonConfirm"/);
   assert.match(html, /\(click\)="confirmNewGame\(\)"/);
