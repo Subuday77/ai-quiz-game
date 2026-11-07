@@ -39,7 +39,7 @@ class UiSpeechTests(unittest.TestCase):
         self.assertIn("Welches chemische Element", prompt)
         self.assertIn("Selected option: A: Quecksilber", prompt)
         self.assertNotIn("KNOW", instructions)
-        speech = "Мне кажется, ответ — «Quecksilber»."
+        speech = "Мне кажется, ответ: «Quecksilber»."
         self.assertEqual(
             _validate(f"KEY: A\nSPEECH: {speech}", question), speech
         )
@@ -47,7 +47,7 @@ class UiSpeechTests(unittest.TestCase):
             "KEY: A\nSPEECH: Ich würde eher Quecksilber nehmen.", question
         ))
         self.assertIn("Quecksilber", _fallback(question))
-        self.assertIn("вариант", _fallback(question))
+        self.assertNotIn("—", _fallback(question))
 
     def test_unsure_uses_ui_language_even_without_a_selected_option(self):
         question = german_question(outcome="UNSURE")
