@@ -6,7 +6,7 @@ No paid AI request is made.
 import os
 import unittest
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, select
@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 from api import app
 from persistence.database import get_db
 from persistence.models import (
-    Base, GameRun, Question, QuestionAttempt, StarAward,
+    Base, GameRun, Question, QuestionAttempt, StarAward, WalletTransaction,
 )
 from persistence.seed_topics import seed_topics
 
@@ -78,6 +78,98 @@ class PersistentGameAPITests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["game_id"]
+
+    def test_abandon_with_helper_and_exclusions_preserves_wallet_and_creates_setup(self):
+        user_id = UUID(self.register("Alice"))
+        run_id = self.start("English")
+        with Session(self.engine) as db:
+            db.add(StarAward(user_id=user_id, run_id=UUID(run_id), tier="platinum"))
+            db.add(StarAward(user_id=user_id, run_id=UUID(run_id), tier="bronze"))
+            db.add(WalletTransaction(
+                user_id=user_id, run_id=UUID(run_id),
+                reason="star/silver/test-grant", amount=5,
+                idempotency_key="setup-test-five-silver",
+            ))
+            db.commit()
+        helper = self.client.post(
+            f"/api/v2/games/{run_id}/helper/purchase",
+            json={"profession": None, "ui_language": "ru"},
+        )
+        self.assertEqual(helper.status_code, 201, helper.text)
+        self.assertRegex(helper.json()["name"], r"[А-Яа-яЁё]")
+        self.assertEqual(self.client.get("/api/v2/stars").json()["platinum"], 0)
+        exclude = self.client.post(f"/api/v2/games/{run_id}/categories/exclude", json={
+            "categories": ["Physics"], "request_id": str(uuid4()),
+        })
+        self.assertEqual(exclude.status_code, 200, exclude.text)
+        self.assertEqual(self.client.get("/api/v2/stars").json()["silver"], 0)
+        before = self.client.get(f"/api/v2/games/{run_id}").json()
+        self.assertFalse(before["question_issued"])
+        self.assertIsNotNone(before["helper"])
+        self.assertEqual(before["helper"]["id"], helper.json()["id"])
+
+        replaced = self.client.post(f"/api/v2/games/{run_id}/replace", json={
+            "language": "German",
+        })
+        self.assertEqual(replaced.status_code, 201, replaced.text)
+        fresh = replaced.json()
+        self.assertNotEqual(fresh["game_id"], run_id)
+        self.assertEqual(fresh["language"], "German")
+        self.assertFalse(fresh["question_issued"])
+        self.assertIsNone(fresh["helper"])
+        self.assertEqual(fresh["main_question_index"], 0)
+        self.assertEqual(fresh["phase"], "main")
+        self.assertEqual(
+            self.client.get(f"/api/v2/games/{fresh['game_id']}/categories").json()["can_exclude"],
+            True,
+        )
+        old = self.client.get(f"/api/v2/games/{run_id}").json()
+        self.assertEqual(old["phase"], "abandoned")
+        self.assertEqual(old["replacement_game_id"], fresh["game_id"])
+        self.assertIsNotNone(old["helper"])  # History remains inspectable.
+        self.assertEqual(
+            self.client.get(f"/api/v2/games/{run_id}/question").status_code, 409,
+        )
+        self.assertEqual(
+            self.client.get("/api/v2/stars").json(),
+            {"bronze": 1, "silver": 0, "gold": 0, "platinum": 0},
+        )  # Earned bronze is still there; spent silver/platinum do not refund.
+
+        # An uncertain duplicate POST must not generate an extra game, re-charge
+        # perks, or apply a later request's different language to the successor.
+        retry = self.client.post(f"/api/v2/games/{run_id}/replace", json={
+            "language": "Italian",
+        })
+        self.assertEqual(retry.status_code, 201, retry.text)
+        self.assertEqual(retry.json()["game_id"], fresh["game_id"])
+        self.assertEqual(retry.json()["language"], "German")
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 2)
+            self.assertIsNotNone(db.get(GameRun, UUID(run_id)).finished_at)
+
+    def test_abandon_invalid_language_and_cross_user_are_non_mutating(self):
+        self.register("Alice")
+        run_id = self.start("English")
+        invalid = self.client.post(f"/api/v2/games/{run_id}/replace", json={
+            "language": "Not-a-game-language",
+        })
+        self.assertEqual(invalid.status_code, 422)
+        csrf = self.client.post(
+            f"/api/v2/games/{run_id}/replace",
+            json={"language": "English"},
+            headers={"Origin": "https://evil.example"},
+        )
+        self.assertEqual(csrf.status_code, 403)
+        other = TestClient(app)
+        self.addCleanup(other.close)
+        self.register("Bob", client=other)
+        forbidden = other.post(f"/api/v2/games/{run_id}/replace", json={
+            "language": "English",
+        })
+        self.assertEqual(forbidden.status_code, 404)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(GameRun.id))), 1)
+            self.assertEqual(db.get(GameRun, UUID(run_id)).status, "main")
 
     def test_game_endpoints_require_login(self):
         self.assertEqual(self.client.post("/api/v2/games", json={}).status_code, 401)
