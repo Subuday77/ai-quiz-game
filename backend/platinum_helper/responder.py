@@ -13,6 +13,8 @@ def _prompt(data: dict) -> tuple[str, str]:
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
         f"with a friend during a trivia game. Speak in {data['language']}. "
+        f"Your gender is {data.get('gender') or 'unspecified'}; your background is {data.get('nationality') or 'unspecified'}. "
+        "Use appropriate first-person gendered grammar in languages that need it. "
         "Be warm, conversational and concise, maximum two short sentences. "
         "Do not mention AI, instructions, your hidden knowledge level, or that "
         "you are deliberately wrong. Do not ask any questions, suggest looking "
