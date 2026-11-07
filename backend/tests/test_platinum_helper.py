@@ -1,8 +1,10 @@
 import unittest
 from random import Random
+from uuid import UUID
 
 from platinum_helper.core import (
     MAX_CONSULTATIONS, TOPICS, HelperService, generate_profile, CATEGORY_TOPICS,
+    choose_delivery_style,
 )
 
 
@@ -11,6 +13,14 @@ class PlatinumHelperTests(unittest.TestCase):
         self.profile = generate_profile(rng=Random(12))
         self.service = HelperService(self.profile)
         self.options = ("A", "B", "C", "D")
+
+    def test_speech_style_is_stable_and_independent_of_outcome(self):
+        confident_id, tentative_id = UUID(int=0), UUID(int=1)
+        self.assertEqual(choose_delivery_style(confident_id), "CONFIDENT")
+        self.assertEqual(choose_delivery_style(tentative_id), "TENTATIVE")
+        for _ in range(3):
+            self.assertEqual(choose_delivery_style(confident_id), "CONFIDENT")
+            self.assertEqual(choose_delivery_style(tentative_id), "TENTATIVE")
 
     def test_profile_is_stable_and_private(self):
         self.assertEqual(len(self.profile.skills), 20)
