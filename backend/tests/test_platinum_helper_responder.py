@@ -124,7 +124,7 @@ class HelperResponderTests(unittest.TestCase):
             "KEY: A\nSPEECH: 476.",
             "KEY: A\nSPEECH: Я бы не советовал выбирать 395.",
         ])
-        self.assertEqual(talk(sample(), client=client), "Мой ответ — «395».")
+        self.assertEqual(talk(sample(), client=client), "Мой ответ: «395».")
         self.assertEqual(client.calls, 2)
         self.assertEqual(_fallback(sample("UNSURE")), "Не уверен, не хочу тебя запутать.")
 
