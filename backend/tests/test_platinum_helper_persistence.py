@@ -13,7 +13,7 @@ from persistence.gameplay import GameConflict, record_answer
 from persistence.game_routes import _game_info
 from persistence.models import (
     Base, GameRun, WalletTransaction, PlatinumHelperCall, PlatinumHelperPurchase, Question,
-    QuestionAttempt, StarAward, Topic, User,
+    QuestionAttempt, QuestionReview, StarAward, Topic, User,
 )
 from platinum_helper.core import CATEGORY_TOPICS, MAX_CONSULTATIONS, TOPICS
 from platinum_helper.service import (
@@ -171,6 +171,74 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertTrue(cached)
         self.assertEqual(old, "A valid response")
         self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 1)
+
+
+    def test_plausible_mistake_uses_saved_generator_scores(self):
+        self.purchase()
+        question, attempt = self.issue_question()
+        self.db.add(QuestionReview(
+            question_id=question.id, checker_type="generator_plausibility",
+            provider="test", contract_version="generator_plausibility_v1",
+            decision="unverified_estimate", details={
+                "scores": {"A": 55, "B": 5, "C": 100, "D": 15},
+            },
+        ))
+        self.db.commit()
+        with patch("platinum_helper.service.choose_outcome", return_value="MISTAKEN"):
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="plausible-score-1", rng=Random(3),
+            )
+        self.assertEqual(payload["outcome"], "MISTAKEN")
+        self.assertEqual(payload["letter"], "A")
+        self.assertEqual(self.db.get(PlatinumHelperCall, payload["call_id"]).selected_key, "A")
+
+    def test_implausible_mistake_abstains_and_retry_does_not_reroll(self):
+        self.purchase()
+        question, attempt = self.issue_question()
+        self.db.add(QuestionReview(
+            question_id=question.id, checker_type="generator_plausibility",
+            provider="test", contract_version="generator_plausibility_v1",
+            decision="unverified_estimate", details={
+                "scores": {"A": 35, "B": 7, "C": 100, "D": 9},
+            },
+        ))
+        self.db.commit()
+        args = dict(user_id=self.user.id, run_id=self.run.id,
+                    question_id=question.id, request_key="abstain-score-1")
+        with patch("platinum_helper.service.choose_outcome", return_value="MISTAKEN"):
+            _, _, _, first = reserve_call(self.db, **args, rng=Random(3))
+        self.assertEqual(first["outcome"], "UNSURE")
+        self.assertIsNone(first["letter"])
+        self.assertIsNone(finish_call(self.db, user_id=self.user.id,
+                                     run_id=self.run.id, call_id=first["call_id"],
+                                     reply=None))
+        with patch("platinum_helper.service.choose_outcome", return_value="KNOW"):
+            _, _, _, retried = reserve_call(self.db, **args, rng=Random(4))
+        self.assertEqual(retried["outcome"], "UNSURE")
+        self.assertIsNone(retried["letter"])
+        self.assertEqual(retried["call_id"], first["call_id"])
+        self.assertEqual(get_purchase(self.db, self.run.id).consultations_used, 0)
+
+    def test_platinum_mistake_ignores_bronze_hidden_options(self):
+        self.purchase()
+        question, attempt = self.issue_question()
+        attempt.hints_used = 2
+        self.db.add(QuestionReview(
+            question_id=question.id, checker_type="generator_plausibility",
+            provider="test", contract_version="generator_plausibility_v1",
+            decision="unverified_estimate", details={
+                "scores": {"A": 85, "B": 15, "C": 100, "D": 5},
+            },
+        ))
+        self.db.commit()
+        with patch("platinum_helper.service.choose_outcome", return_value="MISTAKEN"):
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="bronze-score-1", rng=Random(2),
+            )
+        self.assertEqual(payload["letter"], "A")
+        self.assertEqual(payload["outcome"], "MISTAKEN")
 
     def test_real_q15_transition_refunds_platinum_and_opens_bonus(self):
         self.purchase()
