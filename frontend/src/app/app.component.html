@@ -271,7 +271,7 @@
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
-        <button *ngIf="account && (gameId || resumeCandidate)" class="outline-button"
+        <button *ngIf="account && (gameQuestionIssued || resumeCandidate)" class="outline-button"
                 type="button" (click)="requestNewGame()"
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
           {{ locale.t('game.startNew') }}
