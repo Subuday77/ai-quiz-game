@@ -4,7 +4,7 @@ from platinum_helper.responder import _validate, _prompt, talk, HelperUnavailabl
 
 def sample(outcome="MISTAKEN"):
     return dict(name="Sam", profession="Firefighter", language="Russian",
-                topic="History", outcome=outcome,
+                topic="History", outcome=outcome, delivery_style="CONFIDENT",
                 letter="A" if outcome == "MISTAKEN" else "C",
                 question_text="В каком году?",
                 choices={"A":"395","B":"410","C":"476","D":"527"},
@@ -30,6 +30,22 @@ class HelperResponderTests(unittest.TestCase):
         self.assertEqual(_validate("KEY: A\nSPEECH: Наверное, 395.",sample()),"Наверное, 395.")
         self.assertIsNone(_validate("KEY: C\nSPEECH: 476.",sample()))
         self.assertIsNone(_validate("KEY: A\nSPEECH: Впрочем, 476.",sample()))
+
+    def test_confidence_is_independent_of_correctness(self):
+        for outcome in ("KNOW", "MISTAKEN"):
+            for style in ("CONFIDENT", "TENTATIVE"):
+                data = sample(outcome)
+                data["delivery_style"] = style
+                instructions, prompt = _prompt(data)
+                self.assertIn("KEY: X", instructions)
+                self.assertIn("В каком году?", prompt)
+                if style == "CONFIDENT":
+                    self.assertIn("Do not hedge", instructions)
+                    self.assertNotIn("Sound naturally uncertain", instructions)
+                else:
+                    self.assertIn("Sound naturally uncertain", instructions)
+                    self.assertNotIn("Do not hedge", instructions)
+                self.assertIn(f"option {data['letter']}", instructions)
 
     def test_unsure_has_no_question(self):
         instructions, prompt=_prompt(sample("UNSURE"))
