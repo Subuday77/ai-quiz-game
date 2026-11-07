@@ -1625,3 +1625,60 @@ test('collapsed shop uses tier-colored prices and only opens category changes in
   assert.ok(template.includes("locale.format('stats.roundSkipped'"));
   assert.ok(source.includes('if (selected.isDenied) continue'));
 });
+
+test('helper setup shows collapsed hiring, two price choices and person silhouette', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\(click\)="showHelperHire\(\)"/);
+  assert.match(template, /\*ngIf="helperHireOpen"/);
+  assert.match(template, /\(click\)="selectRandomHelper\(\)"/);
+  assert.match(template, /\(click\)="showChooseHelper\(\)"/);
+  assert.match(template, /\*ngIf="helperChooseProfession"/);
+  assert.match(template, /class="helper-avatar"/);
+  assert.doesNotMatch(template, /☎/);
+  assert.doesNotMatch(template, /helper\.shopDescription/);
+  assert.match(template, /\*ngIf="!helperReply"/);
+  assert.equal(english['helper.call'], 'Ask for help');
+});
+
+test('helper card uses localizable templates and does not translate the literal name', () => {
+  const { app } = setup();
+  const helper = {
+    name: 'Мария Смирнова', profession: 'Doctor', gender: 'female',
+    strong_topics: ['Biology'], weak_topics: ['Mythology'],
+    tagline_id: 1, tagline_high: 'Biology', tagline_low: 'Mythology',
+  };
+  app.locale.load('en');
+  assert.equal(app.helperProfessionLabel(helper), 'Doctor');
+  assert.match(app.helperTagline(helper), /Biology/);
+  assert.match(app.helperTagline(helper), /Mythology/);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\{\{ helper\.name \}\}/);
+  assert.match(template, /helperTagline\(helper\)/);
+  assert.doesNotMatch(template, /helper\.tagline \}\}/);
+});
+
+test('pre-question hiring state is Start, actual issued Q1 state is Resume', () => {
+  const { app } = setup();
+  app.helperCard = {
+    name: 'Test Person', profession: 'Historian',
+    strong_topics: [], weak_topics: [], consultations_remaining: 3,
+  };
+  app.gameQuestionIssued = false;
+  assert.equal(app.setupButtonLabelKey, 'game.start');
+  app.gameQuestionIssued = true;
+  assert.equal(app.setupButtonLabelKey, 'game.resume');
+});
+
+test('successful helper reply hides request button and retry label is context-aware', () => {
+  const { app } = setup();
+  app.helperCallKey = '';
+  app.helperError = '';
+  assert.equal(app.helperCallButtonKey, 'helper.call');
+  app.helperCallKey = 'previous-request';
+  assert.equal(app.helperCallButtonKey, 'helper.recoverCall');
+  app.helperError = 'helper.callFailed';
+  assert.equal(app.helperCallButtonKey, 'helper.repeatCall');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /\*ngIf="!helperReply"/);
+});
+
