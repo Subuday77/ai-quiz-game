@@ -156,7 +156,10 @@ class BonusTopicRotationTests(unittest.TestCase):
         )) as gen:
             result = self.client.get(self.base + "/question")
         self.assertEqual(result.status_code, 502, result.text)
-        gen.assert_called_once()
+        # Q16 now tries the persisted next topic within this same GET.
+        self.assertEqual(gen.call_count, 2)
+        self.assertNotEqual(gen.call_args_list[0].args[2],
+                            gen.call_args_list[1].args[2])
         self.assertEqual(self.get_state(), ("bonus", 15, 1, True, 0))
 
     def test_concurrent_failures_cannot_rotate_the_same_topic_twice(self):
