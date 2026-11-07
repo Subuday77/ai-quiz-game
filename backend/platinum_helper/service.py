@@ -34,7 +34,12 @@ def card(purchase: PlatinumHelperPurchase) -> dict:
         "erudition": p["erudition"],
         "strong_topics": list(p["featured_high"]),
         "weak_topics": list(p["featured_low"]),
-        "tagline": p["tagline"],
+        "tagline": p.get("tagline", ""),
+        "tagline_id": p.get("tagline_id", 1),
+        "tagline_high": p.get("tagline_high") or (p["featured_high"][0] if p["featured_high"] else ""),
+        "tagline_low": p.get("tagline_low") or (p["featured_low"][0] if p["featured_low"] else ""),
+        "gender": p.get("gender", ""),
+        "nationality": p.get("nationality", ""),
         "consultations_remaining": MAX_CONSULTATIONS - purchase.consultations_used,
         "consultations_total": MAX_CONSULTATIONS,
         "refunded": purchase.refunded,
@@ -49,7 +54,8 @@ def get_purchase(db: Session, run_id: UUID) -> PlatinumHelperPurchase | None:
 
 
 def buy(db: Session, *, user_id: UUID, run_id: UUID,
-        profession: str | None, name: str, tagline: str,
+        profession: str | None, name: str, tagline: str = "",
+        gender: str = "", nationality: str = "",
         rng: Random | None = None) -> dict:
     """Buy once before the FIRST question is issued, with an atomic star debit."""
     try:
@@ -68,7 +74,10 @@ def buy(db: Session, *, user_id: UUID, run_id: UUID,
         chosen = profession or rng.choice(list(PROFESSIONAL_SKILLS))
         if available_platinum(db, user_id) < price:
             raise GameConflict("Insufficient platinum stars")
-        profile = generate_profile(chosen, name=name, tagline=tagline, rng=rng)
+        profile = generate_profile(
+            chosen, name=name, tagline=tagline,
+            gender=gender, nationality=nationality, rng=rng
+        )
         purchase = PlatinumHelperPurchase(
             run_id=run_id, user_id=user_id, price=price, profession=chosen,
             profile=asdict(profile), consultations_used=0, refunded=False,
@@ -135,7 +144,9 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             raise GameConflict("No helper competence mapping for the question")
         if old is None:
             rng = rng or Random()
-            outcome = choose_outcome(purchase.profile["skills"][broad], rng)
+            # Existing purchased characters predate the revised category map.
+            # Their original strengths remain fixed; new areas use MEDIUM.
+            outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng)
             letter = (rng.choice([c for c in "ABCD" if c != question.correct_key])
                       if outcome == "MISTAKEN" else
                       question.correct_key if outcome == "KNOW" else None)
