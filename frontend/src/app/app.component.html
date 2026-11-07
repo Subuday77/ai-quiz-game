@@ -137,6 +137,22 @@
       <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
     </section>
   </div>
+  <div class="helper-modal-backdrop" *ngIf="showAbandonConfirm">
+    <section class="helper-modal" role="dialog" aria-modal="true"
+             [attr.aria-label]="locale.t('game.abandonTitle')">
+      <h2>{{ locale.t('game.abandonTitle') }}</h2>
+      <p>{{ locale.t('game.abandonWarning') }}</p>
+      <p><strong>{{ locale.t('game.abandonCost') }}</strong></p>
+      <div class="question-actions">
+        <button type="button" class="primary" (click)="confirmNewGame()">
+          {{ locale.t('game.startNewConfirm') }}
+        </button>
+        <button type="button" class="outline-button" (click)="cancelNewGame()">
+          {{ locale.t('auth.cancel') }}
+        </button>
+      </div>
+    </section>
+  </div>
   <section class="card">
     <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
@@ -164,6 +180,9 @@
       <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
         {{ locale.t('helper.keepGold') }}
       </button>
+      <button type="button" class="outline-button" (click)="requestNewGame()" [disabled]="loading || restoringGame">
+        {{ locale.t('game.startNew') }}
+      </button>
     </div>
     <div *ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">
       <label for="language">{{ locale.t('game.questionLanguage') }}</label>
@@ -174,7 +193,7 @@
       </select>
       <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
       <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
-      <div class="category-pregame-action" *ngIf="account && (!gameId || resumeAvailable || categoryInfo?.can_exclude)">
+      <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && (categoryInfo === null || categoryInfo.can_exclude)">
         <button class="outline-button" type="button" (click)="openCategoryExclusions()"
                 [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
           {{ locale.t(showCategoryExclusions ? 'perks.hideExclusions' : 'perks.openExclusions') }}
@@ -244,13 +263,14 @@
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
           {{ locale.t(setupButtonLabelKey) }}
         </button>
-        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startFreshGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy">
-          {{ locale.t('game.startNew') }}
-        </button>
-        <button *ngIf="resumeAvailable" class="outline-button" type="button" (click)="startGame()"
-                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || categoriesToExclude.length > 0">
+        <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
           {{ locale.t(setupButtonLabelKey) }}
+        </button>
+        <button *ngIf="account && (gameId || resumeCandidate)" class="outline-button"
+                type="button" (click)="requestNewGame()"
+                [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
+          {{ locale.t('game.startNew') }}
         </button>
         <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
         <span *ngIf="loading" class="sr-only" role="status">{{ locale.t('game.loading') }}</span>
