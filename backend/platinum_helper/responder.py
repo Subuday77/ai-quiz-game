@@ -26,6 +26,36 @@ def _speech_language(data: dict) -> str:
     return _LANG.get(raw, raw).capitalize()
 
 
+_PRESENTATION_RECOMMENDATION = {
+    "DIRECT": (
+        "Lead with the choice itself. Avoid opening with a conditional "
+        "'I would ...' construction or its equivalent. Be brief and idiomatic. "
+    ),
+    "PERSONAL": (
+        "Give a quick personal vote, using an easy conversational first-person "
+        "voice. Avoid formulaic conditional phrases; sound spontaneous. "
+    ),
+    "CASUAL": (
+        "Give a relaxed, conversational nudge toward your pick. "
+        "Use a short informal turn of phrase, not a canned slogan or joke. "
+    ),
+}
+_PRESENTATION_UNSURE = {
+    "DIRECT": "Say plainly that you do not know; skip apologies and excuses. ",
+    "PERSONAL": "Admit personally that you cannot remember, without making up reasons. ",
+    "CASUAL": "Give a quick, friendly admission of uncertainty; no jokes or clues. ",
+}
+
+
+def _presentation(data: dict, *, unsure: bool) -> str:
+    style = data.get("presentation_style", "DIRECT")
+    rules = _PRESENTATION_UNSURE if unsure else _PRESENTATION_RECOMMENDATION
+    try:
+        return rules[style]
+    except (KeyError, TypeError):
+        raise ValueError("Unsupported helper presentation style") from None
+
+
 def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
     speech_language = _speech_language(data)
     persona = (
@@ -52,6 +82,7 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
             "start the same way. Do not invent an excuse. Do not ask for "
             "the question, hint at an answer, name an option, "
             "suggest guessing, or invent an explanation. "
+            + _presentation(data, unsure=True) +
             "Output exactly one line: SPEECH: your response.",
             "Question already visible to your friend: " + data["question_text"],
         )
@@ -80,6 +111,7 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         "Do not compare choices or explain why any choice fits or fails. "
         "Use a single short conversational sentence, usually 5 to 16 words, "
         "with comparable detail for confident and tentative advice. "
+        + _presentation(data, unsure=False)
     )
     style = data["delivery_style"]
     if style == "CONFIDENT":
@@ -221,6 +253,13 @@ def _validate(raw: str, data: dict) -> str | None:
     if (not speech or len(speech) > 450 or _DENIAL.search(speech)
             or not _language_script_ok(speech, data)
             or not _single_recommendation_ok(speech)):
+        return None
+    # A valid KEY is not enough. The actual selected answer must be present
+    # in the spoken recommendation as a complete unchanged name/text.
+    # NFKC + casefold tolerate typography/case; no translation/inflection
+    # guessing and no need for separate grammar rules per locale.
+    selected = data["choices"].get(data["letter"])
+    if not isinstance(selected, str) or not _mentions(speech, selected):
         return None
     # Forbid literal mentions of *any* unselected option, whether correct
     # or incorrect (not just the correct choice).
