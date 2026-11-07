@@ -1,7 +1,7 @@
 """Human-sounding Platinum Helper replies with server-side anti-leak checks.
 
-The model never sees the true key, the KNOW/MISTAKEN label, or distractor
-scores. Every valid response names the server-selected answer. When a response
+The model is never told whether its selected key is correct, nor is it
+shown the KNOW/MISTAKEN label, other options, or distractor scores. Every valid response names the server-selected answer. When a response
 cannot pass basic checks, retry once with a stricter wording; never show the
 rejected draft to the player.
 """
@@ -189,11 +189,11 @@ def _fallback(data: dict) -> str:
 def talk(data: dict, *, client=None) -> str:
     """One retry with frozen selected key; never charge for network failure."""
     model = os.environ.get("QUIZ_HELPER_MODEL_ID", "gpt-5.4")
-    sdk = client or OpenAI()
     got_rejected_reply = False
     for attempt in range(2):
         instructions, prompt = _prompt(data, strict=attempt > 0)
         try:
+            sdk = client or OpenAI()
             response = sdk.with_options(timeout=8.0, max_retries=0).responses.create(
                 model=model, instructions=instructions, input=prompt,
                 reasoning={"effort": "low"}, max_output_tokens=240,
