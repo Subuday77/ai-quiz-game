@@ -653,6 +653,79 @@ test('setup button shows loading during resume and start again after failed crea
   assert.equal(app.setupButtonLabelKey, 'game.start');
 });
 
+test('hiring a helper retains category-exclusion setup and uses UI language only', async () => {
+  const { app, requests, posts } = setup();
+  app.gameId = 'existing-game';
+  app.gameQuestionIssued = false;
+  app.selectedLanguage = 'Italian'; // Question language must not influence names.
+  app.locale.code = 'ru';
+  app.spendableStars.platinum = 1;
+  app.openCategoryExclusions(); // Can exclude before buying the helper.
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.categoryInfo.can_exclude, true);
+  app.selectRandomHelper();
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/games/existing-game/helper/purchase');
+  assert.deepEqual(posts[0].body, { profession: null, ui_language: 'ru' });
+  succeed(posts[0], {
+    id: 'saved-helper', name: 'Мария Иванова', profession: 'Physicist',
+    gender: 'female', strong_topics: [], weak_topics: [],
+    consultations_remaining: 3, consultations_total: 3,
+    erudition: 57, price: 1, refunded: false,
+  });
+  await Promise.resolve();
+  assert.equal(app.helperCard.name, 'Мария Иванова');
+  assert.equal(app.categoryInfo.can_exclude, true);
+  assert.equal(app.showCategoryExclusions, true);
+  assert.equal(app.selectedLanguage, 'Italian');
+  assert.equal(app.helperBusy, false);
+  assert.equal(requests.length, 0); // Q1 never appears on hiring.
+});
+
+test('abandoned round reload follows committed replacement instead of losing setup', () => {
+  const prior = globalThis.localStorage;
+  const key = 'ai-quiz-game:active-round:v2:user-1';
+  const saved = new Map([[key, 'old-game']]);
+  globalThis.localStorage = {
+    getItem: k => saved.get(k) ?? null,
+    setItem: (k, v) => saved.set(k, v),
+    removeItem: k => saved.delete(k),
+  };
+  try {
+    const { app, requests, posts } = setup();
+    app.gameId = '';
+    assert.equal(requests[0].url, '/api/v2/games/old-game');
+    succeed(requests[0], {
+      game_id: 'old-game', phase: 'abandoned', language: 'English',
+      correct_main_answers: 10, replacement_game_id: 'new-game',
+    });
+    assert.equal(saved.get(key), 'new-game');
+    assert.equal(requests[1].url, '/api/v2/games/new-game');
+    succeed(requests[1], {
+      game_id: 'new-game', phase: 'main', language: 'Hebrew',
+      correct_main_answers: 0, question_issued: false,
+    });
+    assert.equal(app.gameId, 'new-game');
+    assert.equal(app.selectedLanguage, 'Hebrew');
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.gameQuestionIssued, false);
+    assert.equal(app.categoryInfo.can_exclude, true);
+    assert.equal(posts.length, 0);
+  } finally {
+    if (prior === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prior;
+  }
+});
+
+test('profession display always uses neutral profession key without a gender prefix', () => {
+  const { app } = setup();
+  for (const gender of ['male', 'female', '']) {
+    assert.equal(app.helperProfessionLabel({ gender, profession: 'Physicist' }), 'Physicist');
+  }
+  assert.doesNotMatch(source, /helper\\.professionFemale\\./);
+  assert.equal(english['helper.professionFemale.Physicist'], undefined);
+});
+
 test('reload restores a paid helper before Q1 without buying another or allocating a new run', () => {
   const previous = globalThis.localStorage;
   const key = 'ai-quiz-game:active-round:v2:user-1';
