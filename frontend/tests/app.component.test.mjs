@@ -167,6 +167,26 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(posts.length, 0);
 });
 
+test('question heading displays preparation during first and later question generation', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /<h1 \*ngIf="screen === 'question' && questionLoading">\{\{ locale\.t\('game\.loading'\) \}\}<\/h1>/);
+  assert.match(template, /<h1 \*ngIf="screen === 'question' && !questionLoading && \(current \|\| canRetryQuestion\)">/);
+  assert.doesNotMatch(template, /<h1[^>]*generatingNextQuestion/);
+
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.progress = 0;
+    app.generatingNextQuestion = false; // First question: the old title bug.
+    app.loadQuestion();
+    assert.equal(app.questionLoading, true);
+    assert.equal(app.current, null);
+    assert.equal(app.screen, 'question');
+    succeed(requests[0]);
+  });
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.current.question_id, question.question_id);
+});
+
 test('long-wait warning appears at 15 seconds and clears on success', () => {
   const { app, requests, scheduler } = setup();
   scheduler.run(() => {
