@@ -613,6 +613,11 @@ export class AppComponent implements OnInit, OnDestroy {
       };
       this.stars = this.starTiers.filter(tier => this.currentStars[tier.key] > 0)
         .map(tier => tier.key);
+      if (this.bonusDecisionAvailable) {
+        this.screen = 'setup';
+        this.resumeAvailable = false;
+        return;
+      }
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
@@ -625,6 +630,10 @@ export class AppComponent implements OnInit, OnDestroy {
       this.resumeRunLanguage = '';
       this.showCategoryExclusions = false;
       this.resumeAvailable = false;
+      if (this.bonusDecisionAvailable) {
+        this.screen = 'setup';
+        return;
+      }
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
       return;
@@ -803,6 +812,10 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.feedback = result;
         this.bonusDecisionAvailable = result.phase === 'bonus';
+        if (this.current?.bonus && !result.correct) {
+          this.currentStars.gold = Math.max(0, this.currentStars.gold - 1);
+          this.stars = this.stars.filter(tier => tier !== 'gold');
+        }
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
         this.gameCorrectAnswers = result.correct_main_answers;
@@ -831,7 +844,7 @@ export class AppComponent implements OnInit, OnDestroy {
   continue(): void {
     // Error recovery owns navigation; never silently issue a second request
     // while the Retry action is visible.
-    if (this.loading || this.canRetryQuestion) return;
+    if (this.loading || this.canRetryQuestion || this.bonusDecisionAvailable) return;
     if (this.gameEnded) {
       this.screen = 'done';
     } else {
@@ -927,6 +940,53 @@ export class AppComponent implements OnInit, OnDestroy {
       error: () => {
         if (this.gameId === gameId && this.current?.question_id === questionId)
           this.helperError = 'helper.callFailed';
+      },
+    }));
+  }
+
+  acceptBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading || !this.account || !this.gameId) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/accept', {},
+    ).pipe(timeout(12000)).subscribe({
+      next: () => {
+        this.loading = false;
+        this.bonusDecisionAvailable = false;
+        this.refreshSpendableStars();
+        this.generatingNextQuestion = true;
+        this.loadQuestion();
+      },
+      error: (err: unknown) => {
+        this.loading = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'helper.bonusDecisionFailed';
+      },
+    }));
+  }
+
+  declineBonus(): void {
+    if (!this.bonusDecisionAvailable || this.loading || !this.account || !this.gameId) return;
+    this.loading = true;
+    this.error = '';
+    this.subscriptions.add(this.http.post<GameInfo>(
+      GAME_API + '/' + this.gameId + '/bonus/decline', {},
+    ).pipe(timeout(12000)).subscribe({
+      next: () => {
+        this.loading = false;
+        this.bonusDecisionAvailable = false;
+        this.finishedPhase = 'completed';
+        this.current = null;
+        this.feedback = null;
+        this.screen = 'done';
+        this.forgetActiveGame();
+        this.refreshStats();
+      },
+      error: (err: unknown) => {
+        this.loading = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.error = 'helper.bonusDecisionFailed';
       },
     }));
   }
@@ -1363,6 +1423,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         this.canRetryQuestion = false;
         this.progress = run.main_question_index ?? run.correct_main_answers;
+        this.bonusDecisionAvailable = run.bonus_decision_available === true;
+        this.gameQuestionIssued = run.question_issued === true;
         this.gameCorrectAnswers = run.correct_main_answers;
         this.skippedQuestions = run.skipped_questions ?? 0;
         if (run.phase === 'completed' || run.phase === 'lost') {
