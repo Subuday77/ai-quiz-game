@@ -47,6 +47,7 @@ interface GameInfo {
   skipped_questions?: number;
   question_issued?: boolean;
   helper?: HelperCard | null;
+  replacement_game_id?: string | null;
   bonus_decision_available?: boolean;
 }
 interface PublicQuestion {
