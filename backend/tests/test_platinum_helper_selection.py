@@ -37,11 +37,13 @@ class PlausibleMistakeTests(unittest.TestCase):
         self.assertIsNone(best_visible_wrong(
             correct_key="C", difficulty=5, scores=scores))
 
-    def test_legacy_neutral_scores_and_invalid_metadata(self):
-        self.assertEqual(best_visible_wrong(
-            correct_key="C", difficulty=1, scores=None), "A")
+    def test_legacy_and_invalid_metadata_abstain(self):
+        self.assertIsNone(best_visible_wrong(
+            correct_key="C", difficulty=1, scores=None))
         self.assertIsNone(best_visible_wrong(
             correct_key="C", difficulty=7, scores=None))
+        self.assertIsNone(best_visible_wrong(
+            correct_key="C", difficulty=0, scores={"A": 50, "B": 50}))
         self.assertIsNone(best_visible_wrong(
             correct_key="C", difficulty=1, scores={"A": True, "B": 0, "D": 0}))
         self.assertEqual(best_visible_wrong(
