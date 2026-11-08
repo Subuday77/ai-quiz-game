@@ -262,7 +262,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   // Setup and category actions are under screen=setup, inaccessible on failure.
   assert.match(template, /<div \*ngIf="screen === 'setup' && !bonusDecisionAvailable" class="setup">/);
-  assert.match(template, /<div class="question-actions" \*ngIf="canRetryQuestion && !duplicateExhausted">/);
+  assert.match(template, /class="duplicate-recovery" \*ngIf="canRetryQuestion && !duplicateExhausted && error"/);
 });
 
 test('failed later question discards stale feedback and keeps the original game', () => {
@@ -2235,3 +2235,49 @@ test('successful helper reply hides request button and retry label is context-aw
   assert.match(template, /\*ngIf="!helperReply"/);
 });
 
+
+test('completed unviewed results survive F5 and are offered without creating a round', () => {
+  const previous = globalThis.localStorage;
+  const data = new Map([['ai-quiz-game:unviewed-results:v1:user-1', 'finished-game']]);
+  globalThis.localStorage = {
+    getItem: key => data.get(key) ?? null,
+    setItem: (key, value) => data.set(key, value),
+    removeItem: key => data.delete(key),
+  };
+  try {
+    const { app, requests, posts } = setup();
+    app.gameId = ''; // No active game exists following the completed round.
+    const lookup = requests.find(req => req.url === '/api/v2/games/finished-game');
+    assert.ok(lookup, 'terminal record must be read from PostgreSQL');
+    succeed(lookup, {
+      game_id: 'finished-game', language: 'Russian', phase: 'completed',
+      correct_main_answers: 15, main_question_index: 15,
+      skipped_questions: 0, question_issued: true, helper: null,
+    });
+    assert.equal(app.pendingResults?.game_id, 'finished-game');
+    assert.equal(app.screen, 'setup');
+    app.showPendingResults();
+    assert.equal(app.screen, 'done');
+    assert.equal(app.gameCorrectAnswers, 15);
+    assert.deepEqual(app.stars, ['bronze', 'silver', 'gold']);
+    assert.equal(data.has('ai-quiz-game:unviewed-results:v1:user-1'), false);
+    assert.equal(posts.length, 0, 'viewing results cannot create another game');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('Chrome category modal explicitly styles native select option colors', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.match(styles, /\.swal2-container \.swal2-select option/);
+  assert.match(styles, /color-scheme:\s*dark/);
+  assert.match(styles, /background-color:\s*#292c4c/);
+});
+
+test('Q10 through Q16 use recovery timeout; retry UI stays inside the game', () => {
+  assert.match(source, /this\.progress >= 9/);
+  const markup = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(markup, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"/);
+  assert.match(markup, /\(click\)="showPendingResults\(\)"/);
+});
