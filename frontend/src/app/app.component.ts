@@ -1690,9 +1690,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameId = run.game_id;
     this.gameLanguage = run.language;
     this.selectedLanguage = run.language;
-    this.progress = run.main_question_index;
+    this.progress = run.main_question_index ?? run.correct_main_answers;
     this.gameCorrectAnswers = run.correct_main_answers;
-    this.skippedQuestions = run.skipped_questions;
+    this.skippedQuestions = run.skipped_questions ?? 0;
     this.finishedPhase = run.phase;
     this.currentStars = {
       bronze: run.correct_main_answers >= 5 ? 1 : 0,
