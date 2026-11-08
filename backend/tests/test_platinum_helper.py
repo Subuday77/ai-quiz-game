@@ -138,7 +138,10 @@ class PlatinumHelperTests(unittest.TestCase):
 
     def test_every_competence_is_playable_and_fire_safety_is_not_hidden(self):
         self.assertNotIn("Fire Safety", TOPICS)
-        self.assertEqual(set(TOPICS), set(CATEGORY_TOPICS.values()))
+        self.assertTrue(set(CATEGORY_TOPICS.values()) <= set(TOPICS))
+        # Some profession areas are useful as reviewed question-level skills
+        # even if no broad category falls back to them (e.g. Agriculture).
+        self.assertIn("Agriculture", TOPICS)
 
     def test_new_character_has_stable_localizable_tagline_fields(self):
         p = generate_profile("Historian", name="Jean Dupont",
