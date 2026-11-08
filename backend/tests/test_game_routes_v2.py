@@ -79,6 +79,49 @@ class PersistentGameAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["game_id"]
 
+
+    def test_finished_round_stars_are_read_from_own_awards_after_f5(self):
+        user_id = UUID(self.register("Alice"))
+        win_id = UUID(self.start("Russian"))
+        with Session(self.engine) as db:
+            win = db.get(GameRun, win_id)
+            win.status = "completed"
+            win.correct_main_answers = 15
+            win.bonus_wager_accepted = True
+            win.bonus_correct = True
+            db.add_all([
+                StarAward(user_id=user_id, run_id=win_id, tier=tier)
+                for tier in ("bronze", "silver", "gold", "platinum")
+            ])
+            # The historical gold award remains even after a failed Q16 stake.
+            loss = GameRun(
+                user_id=user_id, language="Russian", status="completed",
+                correct_main_answers=15, bonus_wager_accepted=True,
+                bonus_correct=False,
+            )
+            db.add(loss)
+            db.flush()
+            loss_id = loss.id
+            db.add_all([
+                StarAward(user_id=user_id, run_id=loss_id, tier=tier)
+                for tier in ("bronze", "silver", "gold")
+            ])
+            db.commit()
+
+        expected_win = {"bronze": 1, "silver": 1, "gold": 1, "platinum": 1}
+        expected_loss = {"bronze": 1, "silver": 1, "gold": 0, "platinum": 0}
+        for run_id, expected in ((win_id, expected_win), (loss_id, expected_loss)):
+            url = f"/api/v2/games/{run_id}"
+            first = self.client.get(url)
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(first.json()["round_stars"], expected)
+            self.assertEqual(self.client.get(url).json()["round_stars"], expected)
+        # Viewing results is read-only: the award rows and wallet are unchanged.
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(StarAward.id))), 7)
+            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+        self.assertIsNone(self.client.get("/api/v2/games/active").json())
+
     def test_active_round_is_discovered_without_browser_storage_or_cookie_locality(self):
         self.assertEqual(self.client.get("/api/v2/games/active").status_code, 401)
         user_id = self.register("Alice")
