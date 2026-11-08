@@ -420,11 +420,7 @@
     <p class="error" role="alert" *ngIf="error && !duplicateExhausted && !canRetryQuestion">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
-    <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
-      <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
-        {{ locale.t('game.retry') }}
-      </button>
-    </div>
+
   </section>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>
