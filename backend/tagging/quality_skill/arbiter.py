@@ -116,7 +116,7 @@ def stem_claims_anchored(verdict: ArbitrationVerdict, stem: str) -> bool:
 
 
 def is_suitable(verdict: ArbitrationVerdict, *, correct_answer: str,
-                bonus: bool) -> tuple[bool, str]:
+                bonus: bool, primary_difficulty: str | None = None) -> tuple[bool, str]:
     if verdict.premise != "valid":
         return False, "premise_" + verdict.premise
     if any(item.verdict != "supported" for item in verdict.stem_claims):
@@ -129,7 +129,10 @@ def is_suitable(verdict: ArbitrationVerdict, *, correct_answer: str,
         correct_answer
     ]:
         return False, "options_not_unique"
-    if bonus and verdict.difficulty == "too_easy":
+    # On Q16, a subjective too_easy judgment rejects only by consensus.
+    # None preserves the standalone/legacy conservative contract.
+    if (bonus and verdict.difficulty == "too_easy"
+            and primary_difficulty in (None, "too_easy")):
         return False, "bonus_too_easy"
     return True, "accepted"
 
@@ -137,7 +140,8 @@ def is_suitable(verdict: ArbitrationVerdict, *, correct_answer: str,
 def arbitrate(question, *, language: str, category: str,
               requested_difficulty: int, shadow: dict | None,
               deadline: float, timeout_seconds: float,
-              clock=perf_counter) -> tuple[bool, dict | None, str]:
+              clock=perf_counter, primary_difficulty: str | None = None
+              ) -> tuple[bool, dict | None, str]:
     """Return (accepted, confidential report, reason).
 
     Enabled when QUIZ_QUALITY_ARBITER_MODE=on. Active for every bonus, and
@@ -196,6 +200,7 @@ def arbitrate(question, *, language: str, category: str,
 
     allowed, reason = is_suitable(
         verdict, correct_answer=question.correct_answer, bonus=bonus,
+        primary_difficulty=primary_difficulty,
     )
     event("quality_arbitration", outcome="accept" if allowed else "reject",
           reason=reason, model_id=model, bonus=bonus,
