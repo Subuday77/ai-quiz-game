@@ -545,10 +545,10 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 detail="Historical questions lack verified tags; run tagging.backfill",
             ) from None
 
-        # Q13–Q15 may try one other unused allowed category automatically.
+        # Q10–Q15 may try one other unused allowed category automatically.
         # Q16 uses its existing *persisted* bonus rotation and the same cap.
         categories_to_try = [category]
-        if 13 <= question_number <= 15:
+        if 10 <= question_number <= 15:
             alternate = _alternate_main_category(db, run, question_number, category)
             if alternate is not None:
                 categories_to_try.append(alternate)
