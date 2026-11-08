@@ -434,14 +434,14 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         mode == QualityMode.ENFORCE
         and assessment["total"] >= assessment["score_threshold"]
     )
-    # Bonus difficulty is a HARD gate, not just a weighted editorial score.
-    # Do not publish an easily guessed bonus even when 2.5 < threshold 3.25.
+    # A Q16 too_easy verdict must be independently checked by Terra.
+    # It is NOT a standalone rejection; only two matching opinions veto.
     bonus_too_easy = (
         mode == QualityMode.ENFORCE and requested_difficulty == 15
         and verdict.difficulty == DifficultyRating.TOO_EASY
     )
     if bonus_too_easy:
-        event("bonus_too_easy_rejected", requested_difficulty=15,
+        event("bonus_too_easy_arbitration_requested", requested_difficulty=15,
               score=assessment["total"], threshold=assessment["score_threshold"])
     # In AUDIT/OFF, the critic's factual, option, language and leakage
     # judgments are diagnostic only. The established hard gates protect
@@ -452,7 +452,6 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
         or score_rejection
-        or bonus_too_easy
     )
     # The private report is carried to the later PostgreSQL transaction.
     # No DB connection is kept open during the model request.
@@ -483,16 +482,35 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         "duration_ms": max(0, round((clock() - review_start) * 1000)),
     }
 
-    # Arbitration can only make the gate stricter: it cannot overturn a
-    # rejecting primary critic or a local safeguard. It is a real second
-    # provider call when configured, not merely would_arbitrate telemetry.
-    if not review_rejected and mode == QualityMode.ENFORCE:
+    # A primary Q16 too_easy must reach Terra even when its weighted score
+    # also exceeds the threshold. Hard factual/metadata rejections still win.
+    hard_rejected = (
+        verdict.tags_valid != CheckStatus.PASS
+        or verdict.fact_valid != CheckStatus.PASS
+        or verdict.semantic_duplicate
+        or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
+    )
+    should_arbitrate = mode == QualityMode.ENFORCE and (
+        not review_rejected or (bonus_too_easy and not hard_rejected)
+    )
+    if should_arbitrate:
         from tagging.quality_skill.arbiter import arbitrate
         allowed, arbitration, reason = arbitrate(
             question, language=language, category=category,
             requested_difficulty=requested_difficulty, shadow=shadow,
             deadline=deadline, timeout_seconds=timeout_seconds, clock=clock,
+            primary_difficulty=(verdict.difficulty.value
+                                if requested_difficulty == 15 else None),
         )
+        # A missing or disabled arbiter must never silently approve a
+        # primary critic's too_easy bonus.
+        if bonus_too_easy and arbitration is None and allowed:
+            allowed, reason = False, "bonus_consensus_unavailable"
+        if bonus_too_easy and arbitration is not None:
+            event("bonus_too_easy_consensus",
+                  reviewer=verdict.difficulty.value,
+                  terra=arbitration["details"]["difficulty"],
+                  rejected=(reason == "bonus_too_easy"))
         if arbitration is not None:
             question._review_report["details"]["arbitration"] = arbitration
         if not allowed:
@@ -515,7 +533,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     # Audit keeps critic-only quality findings diagnostic (even critical ones).
     # In enforce, critical faults OR a high weighted score trigger retry.
     if mode == QualityMode.ENFORCE and (
-        assessment["critical"] != "none" or score_rejection or bonus_too_easy
+        assessment["critical"] != "none" or score_rejection
     ):
         raise QualityRegenerationError()
 
