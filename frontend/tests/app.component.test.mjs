@@ -1419,7 +1419,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   assert.match(template, /openAuthDialog\('login'\)/);
   assert.match(template, /openAuthDialog\('register'\)/);
   assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
-  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"[\s\S]*?\(click\)="retryQuestion\(\)"/);
+  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
   assert.match(template, /locale\.t\(feedbackButtonLabelKey\)/);
   assert.match(template, /locale\.t\('perks\.balance'\)/);
@@ -1937,7 +1937,7 @@ test('duplicate recovery shows two accessible translated actions, not generic re
   assert.match(template, /locale\.t\('game\.duplicateExhausted'\)/);
   assert.match(template, /\(click\)="retryQuestion\(\)"[\s\S]*?game\.duplicateRetry/);
   assert.match(template, /\(click\)="returnToMenuAfterDuplicate\(\)"[\s\S]*?game\.returnToMenu/);
-  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted"/);
+  assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"/);
   for (const key of ['game.duplicateExhausted', 'game.duplicateRetry', 'game.returnToMenu']) {
     assert.ok(english[key], key + ' must be in the AI localization source');
   }
