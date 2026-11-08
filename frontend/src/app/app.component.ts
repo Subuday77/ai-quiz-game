@@ -16,6 +16,7 @@ type AuthMode = 'login' | 'register';
 const GAME_API = '/api/v2/games';
 const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
+const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
@@ -161,6 +162,7 @@ export class AppComponent implements OnInit, OnDestroy {
   resetError = '';
   restoringGame = false;
   finishedPhase: 'lost' | 'completed' | null = null;
+  pendingResults: GameInfo | null = null;
   statsLoading = false;
   statsError = '';
   gamesPlayed = 0;
@@ -735,6 +737,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
+        this.clearPendingResults();
         this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
         this.rememberActiveGame(game.game_id);
@@ -902,6 +905,9 @@ export class AppComponent implements OnInit, OnDestroy {
           this.currentStars[result.achievement] += 1;
         }
         if (result.phase === 'completed' || result.phase === 'lost') {
+          // Persist before the user clicks See Results: F5 must not lose access
+          // to an already awarded, terminal round.
+          this.rememberPendingResults(this.gameId);
           this.forgetActiveGame();
         }
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
@@ -924,6 +930,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // while the Retry action is visible.
     if (this.loading || this.canRetryQuestion || this.bonusDecisionAvailable) return;
     if (this.gameEnded) {
+      this.clearPendingResults();
       this.screen = 'done';
     } else {
       this.generatingNextQuestion = true;
@@ -1520,6 +1527,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.error = '';
         if (!run) {
           this.removeSavedGame(accountId);
+          this.restorePendingResults(accountId);
           return;
         }
         if (run.phase !== 'main' && run.phase !== 'bonus') {
@@ -1633,6 +1641,70 @@ export class AppComponent implements OnInit, OnDestroy {
     this.chosenCategory = '';
     this.showCategoryExclusions = false;
     this.screen = 'setup';
+  }
+
+  private rememberPendingResults(id: string): void {
+    if (!this.account) return;
+    try { localStorage.setItem(PENDING_RESULTS_KEY + this.account.id, id); }
+    catch { /* private mode */ }
+  }
+
+  private clearPendingResults(): void {
+    this.pendingResults = null;
+    if (!this.account) return;
+    try { localStorage.removeItem(PENDING_RESULTS_KEY + this.account.id); }
+    catch { /* private mode */ }
+  }
+
+  private restorePendingResults(accountId: string): void {
+    let savedId: string | null = null;
+    try { savedId = localStorage.getItem(PENDING_RESULTS_KEY + accountId); }
+    catch { /* private mode */ }
+    if (!savedId) return;
+    const version = this.restoreVersion;
+    this.subscriptions.add(this.http.get<GameInfo>(GAME_API + '/' + encodeURIComponent(savedId)).pipe(
+      timeout(10000),
+    ).subscribe({
+      next: run => {
+        if (this.account?.id !== accountId || this.restoreVersion !== version ||
+            this.gameId || this.resumeCandidate) return;
+        if (run.game_id !== savedId || (run.phase !== 'completed' && run.phase !== 'lost')) {
+          this.clearPendingResults();
+          return;
+        }
+        this.pendingResults = run;
+      },
+      error: (err: unknown) => {
+        // Only a confirmed missing/unauthorized run clears the local bookmark.
+        // Transient network errors must not erase it.
+        if (this.account?.id === accountId && err instanceof HttpErrorResponse &&
+            (err.status === 403 || err.status === 404)) this.clearPendingResults();
+      },
+    }));
+  }
+
+  showPendingResults(): void {
+    const run = this.pendingResults;
+    if (!run || this.loading || this.screen !== 'setup' ||
+        (run.phase !== 'completed' && run.phase !== 'lost')) return;
+    this.gameId = run.game_id;
+    this.gameLanguage = run.language;
+    this.selectedLanguage = run.language;
+    this.progress = run.main_question_index;
+    this.gameCorrectAnswers = run.correct_main_answers;
+    this.skippedQuestions = run.skipped_questions;
+    this.finishedPhase = run.phase;
+    this.currentStars = {
+      bronze: run.correct_main_answers >= 5 ? 1 : 0,
+      silver: run.correct_main_answers >= 10 ? 1 : 0,
+      gold: run.phase === 'completed' && run.correct_main_answers >= 15 ? 1 : 0,
+      platinum: 0,
+    };
+    this.stars = this.starTiers.filter(t => this.currentStars[t.key] > 0)
+      .map(t => t.key);
+    this.helperCard = run.helper ?? null;
+    this.screen = 'done';
+    this.clearPendingResults();
   }
 
   private rememberActiveGame(id: string): void {
