@@ -409,7 +409,15 @@
         </button>
       </div>
     </div>
-    <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
+    <div class="duplicate-recovery" *ngIf="canRetryQuestion && !duplicateExhausted && error" role="alert" aria-live="assertive">
+      <p>{{ locale.t(error) }}</p>
+      <div class="question-actions">
+        <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
+          {{ locale.t('game.duplicateRetry') }}
+        </button>
+      </div>
+    </div>
+    <p class="error" role="alert" *ngIf="error && !duplicateExhausted && !canRetryQuestion">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
     <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
