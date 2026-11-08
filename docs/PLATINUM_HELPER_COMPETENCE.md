@@ -97,5 +97,8 @@ saved question, not by replaying an old idempotency key.
 | Inventions and discoveries | Penicillin | Medicine |
 | Inventions and discoveries | Printing press | Technology |
 
-The result affects the HIGH/MEDIUM/LOW probability draw; a HIGH helper still
-has an 8% chance to be MISTAKEN by the existing game rules.
+The result selects HIGH/MEDIUM/LOW for the consultation. For questions 1–15,
+KNOW = 100% − N × factor, where N is the one-based question number and the
+factors are HIGH 0.5, MEDIUM 2.5, LOW 5. The remaining probability is divided
+1/3 MISTAKEN and 2/3 UNSURE. Platinum Helper is unavailable on Q16.
+Purchased helper profiles and already frozen consultations are not recalculated.
