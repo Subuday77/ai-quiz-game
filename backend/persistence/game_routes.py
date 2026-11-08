@@ -28,7 +28,7 @@ from persistence.categories import (
     allowed_categories, available_categories, category_snapshot,
     exclude_pregame_categories,
 )
-from persistence.models import GameRun, Question, QuestionAttempt, Topic, User, WalletTransaction
+from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic, User, WalletTransaction
 from persistence.seed_topics import category_slug
 from persistence.star_economy import lock_user_stars
 from persistence.bonus_wager import accept_bonus, decline_bonus
@@ -142,6 +142,7 @@ class GameInfo(BaseModel):
     language: str
     phase: str
     correct_main_answers: int
+    round_stars: dict[str, int]
     main_question_index: int = 0
     skipped_questions: int = 0
     question_issued: bool = False
@@ -180,9 +181,23 @@ def _game_info(db: Session, run) -> GameInfo:
         QuestionAttempt.selected_key.is_(None),
         QuestionAttempt.is_correct.is_(None),
     )) or 0
+    # Use the immutable awards for THIS run, not the account's lifetime
+    # balance or a guessed reward based on the score. F5 must reconstruct Q16.
+    round_stars = {tier: 0 for tier in ("bronze", "silver", "gold", "platinum")}
+    for tier, count in db.execute(
+        select(StarAward.tier, func.count(StarAward.id))
+        .where(StarAward.run_id == run.id, StarAward.user_id == run.user_id)
+        .group_by(StarAward.tier)
+    ):
+        round_stars[tier] = int(count)
+    # A lost Q16 wager consumes this round's gold for the results display,
+    # though the historical StarAward stays immutable.
+    if run.bonus_wager_accepted and run.bonus_correct is False:
+        round_stars["gold"] = max(0, round_stars["gold"] - 1)
     return GameInfo(
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        round_stars=round_stars,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
         question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
