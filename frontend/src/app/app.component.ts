@@ -799,8 +799,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.duplicateExhausted = false;
     this.error = '';
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
-    // Q13–Q16 can try a different vetted category on generation failure.
-    const questionTimeoutMs = this.progress >= 12
+    // Q10–Q16 can try a different vetted category on generation failure.
+    const questionTimeoutMs = this.progress >= 9
       ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
       : this.requestTimeoutMs;
     this.subscriptions.add(this.http.get<PublicQuestion>(
