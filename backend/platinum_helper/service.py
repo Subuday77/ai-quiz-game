@@ -226,6 +226,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         debug_reserved(
             purchase, old, question, category,
             run_id, reused=reused_outcome, competence_source=competence_source,
+            question_number=attempt.number,
         )
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
