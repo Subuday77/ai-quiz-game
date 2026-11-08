@@ -2253,15 +2253,48 @@ test('completed unviewed results survive F5 and are offered without creating a r
       game_id: 'finished-game', language: 'Russian', phase: 'completed',
       correct_main_answers: 15, main_question_index: 15,
       skipped_questions: 0, question_issued: true, helper: null,
+      round_stars: { bronze: 1, silver: 1, gold: 1, platinum: 1 },
     });
     assert.equal(app.pendingResults?.game_id, 'finished-game');
     assert.equal(app.screen, 'setup');
     app.showPendingResults();
     assert.equal(app.screen, 'done');
     assert.equal(app.gameCorrectAnswers, 15);
-    assert.deepEqual(app.stars, ['bronze', 'silver', 'gold']);
+    assert.deepEqual(app.stars, ['bronze', 'silver', 'gold', 'platinum']);
+    assert.deepEqual(app.currentStars, { bronze: 1, silver: 1, gold: 1, platinum: 1 });
     assert.equal(data.has('ai-quiz-game:unviewed-results:v1:user-1'), false);
     assert.equal(posts.length, 0, 'viewing results cannot create another game');
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+
+test('Q16 loss after F5 shows a forfeited gold stake, not a platinum star', () => {
+  const previous = globalThis.localStorage;
+  const data = new Map([['ai-quiz-game:unviewed-results:v1:user-1', 'lost-bonus']]);
+  globalThis.localStorage = {
+    getItem: key => data.get(key) ?? null,
+    setItem: (key, value) => data.set(key, value),
+    removeItem: key => data.delete(key),
+  };
+  try {
+    const { app, requests, posts } = setup();
+    app.gameId = '';
+    const lookup = requests.find(req => req.url === '/api/v2/games/lost-bonus');
+    assert.ok(lookup);
+    succeed(lookup, {
+      game_id: 'lost-bonus', language: 'Russian', phase: 'completed',
+      correct_main_answers: 15, main_question_index: 15,
+      skipped_questions: 0, question_issued: true, helper: null,
+      round_stars: { bronze: 1, silver: 1, gold: 0, platinum: 0 },
+    });
+    app.showPendingResults();
+    assert.equal(app.screen, 'done');
+    assert.deepEqual(app.stars, ['bronze', 'silver']);
+    assert.deepEqual(app.currentStars, { bronze: 1, silver: 1, gold: 0, platinum: 0 });
+    assert.equal(posts.length, 0);
   } finally {
     if (previous === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previous;
