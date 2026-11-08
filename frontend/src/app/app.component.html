@@ -263,6 +263,10 @@
         {{ locale.t('game.retryRestore') }}
       </button>
       <div class="question-actions">
+        <button *ngIf="pendingResults && !resumeAvailable && !resumeCandidate" class="outline-button"
+                type="button" (click)="showPendingResults()" [disabled]="loading || restoringGame">
+          {{ locale.t('game.seeResults') }}
+        </button>
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
           {{ locale.t(setupButtonLabelKey) }}
