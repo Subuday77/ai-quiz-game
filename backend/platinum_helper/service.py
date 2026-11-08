@@ -191,7 +191,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             rng = rng or Random()
             # Existing purchased characters predate the revised category map.
             # Their original strengths remain fixed; new areas use MEDIUM.
-            outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng)
+            outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng, attempt.number)
             if outcome == "MISTAKEN":
                 # The bronze perk hides the lowest-scored answers. Never
                 # recommend a hidden option or an absurdly weak distractor.
