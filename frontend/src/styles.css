@@ -27,3 +27,17 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .quiz-auth-fields .swal2-input:focus { border-color: #8ce9ef; box-shadow: 0 0 0 2px #8ce9ef33; }
 .quiz-auth-popup .swal2-validation-message { border-radius: 10px; color: #701b25; }
 .quiz-auth-popup .swal2-actions { gap: 10px; }
+
+/* Chrome paints SweetAlert2 native select options using a light system palette,
+   while its popup inherits a light foreground. Keep both surfaces explicitly
+   dark; this dropdown is mounted outside Angular component style encapsulation. */
+.swal2-container .swal2-select,
+.swal2-container .swal2-select option {
+  color-scheme: dark;
+  color: #f1f3ff;
+  background-color: #292c4c;
+}
+.swal2-container .swal2-select option:checked {
+  color: #fff;
+  background-color: #2166d0;
+}
