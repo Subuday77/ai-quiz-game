@@ -44,6 +44,7 @@ interface GameInfo {
   language: string;
   phase: string;
   correct_main_answers: number;
+  round_stars: StarCounts;
   main_question_index?: number;
   skipped_questions?: number;
   question_issued?: boolean;
@@ -1587,6 +1588,9 @@ export class AppComponent implements OnInit, OnDestroy {
           this.forgetActiveGame();
           this.feedback = null;
           this.finishedPhase = run.phase === 'lost' ? 'lost' : 'completed';
+          this.currentStars = { ...run.round_stars };
+          this.stars = this.starTiers.filter(t => this.currentStars[t.key] > 0)
+            .map(t => t.key);
           this.current = null;
           this.screen = 'done';
           this.refreshStats();
@@ -1694,12 +1698,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameCorrectAnswers = run.correct_main_answers;
     this.skippedQuestions = run.skipped_questions ?? 0;
     this.finishedPhase = run.phase;
-    this.currentStars = {
-      bronze: run.correct_main_answers >= 5 ? 1 : 0,
-      silver: run.correct_main_answers >= 10 ? 1 : 0,
-      gold: run.phase === 'completed' && run.correct_main_answers >= 15 ? 1 : 0,
-      platinum: 0,
-    };
+    // Rehydrate the exact persisted award set (including the Q16 platinum
+    // star and a forfeited gold wager), never infer it from 15/15.
+    this.currentStars = { ...run.round_stars };
     this.stars = this.starTiers.filter(t => this.currentStars[t.key] > 0)
       .map(t => t.key);
     this.helperCard = run.helper ?? null;
