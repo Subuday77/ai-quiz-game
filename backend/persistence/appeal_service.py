@@ -268,8 +268,10 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
         return appeal
     if decision not in ("upheld", "rejected", "technical_unresolved"):
         raise ValueError("Unknown appeal verdict")
-    moderation = _moderation(db, question_id=appeal.question_id)
+    # Match filing lock order (user -> question -> moderation) to avoid
+    # deadlocks between new complaints and parallel verdict settlement.
     question = db.get(Question, appeal.question_id, with_for_update=True)
+    moderation = _moderation(db, question_id=appeal.question_id)
     now = _now()
     appeal.status = decision
     appeal.closed_at = now
