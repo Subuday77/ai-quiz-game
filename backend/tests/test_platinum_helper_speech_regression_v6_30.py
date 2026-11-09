@@ -203,8 +203,8 @@ class V6ThirtyScenarioTests(unittest.TestCase):
             smoke.main(args)
             smoke.main(args + ["--execute", "--max-api-requests", "2"])
             result = json.loads((Path(tmp) / "summary.json").read_text("utf-8"))
-            self.assertEqual(result["completed"], 1)
-            self.assertEqual(result["api_attempts"], 1)
+            self.assertEqual(result["completed"], 2)
+            self.assertEqual(result["api_attempts"], 2)
 
 
 if __name__ == "__main__":
