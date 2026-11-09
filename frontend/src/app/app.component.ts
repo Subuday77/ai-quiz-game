@@ -530,11 +530,26 @@ export class AppComponent implements OnInit, OnDestroy {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[char]);
   }
 
+  private restoreLostQuestionForAppeal(runId: string): void {
+    if (!this.account || !runId) return;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.get<PublicQuestion>(
+      GAME_API + '/' + runId + '/appeals/lost-question'
+    ).pipe(timeout(10000)).subscribe({
+      next: question => {
+        if (this.account?.id === accountId && this.gameId === runId &&
+            this.finishedPhase === 'lost' && this.screen === 'done') this.current = question;
+      },
+      error: () => { /* Already appealed or not eligible; keep the result unchanged. */ },
+    }));
+  }
+
   async openAppealForm(): Promise<void> {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct)) ||
+          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct) ||
+          (this.screen === 'done' && this.finishedPhase === 'lost')) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
     this.appealBusy = true;
     const question = this.current;
@@ -1895,7 +1910,9 @@ export class AppComponent implements OnInit, OnDestroy {
       .map(t => t.key);
     this.helperCard = run.helper ?? null;
     this.screen = 'done';
-    this.clearPendingResults();
+    if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    // Preserve the bookmark so an F5 does not erase the losing-card appeal path.
+    if (run.phase !== 'lost') this.clearPendingResults();
   }
 
   private rememberActiveGame(id: string): void {
