@@ -41,6 +41,9 @@ jobs:
       - name: Run entire backend unit suite
         working-directory: backend
         run: python -m unittest discover -s tests -v
+      - name: Verify authenticated game and appeal routes mount in real FastAPI app
+        working-directory: backend
+        run: python -c "from api import app; paths={r.path for r in app.routes}; assert '/api/v2/appeals' in paths and '/api/v2/games/{run_id}/appeals' in paths"
 
   frontend:
     runs-on: ubuntu-latest
@@ -100,3 +103,6 @@ jobs:
           assert "appeal_expenses" in {col["name"] for col in db.get_columns("question_attempts")}
           print("Appeal schema ready")
           PY
+      - name: Exercise appeal filing, duplicate protection, and Q16 settlement in PostgreSQL
+        working-directory: backend
+        run: python -m scripts.appeal_postgres_regression
