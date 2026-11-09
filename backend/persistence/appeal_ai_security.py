@@ -48,7 +48,8 @@ class AppealEvidence(_Strict):
     @classmethod
     def bounded_round_context(cls, value: dict[str, Any]) -> dict[str, Any]:
         allowed = {"hints_used", "selected_key", "before_answer", "game_status",
-                   "bonus_wager_accepted", "hidden_keys"}
+                   "bonus_wager_accepted", "hidden_keys",
+                   "prior_appeals_count", "completed_games_count"}
         if set(value) - allowed:
             raise ValueError("Unknown play context field")
         if len(json.dumps(value, ensure_ascii=False)) > 1000:
