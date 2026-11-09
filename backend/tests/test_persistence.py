@@ -218,6 +218,136 @@ class AccountAPITests(unittest.TestCase):
         self.assertEqual(data["wallet_balance"], 0)
         self.assertEqual(data["topics"], [])
 
+    def test_username_change_updates_password_login_without_losing_account(self):
+        created = self.register()
+        self.assertEqual(created.status_code, 201, created.text)
+        user_id = created.json()["id"]
+        with Session(self.eng) as db:
+            owner = db.scalar(select(User).where(User.id == user_id))
+            run = GameRun(user_id=owner.id, language="English", status="main")
+            db.add(run)
+            db.commit()
+            original_run_id = run.id
+        changed = self.client.patch("/api/auth/username",
+                                    json={"username": "NewAlice_77"})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["id"], user_id)
+        self.assertEqual(changed.json()["username"], "NewAlice_77")
+        self.assertEqual(changed.json()["display_name"], "NewAlice_77")
+        self.assertEqual(self.client.get("/api/auth/me").json()["id"], user_id)
+        with Session(self.eng) as db:
+            self.assertEqual(db.get(GameRun, original_run_id).user_id,
+                             db.scalar(select(User.id)))
+            identity = db.scalar(select(AuthIdentity))
+            self.assertEqual(identity.provider_subject, "newalice_77")
+        self.client.post("/api/auth/logout")
+        self.assertEqual(self.client.post("/api/auth/login",
+                         json=self.creds).status_code, 401)
+        self.assertEqual(self.client.post("/api/auth/login",
+                         json={"username": "NewAlice_77",
+                               "password": self.creds["password"]}).status_code, 200)
+
+    def test_username_collision_rejected_and_does_not_change_identity(self):
+        self.assertEqual(self.register().status_code, 201)
+        with Session(self.eng) as db:
+            db.add(User(username="Occupied", username_key="occupied",
+                        display_name="Occupied"))
+            db.commit()
+        collision = self.client.patch("/api/auth/username",
+                                      json={"username": "oCcUpIeD"})
+        self.assertEqual(collision.status_code, 409)
+        self.assertEqual(self.client.get("/api/auth/me").json()["username"], "Alice_77")
+        with Session(self.eng) as db:
+            self.assertEqual(db.scalar(select(AuthIdentity)).provider_subject, "alice_77")
+
+    def test_username_case_change_preserves_login_and_custom_display_name(self):
+        self.assertEqual(self.register().status_code, 201)
+        with Session(self.eng) as db:
+            user = db.scalar(select(User))
+            user.display_name = "My custom nickname"
+            db.commit()
+        updated = self.client.patch("/api/auth/username",
+                                    json={"username": "ALICE_77"})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["display_name"], "My custom nickname")
+        self.assertEqual(updated.json()["username"], "ALICE_77")
+        self.client.post("/api/auth/logout")
+        self.assertEqual(self.client.post("/api/auth/login",
+                         json={"username": "alice_77",
+                               "password": self.creds["password"]}).status_code, 200)
+
+    def test_password_change_requires_old_password_and_confirmation(self):
+        self.assertEqual(self.register().status_code, 201)
+        original = self.creds["password"]
+        changed_password = "differentStrongPassphrase#2026"
+        route = "/api/auth/password"
+        self.assertEqual(self.client.patch(route, json={
+            "current_password": original,
+            "new_password": changed_password,
+            "confirm_password": "noMatchPassphrase123",
+        }).status_code, 422)
+        self.assertEqual(self.client.patch(route, json={
+            "current_password": "wrongCurrentPass",
+            "new_password": changed_password,
+            "confirm_password": changed_password,
+        }).status_code, 401)
+        self.assertEqual(self.client.patch(route, json={
+            "current_password": original,
+            "new_password": original,
+            "confirm_password": original,
+        }).status_code, 422)
+        self.assertEqual(self.client.patch(route, json={
+            "current_password": original,
+            "new_password": changed_password,
+            "confirm_password": changed_password,
+        }).status_code, 204)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+        with Session(self.eng) as db:
+            identity = db.scalar(select(AuthIdentity))
+            self.assertTrue(HASHER.verify(identity.password_hash, changed_password))
+        self.client.post("/api/auth/logout")
+        self.assertEqual(self.client.post("/api/auth/login",
+                         json={"username": "Alice_77", "password": original}).status_code, 401)
+        self.assertEqual(self.client.post("/api/auth/login",
+                         json={"username": "Alice_77",
+                               "password": changed_password}).status_code, 200)
+
+    def test_password_change_revokes_other_sessions_not_current(self):
+        self.assertEqual(self.register().status_code, 201)
+        from fastapi.testclient import TestClient
+        other = TestClient(app)
+        other_login = other.post("/api/auth/login", json=self.creds)
+        self.assertEqual(other_login.status_code, 200)
+        self.assertEqual(other.get("/api/auth/me").status_code, 200)
+        new_password = "strongerUniquePassword_2026"
+        response = self.client.patch("/api/auth/password", json={
+            "current_password": self.creds["password"],
+            "new_password": new_password, "confirm_password": new_password,
+        })
+        self.assertEqual(response.status_code, 204, response.text)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+        self.assertEqual(other.get("/api/auth/me").status_code, 401)
+
+    def test_unauthenticated_and_cross_site_settings_writes_rejected(self):
+        self.assertEqual(self.client.patch("/api/auth/username", json={
+            "username": "Hacker_777",
+        }).status_code, 401)
+        self.assertEqual(self.client.patch("/api/auth/password", json={
+            "current_password": "wrongone",
+            "new_password": "newPassword123",
+            "confirm_password": "newPassword123",
+        }).status_code, 401)
+        self.assertEqual(self.register().status_code, 201)
+        self.assertEqual(self.client.patch("/api/auth/username",
+            json={"username": "Hacker_777"},
+            headers={"Origin": "https://evil.example"}).status_code, 403)
+        self.assertEqual(self.client.patch("/api/auth/password", json={
+            "current_password": self.creds["password"],
+            "new_password": "newPassword123",
+            "confirm_password": "newPassword123",
+        }, headers={"Origin": "https://evil.example"}).status_code, 403)
+        self.assertEqual(self.client.get("/api/auth/me").json()["username"], "Alice_77")
+
     def test_input_validation(self):
         self.assertEqual(self.client.post("/api/auth/register", json={
             "username": "a$", "password": "short"
