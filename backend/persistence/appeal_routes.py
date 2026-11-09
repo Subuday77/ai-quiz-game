@@ -112,6 +112,16 @@ def appeal_quote(run_id: UUID, question_id: UUID,
             QuestionAttempt.superseded_at.is_(None),
         ).order_by(QuestionAttempt.shown_at.desc()).limit(1))
         run = db.get(GameRun, run_id)
+        quote["hint_refund_bronze_if_upheld"] = int(
+            (attempt.appeal_expenses or {}).get("hint_bronze", 0))
+        quote["loss_compensation_tier_if_upheld"] = (
+            "platinum" if attempt.number == 16 else
+            ("bronze" if attempt.number <= 5 else
+             "silver" if attempt.number <= 10 else "gold")
+        ) if not quote["before_answer"] else None
+        quote["bonus_wager_refund_if_upheld"] = bool(
+            not quote["before_answer"] and attempt.number == 16 and
+            run.bonus_wager_accepted)
         quote["question_snapshot"] = {
             "question_id": str(question_id), "question": question.text,
             "answers": {k: question.choices[k] for k in "ABCD"},
