@@ -858,6 +858,177 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
+  async openAccountSettings(): Promise<void> {
+    if (!this.account || this.authBusy || this.authLoading || this.loading) return;
+    const accountId = this.account.id;
+    this.authBusy = true;
+    this.profileMenuOpen = false;
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const selection = await Swal.fire({
+        titleText: this.locale.t('settings.title'),
+        text: this.locale.t('settings.description'),
+        customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+        background: '#1b1e3e', color: '#f1f3ff',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: this.locale.t('settings.changeUsername'),
+        denyButtonText: this.locale.t('settings.changePassword'),
+        cancelButtonText: this.locale.t('auth.cancel'),
+        confirmButtonColor: '#8170d8', denyButtonColor: '#626ba1',
+      });
+      if (this.account?.id !== accountId) return;
+      if (selection.isConfirmed) await this.changeAccountUsername();
+      else if (selection.isDenied) await this.changeAccountPassword();
+    } catch {
+      this.error = 'settings.openFailed';
+    } finally {
+      this.authBusy = false;
+    }
+  }
+
+  private async changeAccountUsername(): Promise<void> {
+    if (!this.account) return;
+    const { default: Swal } = await import('sweetalert2');
+    const accountId = this.account.id;
+    const result = await Swal.fire({
+      titleText: this.locale.t('settings.changeUsername'),
+      html: '<div class="quiz-auth-fields">' +
+        '<label id="settings-username-label" for="settings-username-input"></label>' +
+        '<input id="settings-username-input" class="swal2-input" type="text" ' +
+        'autocomplete="username" maxlength="30"></div>',
+      didOpen: () => {
+        const popup = Swal.getPopup();
+        const label = popup?.querySelector<HTMLElement>('#settings-username-label');
+        if (label) label.textContent = this.locale.t('auth.username');
+        const input = popup?.querySelector<HTMLInputElement>('#settings-username-input');
+        if (input) input.value = this.account?.username || '';
+      },
+      customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+      confirmButtonText: this.locale.t('settings.saveUsername'),
+      cancelButtonText: this.locale.t('auth.cancel'), showCancelButton: true,
+      focusConfirm: false, showLoaderOnConfirm: true,
+      allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async () => {
+        const username = (Swal.getPopup()?.querySelector<HTMLInputElement>(
+          '#settings-username-input')?.value || '').trim();
+        if (!USERNAME_PATTERN.test(username)) {
+          Swal.showValidationMessage(this.locale.t('auth.usernameInvalid'));
+          return false;
+        }
+        try {
+          return await firstValueFrom(this.http.patch<Account>(
+            '/api/auth/username', { username },
+          ).pipe(timeout(15000)));
+        } catch (error: unknown) {
+          if (this.isUnauthorized(error)) {
+            this.sessionExpired();
+            return false;
+          }
+          const key = error instanceof HttpErrorResponse && error.status === 409
+            ? 'auth.usernameTaken' : 'settings.updateFailed';
+          Swal.showValidationMessage(this.locale.t(key));
+          return false;
+        }
+      },
+    });
+    if (!result.isConfirmed || !result.value || this.account?.id !== accountId) return;
+    // Keep the same user id, active round, awards and local storage bookmarks.
+    this.account = result.value as Account;
+    await Swal.fire({
+      titleText: this.locale.t('settings.usernameChanged'),
+      icon: 'success', background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonText: this.locale.t('settings.done'),
+      confirmButtonColor: '#8170d8',
+    });
+  }
+
+  private async changeAccountPassword(): Promise<void> {
+    if (!this.account) return;
+    const { default: Swal } = await import('sweetalert2');
+    const accountId = this.account.id;
+    const fields: { id: string; label: string; autocomplete: string }[] = [
+      { id: 'settings-old-password', label: 'settings.currentPassword', autocomplete: 'current-password' },
+      { id: 'settings-new-password', label: 'settings.newPassword', autocomplete: 'new-password' },
+      { id: 'settings-repeat-password', label: 'settings.repeatPassword', autocomplete: 'new-password' },
+    ];
+    const html = '<div class="quiz-auth-fields">' + fields.map(field =>
+      '<label id="' + field.id + '-label" for="' + field.id + '"></label>' +
+      '<input id="' + field.id + '" class="swal2-input" type="password" ' +
+      'autocomplete="' + field.autocomplete + '" maxlength="256">'
+    ).join('') + '</div>';
+    const result = await Swal.fire({
+      titleText: this.locale.t('settings.changePassword'),
+      html,
+      didOpen: () => {
+        const popup = Swal.getPopup();
+        for (const field of fields) {
+          const label = popup?.querySelector<HTMLElement>('#' + field.id + '-label');
+          if (label) label.textContent = this.locale.t(field.label);
+        }
+      },
+      customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+      confirmButtonText: this.locale.t('settings.savePassword'),
+      cancelButtonText: this.locale.t('auth.cancel'), showCancelButton: true,
+      focusConfirm: false, showLoaderOnConfirm: true,
+      allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async () => {
+        const value = (id: string) =>
+          Swal.getPopup()?.querySelector<HTMLInputElement>('#' + id)?.value || '';
+        const current_password = value('settings-old-password');
+        const new_password = value('settings-new-password');
+        const confirm_password = value('settings-repeat-password');
+        if (!current_password) {
+          Swal.showValidationMessage(this.locale.t('settings.currentRequired'));
+          return false;
+        }
+        if (new_password.length < 8 || new_password.length > 256) {
+          Swal.showValidationMessage(this.locale.t('auth.passwordInvalid'));
+          return false;
+        }
+        if (new_password !== confirm_password) {
+          Swal.showValidationMessage(this.locale.t('auth.passwordMismatch'));
+          return false;
+        }
+        if (new_password === current_password) {
+          Swal.showValidationMessage(this.locale.t('settings.passwordSame'));
+          return false;
+        }
+        try {
+          await firstValueFrom(this.http.patch<void>(
+            '/api/auth/password', { current_password, new_password, confirm_password },
+          ).pipe(timeout(15000)));
+          return true;
+        } catch (error: unknown) {
+          const detail = error instanceof HttpErrorResponse ? error.error?.detail : null;
+          if (this.isUnauthorized(error) && detail !== 'Current password is incorrect') {
+            this.sessionExpired();
+            return false;
+          }
+          let key = 'settings.updateFailed';
+          if (detail === 'Current password is incorrect') key = 'settings.wrongPassword';
+          else if (detail === 'Password login not configured') key = 'settings.passwordUnavailable';
+          else if (error instanceof HttpErrorResponse && error.status === 429)
+            key = 'auth.rateLimited';
+          Swal.showValidationMessage(this.locale.t(key));
+          return false;
+        }
+      },
+    });
+    if (!result.isConfirmed || !result.value || this.account?.id !== accountId) return;
+    await Swal.fire({
+      titleText: this.locale.t('settings.passwordChanged'),
+      text: this.locale.t('settings.otherSessionsRevoked'),
+      icon: 'success', background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonText: this.locale.t('settings.done'),
+      confirmButtonColor: '#8170d8',
+    });
+  }
+
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
   async openAuthDialog(mode: AuthMode): Promise<void> {
     if (this.authBusy || this.loading || this.authLoading) return;
@@ -1187,6 +1358,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
         this.gameQuestionIssued = true;
         this.helperReply = '';
         this.helperError = '';
