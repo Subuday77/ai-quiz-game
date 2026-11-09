@@ -43,7 +43,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Verify authenticated game and appeal routes mount in real FastAPI app
         working-directory: backend
-        run: python -c "from api import app; paths={r.path for r in app.routes}; assert '/api/v2/appeals' in paths and '/api/v2/games/{run_id}/appeals' in paths"
+        run: python -c "from api import app; paths=app.openapi()['paths']; assert '/api/v2/appeals' in paths and '/api/v2/games/{run_id}/appeals' in paths"
 
   frontend:
     runs-on: ubuntu-latest
