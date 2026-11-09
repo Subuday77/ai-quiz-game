@@ -82,13 +82,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 /* Clear, visible costs and scrolling hint inside SweetAlert's fixed-height form. */
 .swal2-popup .appeal-scroll-wrap { position: relative; }
 .swal2-popup .appeal-scroll-wrap .appeal-form { padding-bottom: 2.2rem; }
-.swal2-popup .appeal-scroll-hint {
-  position: absolute; pointer-events: none; inset-inline: 0; bottom: 0;
-  padding: 1.4rem 0 .1rem; text-align: center; font-size: 32px;
-  line-height: 1; color: #675ada;
-  background: linear-gradient(transparent, #fff 62%);
-}
-.swal2-popup .appeal-scroll-hint[hidden] { display: none; }
+.swal2-popup .appeal-scroll-hint { pointer-events: none; }
+.swal2-popup .appeal-scroll-hint[hidden] { display: none !important; }
 .swal2-popup .appeal-cost { margin-top: 1rem; padding: 0.9rem 1.1rem;
   border: 1px solid #8a86b3; border-radius: 12px;
   background: #f3f0ff; color: #37304f; }
@@ -103,3 +98,231 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .swal2-popup .appeal-option-key { background: #e7f5e9; border-radius: 5px; }
 .swal2-popup .appeal-answer-tag { color: #305d78; font-size: .9em; font-weight: 600; }
 .swal2-popup .appeal-rules p { margin: .6rem 0 1rem; }
+
+/* The complaint form is native SweetAlert content, but uses the quiz's
+   dark violet design system. Scoping avoids changing account/history dialogs. */
+.swal2-popup.quiz-appeal-popup {
+  color: #f2f3ff;
+  background: radial-gradient(circle at 92% 0%, #373562 0%, transparent 42%),
+    linear-gradient(155deg, #242744 0%, #191d36 100%);
+  border: 1px solid #62698a;
+  border-radius: 20px;
+  box-shadow: 0 24px 84px #06091bc9, inset 0 1px #ffffff10;
+  padding: 1.35rem 1rem 1.2rem;
+}
+.swal2-popup.quiz-appeal-popup .swal2-title {
+  color: #f3f5ff;
+  font-weight: 750;
+  letter-spacing: -.025em;
+  font-size: clamp(1.4rem, 3vw, 1.9rem);
+  margin: 0 0 1.05rem;
+}
+.swal2-popup.quiz-appeal-popup .swal2-html-container {
+  color: #d9def1;
+  margin: 0 clamp(.6rem, 3vw, 1.6rem);
+  overflow: visible;
+}
+.swal2-popup.quiz-appeal-popup .appeal-quota-header {
+  display: block;
+  margin: 0 0 1rem;
+  padding: .78rem 1.1rem;
+  color: #cdebf6;
+  background: linear-gradient(100deg, #263b56cc, #353259cc);
+  border: 1px solid #6e8fa25c;
+  border-radius: 11px;
+  font-size: .91rem;
+  letter-spacing: .015em;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form {
+  max-height: min(52vh, 440px);
+  min-height: 0;
+  padding: .25rem .55rem 3.25rem;
+  color: #dbe0f2;
+  scrollbar-width: thin;
+  scrollbar-color: #727ca5 #292d4b;
+  overscroll-behavior: contain;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form::-webkit-scrollbar { width: 8px; }
+.swal2-popup.quiz-appeal-popup .appeal-form::-webkit-scrollbar-track {
+  background: #292d4b; border-radius: 12px;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form::-webkit-scrollbar-thumb {
+  background: #727ca5; border-radius: 12px; border: 2px solid #292d4b;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form > p:first-child {
+  color: #f2f5ff;
+  line-height: 1.55;
+  font-size: 1.07rem;
+  margin: .25rem 0 1rem;
+}
+.swal2-popup.quiz-appeal-popup .appeal-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.2rem;
+}
+.swal2-popup.quiz-appeal-popup .appeal-options li {
+  margin: 0;
+  background: #2b3052;
+  color: #e0e7fc;
+  border: 1px solid #555d80;
+  border-radius: 9px;
+  padding: .6rem .75rem;
+  font-size: .94rem;
+  text-align: start;
+}
+.swal2-popup.quiz-appeal-popup .appeal-options li strong { color: #9de5ef; }
+.swal2-popup.quiz-appeal-popup .appeal-reasons {
+  display: grid;
+  gap: .48rem;
+  margin: 0 0 1.15rem;
+}
+.swal2-popup.quiz-appeal-popup .appeal-choice {
+  display: flex;
+  gap: .65rem;
+  align-items: center;
+  padding: .6rem .75rem;
+  border: 1px solid #555c7d7a;
+  background: #282c4a99;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: start;
+  font-size: .92rem;
+  line-height: 1.45;
+}
+.swal2-popup.quiz-appeal-popup .appeal-choice:hover {
+  border-color: #91cfd6;
+  background: #303557;
+}
+.swal2-popup.quiz-appeal-popup .appeal-choice input {
+  accent-color: #91e3ed;
+  width: 17px; height: 17px;
+  margin: 0;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form > label {
+  display: block;
+  margin: .8rem 0 .4rem;
+  font-weight: 650;
+  color: #e1e6f8;
+  font-size: .91rem;
+  text-align: start;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form textarea {
+  color: #f5f6ff;
+  background: #252a49;
+  border: 1px solid #666e95;
+  border-radius: 10px;
+  padding: .85rem;
+  resize: vertical;
+  font: inherit;
+}
+.swal2-popup.quiz-appeal-popup .appeal-form textarea:focus {
+  outline: 2px solid #81dce4;
+  outline-offset: 1px;
+  border-color: #81dce4;
+}
+.swal2-popup.quiz-appeal-popup .appeal-cost {
+  background: linear-gradient(135deg, #343056, #2b3254);
+  border: 1px solid #8176b5;
+  border-radius: 13px;
+  color: #f2ecff;
+  padding: .9rem 1.1rem;
+}
+.swal2-popup.quiz-appeal-popup .appeal-cost h3 { color: #f3edff; }
+.swal2-popup.quiz-appeal-popup .appeal-warning {
+  color: #ffd8a9;
+  line-height: 1.55;
+}
+.swal2-popup.quiz-appeal-popup .appeal-confirm-cost { color: #e4e9fa; }
+.swal2-popup.quiz-appeal-popup .appeal-confirm-total {
+  background: #323659;
+  border: 1px solid #696fa1;
+  color: #eaf4ff;
+}
+.swal2-popup.quiz-appeal-popup .swal2-actions {
+  margin: 1rem 0 0;
+  gap: .65rem;
+}
+.swal2-popup.quiz-appeal-popup .swal2-confirm {
+  background: linear-gradient(100deg, #8ee4ee, #bbb0ff) !important;
+  color: #16192f !important;
+  border-radius: 10px;
+  font-weight: 750;
+  padding: .8rem 1.15rem;
+}
+.swal2-popup.quiz-appeal-popup .swal2-cancel {
+  background: #3b425e !important;
+  color: #e3e6f4 !important;
+  border: 1px solid #657092;
+  border-radius: 10px;
+  padding: .8rem 1.15rem;
+}
+.swal2-popup.quiz-appeal-popup .swal2-validation-message {
+  background: #553847;
+  color: #fff1de;
+  border: 1px solid #ae7381;
+  border-radius: 9px;
+  margin: .75rem 1rem 0;
+}
+
+/* Fade + gentle backdrop blur stays anchored to the scroll viewport.
+   Two CSS-drawn chevrons replace the old font glyph "v". */
+.swal2-popup.quiz-appeal-popup .appeal-scroll-wrap {
+  position: relative;
+  isolation: isolate;
+}
+.swal2-popup.quiz-appeal-popup .appeal-scroll-hint {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0;
+  padding-bottom: 12px;
+  background: linear-gradient(to bottom, transparent 4%, #2226404d 36%, #222640ef 86%, #222640 100%);
+  pointer-events: none;
+}
+.swal2-popup.quiz-appeal-popup .appeal-scroll-hint::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  -webkit-mask-image: linear-gradient(transparent, #000 72%);
+  mask-image: linear-gradient(transparent, #000 72%);
+}
+.swal2-popup.quiz-appeal-popup .appeal-scroll-chevron {
+  display: block;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-right: 2px solid #99dfe9;
+  border-bottom: 2px solid #99dfe9;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  animation: appeal-chevron-drift 1.8s ease-in-out infinite;
+}
+.swal2-popup.quiz-appeal-popup .appeal-scroll-chevron + .appeal-scroll-chevron {
+  margin-top: -3px;
+  opacity: .65;
+  animation-delay: .17s;
+}
+@keyframes appeal-chevron-drift {
+  0%, 100% { translate: 0 -2px; opacity: .52; }
+  55% { translate: 0 2px; opacity: 1; }
+}
+@media (max-width: 650px) {
+  .swal2-popup.quiz-appeal-popup { padding: 1.1rem .4rem .8rem; }
+  .swal2-popup.quiz-appeal-popup .appeal-options { grid-template-columns: 1fr; }
+  .swal2-popup.quiz-appeal-popup .appeal-form { max-height: min(48vh, 400px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swal2-popup.quiz-appeal-popup .appeal-scroll-chevron { animation: none; }
+}
