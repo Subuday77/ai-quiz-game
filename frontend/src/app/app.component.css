@@ -508,3 +508,21 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   box-shadow: 0 8px 24px #0005;
 }
 .profile-menu .account-button { width: 100%; text-align: start; }
+
+
+/* Complaint entry belongs in the top-right of the question card. */
+.card-topline { display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px; flex-wrap: wrap; min-height: 24px; }
+.card-topline .eyebrow { margin: 0; }
+.card-topline .appeal-header-button { margin: -9px 0 3px auto; max-width: 245px;
+  padding: 10px 14px; font-size: 12px; line-height: 1.35; }
+.appeal-allowance-inline { display: inline-flex; align-items: center; gap: 5px;
+  margin-inline-start: 12px; white-space: nowrap; color: #c6d9ff; }
+.appeal-info-icon { border: 1px solid #818db5; background: transparent;
+  color: #bce5f6; width: 21px; height: 21px; display: inline-grid; place-items: center;
+  border-radius: 50%; font-size: 14px; line-height: 1; padding: 0; }
+.appeal-info-icon:hover, .appeal-info-icon:focus-visible { background: #40476e; }
+@media (max-width: 640px) {
+  .card-topline .appeal-header-button { max-width: 100%; margin: 2px 0; }
+  .appeal-allowance-inline { margin-inline-start: 0; }
+}
