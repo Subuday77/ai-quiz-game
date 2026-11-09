@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from helper_fallback_fixtures import english_templates
 from platinum_helper.responder import _prompt, _validate, talk
 
 
@@ -112,7 +113,7 @@ class GuardrailTests(unittest.TestCase):
             "KEY: A\nSPEECH: Мне кажется, Афина.", d
         ), "Мне кажется, Афина.")
 
-    def test_wrong_script_triggers_real_retry_without_changing_selected_key(self):
+    def test_wrong_script_uses_single_call_then_safe_template_with_same_key(self):
         d = question(language="English", choices={
             "A": "Stage", "B": "Orchestra pit",
             "C": "Balcony", "D": "Auditorium",
@@ -121,10 +122,12 @@ class GuardrailTests(unittest.TestCase):
             "KEY: B\nSPEECH: Я бы выбрал Orchestra pit.",
             "KEY: B\nSPEECH: I'd go with Orchestra pit.",
         ])
-        with patch.dict("os.environ", {"QUIZ_HELPER_MAX_ATTEMPTS": "2"}):
-            self.assertEqual(talk(d, client=client), "I'd go with Orchestra pit.")
-        self.assertEqual(client.calls, 2)
-        self.assertIn("ONLY English", client.requests[1]["instructions"])
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[0]
+            self.assertEqual(talk(d, client=client, fallback_loader=english_templates), "I think it's Orchestra pit.")
+        self.assertEqual(client.calls, 1)
+        self.assertIn("ONLY in English", client.requests[0]["instructions"])
+        self.assertIn("Selected option: B: Orchestra pit", client.requests[0]["input"])
 
     def test_one_sentence_valid_fallback_and_known_limitations(self):
         d = question()

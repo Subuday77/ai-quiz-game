@@ -1,24 +1,34 @@
 """Human-sounding Platinum Helper replies with server-side anti-leak checks.
 
 The model is never told whether its selected key is correct, nor is it
-shown the KNOW/MISTAKEN label, other options, or distractor scores. Every valid response names the server-selected answer. When a response
-cannot pass basic checks, retry once with a stricter wording; never show the
-rejected draft to the player.
+shown the KNOW/MISTAKEN label, other options, or distractor scores. Every valid response names the server-selected answer. When the single model attempt fails or cannot pass the checks, render a
+preapproved localized template without any further model calls.
 """
 from __future__ import annotations
 
 import json
-import os
+import random
 import re
 import unicodedata
 
 from openai import OpenAI
 
+from platinum_helper.fallback_locale import HelperFallbackKey
+from platinum_helper.debug import response_source
 from platinum_helper.settings import HelperSettings
 
 
 class HelperUnavailable(RuntimeError):
     pass
+
+
+# English language names are used ONLY to instruct the speech model; the
+# fallback copy itself comes exclusively from the shared localization cache.
+_LANG = {
+    "ru": "russian", "en": "english", "de": "german", "fr": "french",
+    "es": "spanish", "it": "italian", "pt": "portuguese",
+    "he": "hebrew", "ar": "arabic", "ja": "japanese", "zh": "chinese",
+}
 
 
 def _speech_language(data: dict) -> str:
@@ -99,7 +109,7 @@ def _previous_speech_style(data: dict) -> str:
     )
 
 
-def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
+def _prompt(data: dict) -> tuple[str, str]:
     speech_language = _speech_language(data)
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
@@ -172,17 +182,6 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         )
     else:
         raise ValueError("Unsupported helper delivery style")
-    if strict:
-        instructions += (
-            "Your earlier response did not meet the safety requirements. "
-            f"Use ONLY {speech_language}. "
-            "Write a single plain sentence: recommend the exact selected "
-            "answer with NO factual justification, extra claim, argument "
-            "or comparison. Use natural wording in the player's language "
-            "and quote the selected name unchanged if grammar requires it. "
-            "Do not use em dashes or hypothetical/conditional recommendation "
-            "phrases. Preserve your assigned confidence and delivery approach. "
-        )
     instructions += (
         "Output exactly two lines: KEY: X (the selected letter), then "
         "SPEECH: (your natural-language recommendation)."
@@ -334,8 +333,21 @@ def _em_dash_outside_selected_name(speech: str, data: dict) -> bool:
     return "\u2014" in "".join(outside)
 
 
-def _single_recommendation_ok(speech: str) -> bool:
-    return _EXTRA_REASON.search(speech) is None
+def _single_recommendation_ok(speech: str, data: dict) -> bool:
+    """Ignore punctuation *inside* the frozen answer, not outside it.
+
+    Names such as «Дж. К. Роулинг» contain periods and spaces that are
+    legitimate parts of a single answer, not an added explanatory sentence.
+    The same guard still rejects extra sentences following that name.
+    """
+    selected = data.get("choices", {}).get(data.get("letter"))
+    if not isinstance(selected, str) or not selected:
+        return False
+    normalized = _norm(speech)
+    outside = list(normalized)
+    for start, end in _complete_option_spans(speech, selected):
+        outside[start:end] = [""] * (end - start)
+    return _EXTRA_REASON.search("".join(outside)) is None
 
 
 
@@ -364,7 +376,7 @@ def _validate(raw: str, data: dict) -> str | None:
     if (not speech or len(speech) > 450 or _DENIAL.search(speech)
             or _em_dash_outside_selected_name(speech, data)
             or not _language_script_ok(speech, data)
-            or not _single_recommendation_ok(speech)):
+            or not _single_recommendation_ok(speech, data)):
         return None
     # A valid KEY is not enough. The actual selected answer must be present
     # in the spoken recommendation as a complete unchanged name/text.
@@ -384,64 +396,90 @@ def _validate(raw: str, data: dict) -> str | None:
     return speech
 
 
-# Safe, deterministic last-resort wording after at least one model reply was
-# received but could not pass validation. No second model or checker needed.
-_FALLBACK = {
-    "russian": ("Мой ответ: «{answer}».", "Пожалуй, «{answer}».", "Не уверен, не хочу тебя запутать."),
-    "english": ("Go with {answer}.", "I'd choose {answer}.", "I'm not sure enough to advise."),
-    "german": ("Nimm {answer}.", "Ich würde {answer} nehmen.", "Ich bin mir nicht sicher."),
-    "french": ("Choisis {answer}.", "Je choisirais {answer}.", "Je ne suis pas sûr de la réponse."),
-    "spanish": ("Elige {answer}.", "Yo elegiría {answer}.", "No estoy seguro de la respuesta."),
-    "italian": ("Scegli {answer}.", "Io sceglierei {answer}.", "Non sono sicuro della risposta."),
-    "portuguese": ("Escolhe {answer}.", "Eu escolheria {answer}.", "Não tenho certeza da resposta."),
-    "hebrew": ("לך על {answer}.", "נראה לי {answer}.", "אני לא בטוח בתשובה."),
-    "arabic": ("اختر {answer}.", "أظن أن الإجابة {answer}.", "لست متأكداً من الإجابة."),
-    "japanese": ("{answer}でいこう。", "{answer}だと思う。", "答えに自信がない。"),
-    "chinese": ("选{answer}。", "我觉得是{answer}。", "我不确定答案。"),
+# The source strings live in localization/en.json and their translated copies
+# in the shared UiTranslation PostgreSQL cache. The responder contains NO
+# language-specific text. These keys are fixed contract IDs, not model output.
+_FALLBACK_BY_STYLE = {
+    "CONFIDENT": (HelperFallbackKey.CONFIDENT_1, HelperFallbackKey.CONFIDENT_2),
+    "TENTATIVE": (HelperFallbackKey.TENTATIVE_1, HelperFallbackKey.TENTATIVE_2),
 }
-_LANG = {"ru": "russian", "en": "english", "de": "german", "fr": "french",
-         "es": "spanish", "it": "italian", "pt": "portuguese",
-         "he": "hebrew", "ar": "arabic", "ja": "japanese", "zh": "chinese"}
 
 
-def _fallback(data: dict) -> str:
-    raw_language = str(data.get("speech_language") or data["language"]).strip().casefold()
-    language = _LANG.get(raw_language, raw_language)
-    formats = _FALLBACK.get(language)
-    if formats is None:
-        raise HelperUnavailable("No safe fallback for language")
+def _fallback(data: dict, templates: dict[str, str]) -> str:
     if data["outcome"] == "UNSURE":
-        return formats[2]
-    answer = data["choices"][data["letter"]]
-    index = 0 if data["delivery_style"] == "CONFIDENT" else 1
-    return formats[index].format(answer=answer)
-
-
-def talk(data: dict, *, client=None) -> str:
-    """One retry with frozen selected key; never charge for network failure."""
-    settings = HelperSettings.from_env()
-    got_rejected_reply = False
-    for attempt in range(settings.max_attempts):
-        instructions, prompt = _prompt(data, strict=attempt > 0)
+        keys = (HelperFallbackKey.UNSURE,)
+    elif data["outcome"] in ("KNOW", "MISTAKEN"):
         try:
-            sdk = client or OpenAI()
-            response = sdk.with_options(
-                timeout=settings.timeout_seconds, max_retries=0
-            ).responses.create(
-                model=settings.model, instructions=instructions, input=prompt,
-                reasoning={"effort": settings.reasoning_effort},
-                max_output_tokens=settings.max_output_tokens,
-            )
-            if response.status != "completed":
-                continue
-            got_rejected_reply = True
+            keys = _FALLBACK_BY_STYLE[data["delivery_style"]]
+        except KeyError:
+            raise HelperUnavailable("Invalid helper confidence state") from None
+    else:
+        raise HelperUnavailable("Invalid helper outcome")
+
+    key = random.SystemRandom().choice(keys)
+    template = templates.get(key.value)
+    answer = data.get("choices", {}).get(data.get("letter"))
+    needed = 0 if data["outcome"] == "UNSURE" else 1
+    if (not isinstance(template, str) or not template.strip()
+            or template.count("{{answer}}") != needed):
+        raise HelperUnavailable("Missing or unsafe localized helper fallback")
+    if needed and (not isinstance(answer, str) or not answer.strip()):
+        raise HelperUnavailable("Missing frozen helper answer")
+
+    speech = template.replace("{{answer}}", answer or "")
+    # Localized templates are untrusted; apply the same anti-leak checks.
+    raw = ("SPEECH: " + speech if not needed
+           else "KEY: " + data["letter"] + "\nSPEECH: " + speech)
+    if _validate(raw, data) != speech:
+        raise HelperUnavailable("Localized helper fallback failed validation")
+    return speech
+
+
+def talk(data: dict, *, client=None, fallback_loader=None) -> str:
+    """Exactly one provider request, then a localized template if necessary."""
+    settings = HelperSettings.from_env()
+    instructions, prompt = _prompt(data)
+    failure_reason = "model_incomplete"
+    try:
+        sdk = client or OpenAI()
+        response = sdk.with_options(
+            timeout=settings.timeout_seconds, max_retries=0
+        ).responses.create(
+            model=settings.model, instructions=instructions, input=prompt,
+            reasoning={"effort": settings.reasoning_effort},
+            max_output_tokens=settings.max_output_tokens,
+        )
+        if response.status == "completed":
             speech = _validate(response.output_text or "", data)
             if speech:
+                response_source(
+                    call_id=data.get("call_id"), source="model", model=settings.model,
+                )
                 return speech
-        except Exception:
-            continue
-    # A rejected draft can be replaced safely; an API outage never silently
-    # consumes a paid consultation.
-    if got_rejected_reply:
-        return _fallback(data)
-    raise HelperUnavailable("Helper is temporarily unavailable")
+            failure_reason = "model_speech_rejected"
+    except Exception:
+        # Includes SDK setup, missing model, provider timeout, bad API response.
+        # Never log exception text or private response contents here.
+        failure_reason = "provider_error"
+
+    # No retry, no second model, no re-selection of the answer.
+    if fallback_loader is None:
+        response_source(
+            call_id=data.get("call_id"), source="unavailable",
+            model=settings.model, reason="missing_fallback_loader",
+        )
+        raise HelperUnavailable("Localized fallback dictionary was not provided")
+    try:
+        templates = fallback_loader()
+        speech = _fallback(data, templates)
+    except Exception as exc:
+        response_source(
+            call_id=data.get("call_id"), source="unavailable",
+            model=settings.model, reason="fallback_unavailable",
+        )
+        raise HelperUnavailable("Localized fallback is not available") from exc
+    response_source(
+        call_id=data.get("call_id"), source="fallback",
+        model=settings.model, reason=failure_reason,
+    )
+    return speech

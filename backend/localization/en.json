@@ -263,5 +263,10 @@
   "game.abandonCost": "Spent stars will not be refunded.",
   "game.startNewConfirm": "Start a new game",
   "game.replaceFailed": "Could not confirm the new game. Your old round remains available unless the server already completed the change. Retry or reload the page to recover the saved round.",
-  "game.retryRestore": "Retry restoring my saved game"
+  "game.retryRestore": "Retry restoring my saved game",
+  "helper.fallback.confident.1": "I know this one: {{answer}}.",
+  "helper.fallback.confident.2": "It's definitely {{answer}}.",
+  "helper.fallback.tentative.1": "I think it's {{answer}}.",
+  "helper.fallback.tentative.2": "Maybe {{answer}}, but I'm not sure.",
+  "helper.fallback.unsure": "I can't help with this one."
 }
