@@ -826,9 +826,11 @@ export class AppComponent implements OnInit, OnDestroy {
           ' ' + safe(this.locale.t('stars.bronze')) +
           '</p><p>' + safe(this.locale.t('appeals.compensation')) + ': ' +
           item.compensation.amount + ' ' + safe(this.locale.t('stars.' + item.compensation.tier)) +
-          '</p><p>' + safe(this.locale.t('appeals.wagerRefunded')) + ': ' +
-          safe(item.bonus_wager_refunded ? this.locale.t('appeals.yes') : this.locale.t('appeals.no')) +
-          '</p><p>' + safe(this.locale.t('appeals.hintRefunds')) + ': ' +
+          '</p>' + (item.question_number === 16
+            ? '<p>' + safe(this.locale.t('appeals.wagerRefunded')) + ': ' +
+              safe(item.bonus_wager_refunded ? this.locale.t('appeals.yes') : this.locale.t('appeals.no')) +
+              '</p>' : '') +
+          '<p>' + safe(this.locale.t('appeals.hintRefunds')) + ': ' +
           (costs || '0') + '</p></details>';
       }).join('') : '<p>' + safe(this.locale.t('appeals.none')) + '</p>';
       await Swal.fire({ titleText: this.locale.t('appeals.myComplaints'),
