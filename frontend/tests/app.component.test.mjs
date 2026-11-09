@@ -38,7 +38,7 @@ const componentSource = source
   .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
-const { AppComponent } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { AppComponent, appealQuestionExcerpt, filterAppealHistory } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -2396,4 +2396,83 @@ test('profile settings are above complaint history and have two independently sa
   assert.match(source, /this\.account = result\.value as Account/);
   assert.doesNotMatch(source.slice(source.indexOf('private async changeAccountUsername()'),
     source.indexOf('private async changeAccountPassword()')), /resetGameView\(\)/);
+});
+
+
+test('complaint history previews exactly four words while preserving full question for hover', () => {
+  assert.equal(appealQuestionExcerpt('  Какой учёный получил Премию Тьюринга 1972 года?'),
+    'Какой учёный получил Премию…');
+  assert.equal(appealQuestionExcerpt('Short question?'), 'Short question?');
+  assert.equal(appealQuestionExcerpt('  '), '—');
+  assert.equal(appealQuestionExcerpt('אילו עובדות נבדקו בתשובה הנכונה'),
+    'אילו עובדות נבדקו בתשובה…');
+  assert.match(source, /'<summary title="' \+ safe\(question\)/);
+  assert.match(source, /class="appeal-history-question-preview" dir="auto"/);
+  assert.match(source, /safe\(summary\)/);
+  assert.match(source, /safe\(question\)/);
+});
+
+test('complaint history searches full question text and composes date/status filters', () => {
+  const at = (year, month, day, hour) =>
+    new Date(year, month - 1, day, hour).toISOString();
+  const records = [
+    { id: 'old', status: 'upheld', submitted_at: at(2026, 11, 7, 14),
+      question_snapshot: { question: 'Какой учёный получил Премию Тьюринга 1972 года?' } },
+    { id: 'new', status: 'rejected', submitted_at: at(2026, 11, 9, 12),
+      question_snapshot: { question: 'В каком году состоялось открытие?' } },
+    { id: 'pending', status: 'pending', submitted_at: at(2026, 11, 8, 16),
+      question_snapshot: { question: 'Какие доказательства подтверждают событие?' } },
+    { id: 'retry', status: 'retry_pending', submitted_at: at(2026, 11, 8, 8),
+      question_snapshot: { question: 'Что известно о Тьюринге?' } },
+    { id: 'technical', status: 'technical_unresolved', submitted_at: at(2026, 11, 6, 15),
+      question_snapshot: { question: 'История развития COBOL' } },
+  ];
+  const filters = {
+    status: 'all', search: '', from: '', to: '', sort: 'newest',
+  };
+  const ids = changes => filterAppealHistory(records, { ...filters, ...changes }).map(r => r.id);
+  assert.deepEqual(ids({}), ['new', 'pending', 'retry', 'old', 'technical']);
+  assert.deepEqual(ids({ sort: 'oldest' }), ['technical', 'old', 'retry', 'pending', 'new']);
+  assert.deepEqual(ids({ search: 'ТЬЮРИНГА' }), ['old']);
+  assert.deepEqual(ids({ search: 'тЬюРиНгЕ' }), ['retry']);
+  assert.deepEqual(ids({ search: '1972' }), ['old'],
+    'search must look beyond the four-word preview');
+  assert.deepEqual(ids({ status: 'upheld' }), ['old']);
+  assert.deepEqual(ids({ status: 'rejected' }), ['new']);
+  assert.deepEqual(ids({ status: 'in_review' }), ['pending', 'retry']);
+  assert.deepEqual(ids({ status: 'technical_unresolved' }), ['technical']);
+  assert.deepEqual(ids({ from: '2026-11-08', to: '2026-11-08' }), ['pending', 'retry'],
+    'date filters are inclusive local-calendar days');
+  assert.deepEqual(ids({ status: 'in_review', search: 'доказательства',
+    from: '2026-11-08', to: '2026-11-09' }), ['pending']);
+  assert.deepEqual(ids({ status: 'upheld', from: '2026-11-09' }), []);
+  assert.deepEqual(ids({ search: 'nonexistent' }), []);
+  assert.deepEqual(records.map(x => x.id), ['old', 'new', 'pending', 'retry', 'technical'],
+    'sorting must not mutate original API data');
+});
+
+test('complaint history filter toolbar and premium cards provide accessible controls', () => {
+  const css = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  for (const key of ['historySearch', 'historyStatus', 'historyAll',
+    'historyInReview', 'historyFrom', 'historyTo', 'historySort',
+    'historyNewest', 'historyOldest', 'historyNoMatches', 'historyCount']) {
+    assert.ok(english['appeals.' + key], key);
+  }
+  for (const field of ['appeal-history-search', 'appeal-history-status',
+    'appeal-history-from', 'appeal-history-to', 'appeal-history-sort']) {
+    assert.ok(source.includes('id="' + field + '"'), field);
+    assert.ok(source.includes('for="' + field + '"'), field + ' accessible label');
+  }
+  assert.match(source, /customClass: \{ popup: 'quiz-appeal-popup quiz-appeal-history-popup' \}/);
+  assert.match(source, /search\.addEventListener\('input', update\)/);
+  assert.match(source, /input\.addEventListener\('change', update\)/);
+  assert.match(source, /filterAppealHistory\(records, filters\)/);
+  assert.match(source, /list\.appendChild\(node\)/);
+  assert.match(source, /node\.hidden = !ids\.has\(id\)/);
+  assert.match(source, /role="status" aria-live="polite"/);
+  assert.match(css, /\.quiz-appeal-history-popup \.appeal-history-toolbar/);
+  assert.match(css, /\.appeal-history-item\[hidden\]\s*\{\s*display:\s*none !important/);
+  assert.match(css, /\.appeal-history-status-upheld/);
+  assert.match(css, /\.appeal-history-status-rejected/);
+  assert.match(css, /@media \(max-width: 590px\)/);
 });
