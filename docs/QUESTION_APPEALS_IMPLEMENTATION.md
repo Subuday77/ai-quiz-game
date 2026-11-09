@@ -83,6 +83,50 @@ one-time manual recovery only (not normal startup), use
 Frontend is still Angular and runs separately in VS Code:
 `cd frontend; npm install; npm start`.
 
+## QA only: additional free complaint filings for a test account
+
+The normal policy remains **5 free filings per calendar month (UTC)**, plus
+a star deposit for every filing. If more live Judge tests are needed,
+use account-scoped, non-transferable **extra free filing credits**, with
+an explicit local-only environment opt-in. This does not delete existing
+appeals, reset adjudication history, refund old deposits or touch the wallet.
+The additional credits waive only the *non-refundable filing fee*.
+
+After pulling the branch, from the PyCharm terminal in `backend` apply the
+new migration and set one opt-in variable in the root `.env`:
+
+```powershell
+python -m alembic upgrade head
+```
+
+```dotenv
+QUIZ_QA_APPEAL_CREDITS_ENABLED=true
+```
+
+Dry-run a grant of 10 additional free filings for the account:
+
+```powershell
+python -m scripts.grant_test_appeals --username AI_Tester_1 --count 10
+```
+
+If the username, current UTC month, and new quota are correct, apply once:
+
+```powershell
+python -m scripts.grant_test_appeals --username AI_Tester_1 --count 10 --apply --confirm AI_Tester_1
+```
+
+The script prints the before/after amount and remaining free count. The
+profile and complaint form immediately use the updated total (e.g. `13/15`
+rather than `3/5`), while the deposit is still paid normally. Run the
+script only once if you want +10: applying twice grants +20. Entries only
+apply to the calendar month in which they were granted; they do not carry
+over automatically.
+
+**Disable** `QUIZ_QA_APPEAL_CREDITS_ENABLED` outside local testing, and
+**never enable it in production**. The flag is disabled by default. With
+the flag off, stored QA credits are ignored and the standard 5/month
+policy is restored without deleting audit records.
+
 ## Two-level diagnostics and manual retry
 
 Add `QUIZ_COMPLAINT_LOG_LEVEL=INFO` to the shared root `.env`. Set
