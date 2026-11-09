@@ -83,6 +83,68 @@ one-time manual recovery only (not normal startup), use
 Frontend is still Angular and runs separately in VS Code:
 `cd frontend; npm install; npm start`.
 
+## Two-level diagnostics and manual retry
+
+Add `QUIZ_COMPLAINT_LOG_LEVEL=INFO` to the shared root `.env`. Set
+`QUIZ_COMPLAINT_LOG_LEVEL=DEBUG` temporarily while reproducing failures.
+
+- INFO: `appeal_submitted`, Caddy/Judge start and finish, model name, response
+  status, elapsed milliseconds and token counts; verdicts, settlement/refunds,
+  retry scheduling, security validation failures and HTTP/API exceptions.
+- DEBUG: only sanitized validation field paths and error types, wallet
+  idempotency decisions and retry classification. Correct keys, player text,
+  source URLs, raw model responses and API secrets are **never** logged.
+- Both models use strict Responses API `text.format.type=json_schema`; actual
+  input/output must still pass Pydantic validation. The separate stage name
+  identifies whether the failure occurred at evidence, Caddy, Judge or settlement.
+
+A deferred appeal can be requested **immediately** from a PyCharm terminal
+in the `backend` directory, with no restart and no additional process:
+
+```powershell
+python -m persistence.appeal_worker --retry-now ed220a73-41df-474e-8a3b-1d9d23297dce --retry-now ada6d5fd-0b3d-4e2a-8631-0bb091c6b856
+```
+
+This operator-only command bypasses a next-day defer, **not** an active
+short-lived processing lease. It does not call `file_appeal`: no new filing,
+deposit or filing fee. Normal idempotent settlement remains in effect. Use
+this after updating code and migrations; OpenAI requests may incur token costs.
+
+## Test-data cleanup (do not run during active QA)
+
+Keep FastAPI **stopped** while applying cleanup, after reviewing a dry-run.
+The script requires an explicit username and specific appeal UUIDs. It only
+automatically reverses **still-unresolved, zero-fee** test complaints that
+have no other players' appeals, previous moderation outcomes or extra ledger
+entries. It restores each affected quarantined question and creates one
+auditable compensating credit for each paid test deposit. It refuses anything
+more complex rather than deleting verified real-player reports or guessing
+history.
+
+```powershell
+python -m scripts.cleanup_test_appeals --username AI_Tester_1 --appeal-id ed220a73-41df-474e-8a3b-1d9d23297dce --appeal-id ada6d5fd-0b3d-4e2a-8631-0bb091c6b856
+```
+
+To apply, **after** reviewing the dry run and stopping FastAPI, append
+`--apply --confirm RESET-TEST-APPEALS`. Already decided/paid complaints
+require a separate reviewed recovery; do not broaden this command.
+
+## User interface behavior
+
+In the spendable-star stats line, a live PostgreSQL-backed monthly free-case
+counter appears next to the player statistics. Its help icon opens a full
+SweetAlert explainer. The report button appears top-right on the active
+question card, and on the losing feedback card, but not on completed results.
+The report form displays deposit, remaining free cases or next filing fee,
+then opens a second explicit confirmation showing the exact debit, deposit
+refund and any applicable Q16 wager, per-question hint and loss compensation.
+No POST is made until the second confirmation. A fading down-arrow signals
+more content below the fold.
+
+Private complaint history labels the player's chosen option and the game's
+stored key. An answer key from a pre-answer complaint remains hidden while
+the original game is still active.
+
 ## Regression verification
 
 The `Appeals security and policy` GitHub Actions workflow covers:
