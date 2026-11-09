@@ -244,3 +244,61 @@ and cannot certify real-model accuracy or deployed-model authorization.
 No automatic complaint-result alerts, no retroactive edits to finished games,
 no player-accessible settlement endpoint, and no changes on `master`.
 Do not claim production E2E validation from CI alone.
+
+
+## Isolated live worker payout QA (Q10 + Q16)
+
+**Do not run** `scripts.appeal_postgres_regression` against an existing database: it is CI-only.
+Instead, to exercise the actual Keddy / Judge worker against PostgreSQL while leaving
+all real accounts and questions untouched, use `scripts.qa_appeal_worker`.
+
+1. Apply migrations and **stop FastAPI** in PyCharm so its built-in appeal scheduler
+   cannot race the manual call.
+2. In the **backend** PyCharm PowerShell terminal:
+
+```powershell
+$env:QUIZ_QA_APPEAL_WORKER_TEST_ENABLED="true"
+python -m scripts.qa_appeal_worker prepare --scenario q10 --confirm QA-WORKER-TEST
+```
+
+The command creates one new, non-login QA-only user and run, copies the quarantined
+Turing/COBOL source question `b15206ac-7523-4203-9c26-43fe52c4a6fc`,
+seeds QA-only stars, records a losing attempt, and calls real `file_appeal`.
+The copy is quarantined in **the same transaction** in which it is created
+and filed, never exposed to the general approved pool. It prints `appeal_id`.
+**The original question remains quarantined** and is never edited.
+
+3. Invoke the real worker for **that ID only** (calls paid live models):
+
+```powershell
+python -m scripts.qa_appeal_worker run --appeal-id UUID_FROM_PREPARE --confirm QA-WORKER-TEST
+python -m scripts.qa_appeal_worker verify --appeal-id UUID_FROM_PREPARE
+```
+
+`run` directly calls `process_appeal(UUID)` — it does not scan other players'
+pending complaints. On a completed verdict it calls the same worker a second
+time to validate that the wallet ledger did not change. `verify` is read-only
+and can be repeated later. No API key or model call is required to *verify*.
+
+For the Q16 scenario, repeat the `prepare` → `run` → `verify` commands,
+replacing `--scenario q10` with `--scenario q16`.
+
+The expected `upheld` settlements are:
+
+| Scenario | Before filing | After filing | After upheld |
+| --- | --- | --- | --- |
+| Q10 (lost; 1 hint costing 2 bronze) | 4 bronze / 4 silver | 4 bronze / 3 silver | **6 bronze / 5 silver** |
+| Q16 (lost; 1 gold wager) | 3 gold / 0 platinum | 2 gold / 0 platinum | **4 gold / 1 platinum** |
+
+Both cases must end with the QA copy `rejected`, moderation
+`upheld_count=1` and `permanently_blocked=true`, with precisely one
+transaction per purpose. Model decisions are never forged: a real `rejected`
+or `retry_pending` is reported as a **failed / incomplete QA run** and is
+retained for inspection.
+
+**Controls**: both write operations require the opt-in environment variable
+and the exact `--confirm` phrase. `run` checks the QA-only username,
+topic, generator marker, question number, game state and appeal metadata
+before calling the worker. No cleanup happens automatically; fixture rows
+and their independent wallet ledger remain for audit. No real player's
+stars, appeals, active rounds, or the quarantined source are modified.
