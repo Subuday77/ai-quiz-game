@@ -13,6 +13,7 @@ from persistence.database import get_db
 from persistence.models import GameRun, Question, QuestionAppeal, User
 from persistence.gameplay import GameConflict, GameNotFound
 from persistence.appeal_service import quote_appeal, file_appeal, _filings_this_month
+from persistence.appeal_qa_quota import allowance
 from persistence.appeal_policy import appeal_fee_bronze
 from star_perks import PerkUnavailable
 from persistence.appeal_logging import emit
@@ -173,12 +174,15 @@ def submit_appeal(run_id: UUID, payload: AppealInput, request: Request,
 def monthly_appeal_allowance(user: User = Depends(authenticated_user),
                              db: Session = Depends(get_db)):
     """Current monthly free count and fee for the NEXT appeal, in UTC."""
-    count = _filings_this_month(db, user_id=user.id, now=datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
+    count = _filings_this_month(db, user_id=user.id, now=now)
+    quota = allowance(db, user_id=user.id, now=now, submitted=count)
     return {
-        "free_remaining": max(0, 5 - count),
-        "free_total": 5,
+        "free_remaining": quota["free_appeals_remaining"],
+        "free_total": quota["free_appeals_total"],
+        "refresh_at": quota["free_appeals_refresh_at"],
         "filed_this_month": count,
-        "next_filing_fee_bronze": appeal_fee_bronze(count),
+        "next_filing_fee_bronze": quota["filing_fee_bronze"],
     }
 
 
