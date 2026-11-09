@@ -493,5 +493,7 @@ def submit_answer(game_id: str, payload: AnswerInput) -> AnswerFeedback:
 # Angular is migrated and the in-memory API tests have been retired.
 from persistence.game_routes import router as persistent_games_router  # noqa: E402
 from persistence.star_routes import router as star_router  # noqa: E402
+from persistence.appeal_routes import router as appeal_router  # noqa: E402
 app.include_router(persistent_games_router)
 app.include_router(star_router)
+app.include_router(appeal_router)
