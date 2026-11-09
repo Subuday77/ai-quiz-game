@@ -6,6 +6,7 @@ These tests cover contracts and accepted speech, not actual LLM fluency.
 """
 import unittest
 
+from helper_fallback_fixtures import russian_templates
 from platinum_helper.responder import _fallback, _prompt, _validate
 
 
@@ -58,7 +59,7 @@ class MultilingualSpeechTests(unittest.TestCase):
                     ) as rng:
                         rng.return_value.choice.side_effect = lambda variants: variants[index]
                         data = scenario(answer=name, style=style)
-                        speech = _fallback(data)
+                        speech = _fallback(data, russian_templates())
                         self.assertEqual(speech.count(name), 1)
                         self.assertEqual(
                             _validate(f"KEY: B\nSPEECH: {speech}", data), speech
