@@ -303,5 +303,7 @@
   "appeals.status.retry_pending": "Awaiting technical retry",
   "appeals.status.upheld": "Upheld",
   "appeals.status.rejected": "Rejected",
-  "appeals.status.technical_unresolved": "Not reviewed due to technical reasons"
+  "appeals.status.technical_unresolved": "Not reviewed due to technical reasons",
+  "appeals.depositForfeited": "forfeited",
+  "appeals.depositPending": "deducted, review pending"
 }
