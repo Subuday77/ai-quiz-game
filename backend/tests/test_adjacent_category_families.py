@@ -173,6 +173,135 @@ class AdjacentCategoryFamilyTests(unittest.TestCase):
             self.assertNotEqual(first, backup)
             self.assertNotEqual(category_family(backup), category_family("Literature"))
 
+    def restrict_to_same_family_remainder(self, *, last_number, leftover):
+        """All 16 allowed categories have been consumed except related topics."""
+        chosen = ["Literature", *leftover]
+        unrelated = [
+            cat for cat in QUESTION_CATEGORIES
+            if category_family(cat) != category_family("Literature")
+        ][:last_number - 1]
+        self.assertEqual(len(unrelated), last_number - 1)
+        allowed = unrelated + chosen
+        self.assertEqual(len(allowed), 16)
+        for number, category in enumerate(unrelated, 1):
+            self.complete_slot(number, category)
+        self.complete_slot(last_number, "Literature")
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.allowed_categories = allowed
+            run.correct_main_answers = last_number
+            db.commit()
+        return allowed
+
+    def test_only_related_categories_left_preserves_main_backup(self):
+        """Q15: related-only fallback must reach the second category through API."""
+        from fastapi import HTTPException
+        from persistence.categories import available_categories
+        from test_tagged_dedup import candidate
+
+        allowed = self.restrict_to_same_family_remainder(
+            last_number=14, leftover=["Authors and books", "Poetry"],
+        )
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(
+                set(available_categories(db, run, 15)),
+                {"Authors and books", "Poetry"},
+            )
+            primary = _category_for_round(self.run_id, 15, db=db)
+            backup = _alternate_main_category(db, run, 15, primary)
+            self.assertIn(primary, {"Authors and books", "Poetry"})
+            self.assertIn(backup, {"Authors and books", "Poetry"})
+            self.assertNotEqual(primary, backup)
+            self.assertEqual(category_family(primary), category_family(backup))
+            self.assertEqual(category_family(primary), category_family("Literature"))
+
+        with patch.dict(os.environ, {"AI_TAG_DEDUP_ENABLED": "true"}), patch(
+            "tagging.repository.history_for_user", return_value=[],
+        ), patch(
+            "api.generate_valid_question",
+            side_effect=[
+                HTTPException(status_code=503, detail="Primary generation failed"),
+                candidate(difficulty=14),
+            ],
+        ) as generator:
+            response = self.client.get(self.base + "/question")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 15)
+        self.assertEqual(
+            [call.args[2] for call in generator.call_args_list],
+            [primary, backup],
+        )
+        with Session(self.engine) as db:
+            issued = db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == self.run_id,
+                QuestionAttempt.number == 15,
+            ))
+            self.assertIsNotNone(issued)
+            actual = db.get(Topic, db.get(Question, issued.question_id).topic_id)
+            self.assertEqual(actual.labels["en"], backup)
+            self.assertIn(actual.labels["en"], allowed)
+        # F5/re-request returns exactly the persisted backup without new AI.
+        with patch("api.generate_valid_question") as generator:
+            self.assertEqual(
+                self.client.get(self.base + "/question").json(), response.json(),
+            )
+            generator.assert_not_called()
+
+    def test_only_related_category_left_still_allows_bonus_and_rotation(self):
+        """Q16: sole remaining sibling remains eligible; rotation still progresses."""
+        from fastapi import HTTPException
+        from test_tagged_dedup import candidate
+
+        allowed = self.restrict_to_same_family_remainder(
+            last_number=15, leftover=["Authors and books"],
+        )
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.status = "bonus"
+            run.bonus_wager_accepted = True
+            db.commit()
+
+        with Session(self.engine) as db:
+            first = _category_for_round(self.run_id, 16, db=db)
+            rotated = _category_for_round(self.run_id, 16, 1, db=db)
+            sequence = [_category_for_round(self.run_id, 16, i, db=db)
+                        for i in range(len(allowed))]
+        self.assertEqual(first, "Authors and books")
+        self.assertEqual(category_family(first), category_family("Literature"))
+        self.assertNotEqual(rotated, first)
+        self.assertEqual(set(sequence), set(allowed))
+        self.assertEqual(len(set(sequence)), len(allowed))
+
+        with patch.dict(os.environ, {"AI_TAG_DEDUP_ENABLED": "true"}), patch(
+            "tagging.repository.history_for_user", return_value=[],
+        ), patch(
+            "api.generate_valid_question",
+            side_effect=[
+                HTTPException(status_code=503, detail="Bonus generation failed"),
+                candidate(difficulty=15),
+            ],
+        ) as generator:
+            response = self.client.get(self.base + "/question")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 16)
+        self.assertTrue(response.json()["bonus"])
+        self.assertEqual(
+            [call.args[2] for call in generator.call_args_list],
+            [first, rotated],
+        )
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, self.run_id).bonus_topic_index, 1)
+            issued = db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == self.run_id,
+                QuestionAttempt.number == 16,
+            ))
+            self.assertIsNotNone(issued)
+            topic = db.get(Topic, db.get(Question, issued.question_id).topic_id)
+            self.assertEqual(topic.labels["en"], rotated)
+
     def test_bonus_rotation_still_visits_every_category(self):
         self.complete_slot(15, "Literature")
         with Session(self.engine) as db:
