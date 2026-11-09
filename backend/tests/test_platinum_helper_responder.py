@@ -159,6 +159,47 @@ class HelperResponderTests(unittest.TestCase):
             self.assertEqual(talk(sample(), client=client, fallback_loader=russian_templates), "Я знаю: «395».")
         self.assertEqual(client.calls, 1)
 
+    def test_debug_trace_distinguishes_model_fallback_and_unavailable(self):
+        data = sample()
+        data["call_id"] = "qa-call-id"
+
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient(["KEY: A\nSPEECH: Я выбираю 395."]),
+                fallback_loader=russian_templates,
+            )
+            self.assertEqual(speech, "Я выбираю 395.")
+            self.assertEqual(log.call_args.kwargs["source"], "model")
+            self.assertIsNone(log.call_args.kwargs.get("reason"))
+            self.assertEqual(log.call_args.kwargs["call_id"], "qa-call-id")
+
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient([RuntimeError("model not found")]),
+                fallback_loader=russian_templates,
+            )
+            self.assertIn("395", speech)
+            self.assertEqual(log.call_args.kwargs["source"], "fallback")
+            self.assertEqual(log.call_args.kwargs["reason"], "provider_error")
+
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient(["KEY: A\nSPEECH: Правильный ответ 476."]),
+                fallback_loader=russian_templates,
+            )
+            self.assertIn("395", speech)
+            self.assertEqual(log.call_args.kwargs["source"], "fallback")
+            self.assertEqual(log.call_args.kwargs["reason"], "model_speech_rejected")
+
+        with patch("platinum_helper.responder.response_source") as log:
+            with self.assertRaises(HelperUnavailable):
+                talk(
+                    data, client=FakeClient([RuntimeError("model not found")]),
+                    fallback_loader=lambda: {},
+                )
+            self.assertEqual(log.call_args.kwargs["source"], "unavailable")
+            self.assertEqual(log.call_args.kwargs["reason"], "fallback_unavailable")
+
     def test_network_timeout_uses_template_without_retry(self):
         client = FakeClient([TimeoutError(), TimeoutError()])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
