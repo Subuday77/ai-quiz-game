@@ -69,3 +69,29 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .swal2-popup .appeal-history-item summary { cursor: pointer; font-weight: 600; }
 .swal2-popup .appeal-history-item p,
 .swal2-popup .appeal-history-item li { overflow-wrap: anywhere; }
+
+
+/* Clear, visible costs and scrolling hint inside SweetAlert's fixed-height form. */
+.swal2-popup .appeal-scroll-wrap { position: relative; }
+.swal2-popup .appeal-scroll-wrap .appeal-form { padding-bottom: 2.2rem; }
+.swal2-popup .appeal-scroll-hint {
+  position: absolute; pointer-events: none; inset-inline: 0; bottom: 0;
+  padding: 1.4rem 0 .1rem; text-align: center; font-size: 32px;
+  line-height: 1; color: #675ada;
+  background: linear-gradient(transparent, #fff 62%);
+}
+.swal2-popup .appeal-scroll-hint[hidden] { display: none; }
+.swal2-popup .appeal-cost { margin-top: 1rem; padding: 0.9rem 1.1rem;
+  border: 1px solid #8a86b3; border-radius: 12px;
+  background: #f3f0ff; color: #37304f; }
+.swal2-popup .appeal-cost h3 { margin: 0 0 .65rem; font-size: 1rem; }
+.swal2-popup .appeal-cost p { margin: .5rem 0; }
+.swal2-popup .appeal-confirm-cost { text-align: start; line-height: 1.55; }
+.swal2-popup .appeal-confirm-total { font-size: 1.08rem;
+  padding: .45rem .65rem; background: #f3f0ff; border-radius: 8px; }
+.swal2-popup .appeal-warning { color: #704220; }
+.swal2-popup .appeal-option-player { border-inline-start: 3px solid #4277db;
+  padding-inline-start: .4rem; }
+.swal2-popup .appeal-option-key { background: #e7f5e9; border-radius: 5px; }
+.swal2-popup .appeal-answer-tag { color: #305d78; font-size: .9em; font-weight: 600; }
+.swal2-popup .appeal-rules p { margin: .6rem 0 1rem; }
