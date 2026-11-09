@@ -2323,3 +2323,30 @@ test('appeal history only renders bonus wager on Q16, with unambiguous forfeitur
   assert.equal(english['appeals.depositForfeited'], 'not refunded');
   assert.match(source, /item\.question_number === 16[\s\S]*?'appeals\.wagerRefunded'/);
 });
+
+test('complaint form separates monthly allowance, filing fee and total debit', () => {
+  assert.equal(english['appeals.costTitle'], 'Total complaint cost');
+  assert.equal(english['appeals.filingPrice'], 'Complaint fee');
+  assert.equal(english['appeals.freeQuota'], 'Free complaints: {{remaining}}/{{total}}');
+  assert.equal(english['appeals.freeReset'], 'Refresh {{date}}');
+  assert.match(source, /quote\.free_appeals_refresh_at/);
+  assert.match(source, /timeZone:\s*'UTC'/);
+  assert.match(source, /'appeals\.freeQuota'/);
+  assert.match(source, /'appeals\.freeReset'/);
+  assert.match(source, /'appeals\.filingPrice'\) \+ ': ' \+/);
+  assert.match(source, /appeal-quota-header/);
+  assert.match(source, /<section class="appeal-cost">/);
+});
+
+test('appeal popup uses dark theme, soft blur fade and animated double chevron', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.match(source, /customClass:\s*\{ popup: 'quiz-appeal-popup' \}/);
+  assert.match(source, /quiz-appeal-confirm-popup/);
+  assert.match(source, /<span class="appeal-scroll-chevron"><\/span>/);
+  assert.doesNotMatch(source, /aria-hidden="true">⌄<\/div>/);
+  assert.match(styles, /\.swal2-popup\.quiz-appeal-popup/);
+  assert.match(styles, /backdrop-filter:\s*blur\(3px\)/);
+  assert.match(styles, /@keyframes appeal-chevron-drift/);
+  assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+  assert.match(source, /hint\.hidden = scroll\.scrollTop/);
+});
