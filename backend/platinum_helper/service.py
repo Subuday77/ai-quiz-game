@@ -141,6 +141,9 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         purchase = get_purchase(db, run_id)
         if purchase is None:
             raise GameConflict("No helper purchased")
+        # Refunded unused helpers cannot grant subsequent free consultations.
+        if purchase.refunded:
+            raise GameConflict("Refunded helper is no longer available")
         if not 1 <= len(request_key) <= 80:
             raise ValueError("Invalid request key")
         old = db.scalar(select(PlatinumHelperCall).where(
