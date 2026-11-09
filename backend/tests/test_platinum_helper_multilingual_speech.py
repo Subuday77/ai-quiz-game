@@ -46,21 +46,23 @@ class MultilingualSpeechTests(unittest.TestCase):
                     self.assertNotIn("KNOW", i1)
 
     def test_no_hardcoded_declension_or_inflection_changes_in_fallback(self):
-        # These were the four Russian nominatives malformed by the old
-        # "Я бы выбрал <nominative name>" formula during live QA.
+        # Check both approved variants for each confidence and every unusual
+        # nominative form: insert the exact original option only once.
+        from unittest.mock import patch
         names = ("Афродита", "Антон Чехов", "Словения", "Литва", "Brassica napus")
         for name in names:
-            for style, expected_prefix in (
-                ("CONFIDENT", "Мой ответ: «"),
-                ("TENTATIVE", "Пожалуй, «"),
-            ):
-                with self.subTest(name=name, style=style):
-                    data = scenario(answer=name, style=style)
-                    speech = _fallback(data)
-                    self.assertEqual(speech, f"{expected_prefix}{name}».")
-                    self.assertEqual(
-                        _validate(f"KEY: B\nSPEECH: {speech}", data), speech
-                    )
+            for style in ("CONFIDENT", "TENTATIVE"):
+                for index in (0, 1):
+                    with self.subTest(name=name, style=style, index=index), patch(
+                        "platinum_helper.responder.random.SystemRandom"
+                    ) as rng:
+                        rng.return_value.choice.side_effect = lambda variants: variants[index]
+                        data = scenario(answer=name, style=style)
+                        speech = _fallback(data)
+                        self.assertEqual(speech.count(name), 1)
+                        self.assertEqual(
+                            _validate(f"KEY: B\nSPEECH: {speech}", data), speech
+                        )
 
     def test_same_answer_is_embeddable_in_idiomatic_languages(self):
         examples = (
