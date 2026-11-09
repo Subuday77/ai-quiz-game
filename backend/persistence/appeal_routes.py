@@ -49,6 +49,42 @@ def _public(appeal: QuestionAppeal) -> dict:
     }
 
 
+
+@router.get("/games/{run_id}/appeals/lost-question")
+def lost_question_for_appeal(run_id: UUID,
+                             user: User = Depends(authenticated_user),
+                             db: Session = Depends(get_db)):
+    """Recover the exact losing question after F5 without replaying the game."""
+    from persistence.gameplay import owned_game, hidden_choices
+    from persistence.models import GameRun, QuestionAttempt
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user.id)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    if run.status != "lost":
+        raise HTTPException(status_code=409, detail="This round has not been lost")
+    attempt = db.scalar(select(QuestionAttempt).where(
+        QuestionAttempt.run_id == run_id, QuestionAttempt.is_correct.is_(False),
+        QuestionAttempt.answered_at.is_not(None),
+        QuestionAttempt.superseded_at.is_(None),
+    ).order_by(QuestionAttempt.answered_at.desc()).limit(1))
+    if attempt is None:
+        raise HTTPException(status_code=404, detail="No losing question")
+    if db.scalar(select(QuestionAppeal.id).where(
+        QuestionAppeal.user_id == user.id,
+        QuestionAppeal.question_id == attempt.question_id,
+    )) is not None:
+        raise HTTPException(status_code=409, detail="Already appealed")
+    question = db.get(Question, attempt.question_id)
+    hidden = set(hidden_choices(db, attempt, question))
+    return {
+        "question_id": str(question.id), "number": attempt.number,
+        "difficulty": attempt.requested_difficulty, "question": question.text,
+        "answers": {k: question.choices[k] for k in "ABCD" if k not in hidden},
+        "bonus": attempt.number == 16, "hidden_count": attempt.hints_used,
+    }
+
+
 @router.get("/games/{run_id}/appeals/{question_id}/quote")
 def appeal_quote(run_id: UUID, question_id: UUID,
                  user: User = Depends(authenticated_user),
