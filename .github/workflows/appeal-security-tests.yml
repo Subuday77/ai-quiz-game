@@ -22,7 +22,7 @@ jobs:
         run: python -m pip install -r backend/requirements.txt
       - name: Run appeals and adversarial tests
         working-directory: backend
-        run: python -m unittest -v tests.test_appeal_policy tests.test_appeal_ai_security
+        run: python -m unittest discover -s tests -p 'test_appeal_*.py' -v
       - name: Compile new appeals modules
         run: python -m compileall -q backend/persistence/appeal_policy.py backend/persistence/appeal_service.py backend/persistence/appeal_ai_security.py
       - name: Check Alembic heads
