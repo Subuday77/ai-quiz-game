@@ -92,6 +92,12 @@ interface HelperCard {
 }
 interface HelperReply { text: string; helper: HelperCard; }
 
+interface AppealAllowance {
+  free_remaining: number;
+  free_total: number;
+  filed_this_month: number;
+  next_filing_fee_bronze: number;
+}
 interface AppealQuote {
   before_answer: boolean;
   deposit_tier: StarTier;
@@ -111,6 +117,7 @@ interface AppealRecord {
   reasons: string[]; comment: string; source_links: string[];
   verdict: string | null; deposit: { tier: StarTier; amount: number; refunded: boolean };
   filing_fee_bronze: number; compensation: { tier: StarTier; amount: number };
+  selected_key: Choice | null; answer_key: Choice | null;
   bonus_wager_refunded: boolean;
   expenses_refunded: { tier: StarTier; amount: number; reason: string }[];
 }
@@ -181,6 +188,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
 
   profileMenuOpen = false;
+  appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
   appealMessage = '';
   appealedQuestionIds = new Set<string>();
@@ -549,9 +557,9 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct) ||
-          (this.screen === 'done' && this.finishedPhase === 'lost')) ||
+          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
+
     this.appealBusy = true;
     const question = this.current;
     const runId = this.gameId;
@@ -563,59 +571,123 @@ export class AppComponent implements OnInit, OnDestroy {
       ).pipe(timeout(12000)));
       if (this.gameId !== runId || this.account?.id !== accountId) return;
       const safe = (value: unknown) => this.escapeAppealHtml(value);
+      const star = (tier: StarTier, count: number) =>
+        count + ' ' + this.locale.t('stars.' + tier) + ' ★';
       const snapshot = quote.question_snapshot;
       const options = this.choices.map(key =>
         '<li><strong>' + key + '.</strong> ' + safe(snapshot.answers[key]) + '</li>'
       ).join('');
-      const reasonInputs = this.appealReasons.filter(r =>
+      const reasons = this.appealReasons.filter(r =>
         r !== 'incorrect_key' || !quote.before_answer
-      ).map(r => '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
-        safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>').join('');
-      const feeWarning = quote.filing_fee_bronze > 0
-        ? '<p class="appeal-warning">' + safe(this.locale.t('appeals.feeNeverReturned')) +
-          '</p><label class="appeal-choice"><input type="checkbox" id="appeal-confirm-fee"> ' +
-          safe(this.locale.t('appeals.confirmFee')) + '</label>'
-        : '';
+      );
+      const reasonsHtml = reasons.map(r =>
+        '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
+        safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>'
+      ).join('');
+      const feeText = quote.free_appeals_remaining > 0
+        ? this.locale.format('appeals.freeCount', { count: quote.free_appeals_remaining })
+        : this.locale.t('appeals.filingPrice') + ': ' + star('bronze', quote.filing_fee_bronze);
+      const deposit = star(quote.deposit_tier, quote.deposit_amount);
+      const totalNow = quote.deposit_tier === 'bronze'
+        ? star('bronze', quote.deposit_amount + quote.filing_fee_bronze)
+        : deposit + (quote.filing_fee_bronze
+            ? ' + ' + star('bronze', quote.filing_fee_bronze) : '');
+      const costHtml =
+        '<section class="appeal-cost"><h3>' + safe(this.locale.t('appeals.costTitle')) +
+        '</h3><p><strong>' + safe(this.locale.t('appeals.deposit')) + ':</strong> ' +
+        safe(deposit) + '</p><p><strong>' + safe(feeText) + '</strong></p><p><strong>' +
+        safe(this.locale.t('appeals.nowDebit')) + ':</strong> ' +
+        safe(totalNow) + '</p><p class="appeal-warning">' +
+        safe(this.locale.t('appeals.depositRule')) + '</p>' +
+        (quote.filing_fee_bronze ? '<p class="appeal-warning">' +
+         safe(this.locale.t('appeals.feeNeverReturned')) + '</p>' : '') +
+        '</section>';
       const wagerNotice = question.number === 16
         ? '<p>' + safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '';
       const hintNotice = question.hidden_count
         ? '<p>' + safe(this.locale.t('appeals.hintsLater')) + '</p>' : '';
-      const result = await Swal.fire({
-        titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
-        confirmButtonText: this.locale.t('appeals.submit'),
-        cancelButtonText: this.locale.t('helper.close'),
-        html: '<div class="appeal-form"><p><strong>' + safe(snapshot.question) +
-          '</strong></p><ol class="appeal-options">' + options +
-          '</ol><div class="appeal-reasons">' + reasonInputs +
-          '</div><label for="appeal-comment">' + safe(this.locale.t('appeals.comment')) +
-          '</label><textarea id="appeal-comment" maxlength="1000" rows="4"></textarea>' +
-          '<label for="appeal-sources">' + safe(this.locale.t('appeals.sources')) +
-          '</label><textarea id="appeal-sources" rows="2"></textarea>' +
-          '<p>' + safe(this.locale.t('appeals.deposit')) + ': 1 ' +
-          safe(this.locale.t('stars.' + quote.deposit_tier)) + '</p>' +
-          '<p>' + safe(this.locale.t('appeals.fee')) + ': ' +
-          quote.filing_fee_bronze + ' ' + safe(this.locale.t('stars.bronze')) +
-          '</p>' + wagerNotice + hintNotice + feeWarning + '</div>',
-        preConfirm: () => {
-          const popup = Swal.getPopup();
-          if (!popup) return false;
-          const reasons = Array.from(popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked'))
-            .map(input => input.value);
-          const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
-          const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
-            .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-          const confirmFee = !!popup.querySelector<HTMLInputElement>('#appeal-confirm-fee')?.checked;
-          if ((!reasons.length && !comment) || links.length > 5 || links.some(l =>
-            l.length > 500 || !/^https?:\/\//i.test(l)) ||
-            (quote.filing_fee_bronze > 0 && !confirmFee)) {
-            Swal.showValidationMessage(this.locale.t('appeals.invalid'));
-            return false;
-          }
-          return { reasons, comment, source_links: links, confirm_nonrefundable_fee: confirmFee,
-            expected_fee_bronze: quote.filing_fee_bronze };
-        }
-      });
-      if (!result.isConfirmed || !result.value) return;
+      let draft: { reasons: string[]; comment: string; source_links: string[] } = {
+        reasons: [], comment: '', source_links: [],
+      };
+      let confirmed = false;
+      while (!confirmed) {
+        const result = await Swal.fire({
+          titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
+          confirmButtonText: this.locale.t('appeals.submit'),
+          cancelButtonText: this.locale.t('helper.close'),
+          html: '<div class="appeal-scroll-wrap"><div class="appeal-form">' +
+            '<p><strong>' + safe(snapshot.question) + '</strong></p>' +
+            '<ol class="appeal-options">' + options + '</ol>' +
+            '<div class="appeal-reasons">' + reasonsHtml + '</div>' +
+            '<label for="appeal-comment">' + safe(this.locale.t('appeals.comment')) +
+            '</label><textarea id="appeal-comment" maxlength="1000" rows="4"></textarea>' +
+            '<label for="appeal-sources">' + safe(this.locale.t('appeals.sources')) +
+            '</label><textarea id="appeal-sources" rows="2"></textarea>' +
+            costHtml + wagerNotice + hintNotice + '</div>' +
+            '<div class="appeal-scroll-hint" aria-hidden="true">⌄</div></div>',
+          didOpen: popup => {
+            popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]')
+              .forEach(input => { input.checked = draft.reasons.includes(input.value); });
+            const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment');
+            if (comment) comment.value = draft.comment;
+            const sources = popup.querySelector<HTMLTextAreaElement>('#appeal-sources');
+            if (sources) sources.value = draft.source_links.join('\n');
+            const scroll = popup.querySelector<HTMLElement>('.appeal-form');
+            const hint = popup.querySelector<HTMLElement>('.appeal-scroll-hint');
+            if (!scroll || !hint) return;
+            const update = () => {
+              hint.hidden = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 8;
+            };
+            scroll.addEventListener('scroll', update, { passive: true });
+            update();
+          },
+          preConfirm: () => {
+            const popup = Swal.getPopup();
+            if (!popup) return false;
+            const selectedReasons = Array.from(
+              popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked')
+            ).map(input => input.value);
+            const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
+            const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
+              .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+            if ((!selectedReasons.length && !comment) || links.length > 5 ||
+                links.some(l => l.length > 500 || !/^https?:\/\//i.test(l))) {
+              Swal.showValidationMessage(this.locale.t('appeals.invalid'));
+              return false;
+            }
+            return { reasons: selectedReasons, comment, source_links: links };
+          },
+        });
+        if (!result.isConfirmed || !result.value) return;
+        draft = result.value;
+        if (this.gameId !== runId || this.account?.id !== accountId) return;
+        const confirmedResult = await Swal.fire({
+          titleText: this.locale.t('appeals.confirmTitle'),
+          width: '650px', showCancelButton: true, reverseButtons: true,
+          confirmButtonText: this.locale.t('appeals.confirmAndSend'),
+          cancelButtonText: this.locale.t('appeals.back'),
+          html: '<div class="appeal-confirm-cost"><p>' +
+            safe(this.locale.t('appeals.confirmIntro')) + '</p><p>' +
+            safe(this.locale.t('appeals.deposit')) + ': <strong>' + safe(deposit) +
+            '</strong></p><p>' + safe(this.locale.t('appeals.fee')) +
+            ': <strong>' + safe(star('bronze', quote.filing_fee_bronze)) +
+            '</strong></p><p class="appeal-confirm-total">' +
+            safe(this.locale.t('appeals.nowDebit')) + ': <strong>' +
+            safe(totalNow) + '</strong></p><p class="appeal-confirm-total">' +
+            safe(this.locale.t('appeals.ifUpheldRefund')) + ': <strong>' +
+            safe(deposit) + '</strong></p><p>' +
+            safe(this.locale.t('appeals.hintRefundRule')) + '</p>' +
+            '<p class="appeal-warning">' +
+            safe(this.locale.t('appeals.rejectedRule')) + '</p>' +
+            (quote.filing_fee_bronze > 0 ? '<p class="appeal-warning">' +
+             safe(this.locale.t('appeals.feeNeverReturned')) + '</p>' : '') +
+            (question.number === 16 ? '<p>' +
+             safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '') +
+            '</div>',
+        });
+        if (confirmedResult.isConfirmed) confirmed = true;
+        else if (confirmedResult.dismiss !== Swal.DismissReason.cancel) return;
+      }
       if (this.gameId !== runId || this.account?.id !== accountId) return;
       const storageKey = 'ai-quiz-game:appeal-request:' + accountId + ':' +
         runId + ':' + question.question_id;
@@ -626,13 +698,17 @@ export class AppComponent implements OnInit, OnDestroy {
         try { sessionStorage.setItem(storageKey, requestId); } catch { /* private mode */ }
       }
       await firstValueFrom(this.http.post<AppealRecord>(
-        GAME_API + '/' + runId + '/appeals',
-        { ...result.value, question_id: question.question_id, request_id: requestId }
+        GAME_API + '/' + runId + '/appeals', {
+          ...draft, question_id: question.question_id, request_id: requestId,
+          expected_fee_bronze: quote.filing_fee_bronze,
+          confirm_nonrefundable_fee: true,
+        }
       ).pipe(timeout(15000)));
       try { sessionStorage.removeItem(storageKey); } catch { /* private mode */ }
       this.appealedQuestionIds.add(question.question_id);
       this.appealMessage = this.locale.t('appeals.received');
       this.refreshSpendableStars();
+      this.refreshAppealAllowance();
       if (quote.before_answer && this.gameId === runId) {
         this.current = null;
         this.feedback = null;
@@ -645,6 +721,36 @@ export class AppComponent implements OnInit, OnDestroy {
     } finally {
       this.appealBusy = false;
     }
+  }
+
+  async openAppealRules(): Promise<void> {
+    const { default: Swal } = await import('sweetalert2');
+    const safe = (value: unknown) => this.escapeAppealHtml(value);
+    const blocks = [
+      'appeals.rulesWhen', 'appeals.rulesFree', 'appeals.rulesDeposits',
+      'appeals.rulesJudge', 'appeals.rulesUpheld', 'appeals.rulesRejected',
+      'appeals.rulesTechnical', 'appeals.rulesHistory'
+    ].map(key => '<p>' + safe(this.locale.t(key)) + '</p>').join('');
+    await Swal.fire({
+      titleText: this.locale.t('appeals.rulesTitle'), width: '720px',
+      html: '<div class="appeal-history appeal-rules">' + blocks + '</div>',
+      confirmButtonText: this.locale.t('helper.close'),
+    });
+  }
+
+  private refreshAppealAllowance(): void {
+    const accountId = this.account?.id;
+    if (!accountId) { this.appealAllowance = null; return; }
+    this.subscriptions.add(this.http.get<AppealAllowance>(
+      '/api/v2/appeals/allowance'
+    ).pipe(timeout(10000)).subscribe({
+      next: data => {
+        if (this.account?.id === accountId) this.appealAllowance = data;
+      },
+      error: () => {
+        if (this.account?.id === accountId) this.appealAllowance = null;
+      },
+    }));
   }
 
   async openAppealHistory(): Promise<void> {
