@@ -1254,6 +1254,7 @@ export class AppComponent implements OnInit, OnDestroy {
   consultHelper(): void {
     if (!this.account || !this.gameId || !this.current || this.current.bonus ||
         this.screen !== 'question' || !this.helperCard || this.helperBusy || this.loading ||
+        this.helperCard.refunded ||
         (this.helperCard.consultations_remaining <= 0 && !this.helperCallKey) ||
         !!this.helperReply) return;
     if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
