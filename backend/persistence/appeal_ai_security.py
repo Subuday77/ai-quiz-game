@@ -42,14 +42,15 @@ class AppealEvidence(_Strict):
     question_number: int = Field(ge=1, le=16)
     language: str = Field(min_length=2, max_length=35)
     # Bounded factual play context, never model instructions or payment authority.
-    round_context: dict[str, Any] = Field(default_factory=dict, max_length=8)
+    round_context: dict[str, Any] = Field(default_factory=dict, max_length=10)
 
     @field_validator("round_context")
     @classmethod
     def bounded_round_context(cls, value: dict[str, Any]) -> dict[str, Any]:
         allowed = {"hints_used", "selected_key", "before_answer", "game_status",
                    "bonus_wager_accepted", "hidden_keys",
-                   "prior_appeals_count", "completed_games_count"}
+                   "prior_appeals_count", "completed_games_count",
+                   "hint_bronze_spent", "helper_used_on_question"}
         if set(value) - allowed:
             raise ValueError("Unknown play context field")
         if len(json.dumps(value, ensure_ascii=False)) > 1000:
