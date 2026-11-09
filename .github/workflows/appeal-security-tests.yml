@@ -28,3 +28,75 @@ jobs:
       - name: Check Alembic heads
         working-directory: backend
         run: python -m alembic heads
+
+  full-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r backend/requirements.txt
+      - name: Run entire backend unit suite
+        working-directory: backend
+        run: python -m unittest discover -s tests -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Angular dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+      - name: Build Angular production package
+        working-directory: frontend
+        run: npm run build
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quiz
+          POSTGRES_PASSWORD: quiz_test
+          POSTGRES_DB: quiz_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quiz -d quiz_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://quiz:quiz_test@127.0.0.1:5432/quiz_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r backend/requirements.txt
+      - name: Apply and inspect full Alembic chain
+        working-directory: backend
+        run: |
+          python -m alembic upgrade head
+          python -m alembic current
+          python - <<'PY'
+          from sqlalchemy import inspect
+          from persistence.database import engine
+          db = inspect(engine())
+          assert {"question_appeals", "question_moderation"}.issubset(set(db.get_table_names()))
+          assert "appeal_expenses" in {col["name"] for col in db.get_columns("question_attempts")}
+          print("Appeal schema ready")
+          PY
