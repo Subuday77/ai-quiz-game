@@ -22,8 +22,19 @@
       <span class="account-loading" *ngIf="authLoading">{{ locale.t('account.checking') }}</span>
       <ng-container *ngIf="!authLoading">
         <ng-container *ngIf="account as player; else signedOut">
-          <span class="player-name" [title]="player.username">● {{ player.display_name || player.username }}</span>
-          <button class="account-button" type="button" (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">{{ locale.t('appeals.myComplaints') }}</button>
+          <div class="profile-controls">
+            <button class="account-button player-name" type="button"
+                    [title]="player.username" [attr.aria-expanded]="profileMenuOpen"
+                    (click)="profileMenuOpen = !profileMenuOpen">
+              ● {{ player.display_name || player.username }} ▾
+            </button>
+            <div *ngIf="profileMenuOpen" class="profile-menu">
+              <button class="account-button" type="button"
+                      (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
+                {{ locale.t('appeals.myComplaints') }}
+              </button>
+            </div>
+          </div>
           <button class="account-button" type="button" (click)="logout()" [disabled]="loading || authBusy">
             {{ locale.t('account.signOut') }}
           </button>
