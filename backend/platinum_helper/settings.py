@@ -40,7 +40,6 @@ class HelperSettings:
     reasoning_effort: str
     max_output_tokens: int
     timeout_seconds: float
-    max_attempts: int
     threshold_level_0: int
     threshold_levels_1_3: int
     threshold_levels_4_15: int
@@ -65,7 +64,6 @@ class HelperSettings:
             reasoning_effort=effort,
             max_output_tokens=_integer("QUIZ_HELPER_MAX_OUTPUT_TOKENS", 240, 64, 4096),
             timeout_seconds=_float("QUIZ_HELPER_TIMEOUT_SECONDS", 8.0, 0.1, 120.0),
-            max_attempts=_integer("QUIZ_HELPER_MAX_ATTEMPTS", 2, 1, 4),
             threshold_level_0=thresholds[0],
             threshold_levels_1_3=thresholds[1],
             threshold_levels_4_15=thresholds[2],
