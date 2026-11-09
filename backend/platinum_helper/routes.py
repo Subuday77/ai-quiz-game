@@ -12,6 +12,7 @@ from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import User
 from platinum_helper.core import PROFESSIONAL_SKILLS
 from platinum_helper.identity import UI_FAKER_LOCALES, generate_identity
+from platinum_helper.fallback_locale import cached_helper_templates
 from platinum_helper.responder import HelperUnavailable, talk
 from platinum_helper.service import (
     buy, finish_call, get_purchase, card, reserve_call,
@@ -101,7 +102,12 @@ def call_helper(run_id: UUID, payload: CallInput, request: Request,
         # language; only the character's speech follows the visible UI locale.
         data["speech_language"] = speech_language
         try:
-            reply = talk(data)
+            # Only after failed or unsafe model output, look up the
+            # already-translated templates from PostgreSQL. No localizer call.
+            reply = talk(
+                data,
+                fallback_loader=lambda: cached_helper_templates(db, speech_language),
+            )
         except HelperUnavailable:
             finish_call(db, user_id=user.id, run_id=run_id,
                         call_id=data["call_id"], reply=None)
