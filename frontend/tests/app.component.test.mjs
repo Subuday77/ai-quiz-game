@@ -2476,3 +2476,30 @@ test('complaint history filter toolbar and premium cards provide accessible cont
   assert.match(css, /\.appeal-history-status-rejected/);
   assert.match(css, /@media \(max-width: 590px\)/);
 });
+
+test('complaint history clear button resets search, dates, status and ordering together', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.equal(english['appeals.historyReset'], 'Clear filters');
+  assert.match(source, /<button id="appeal-history-reset" class="appeal-history-reset" type="button">/);
+  assert.match(source, /const reset = popup.querySelector<HTMLButtonElement>\('#appeal-history-reset'\)/);
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /reset\.addEventListener\('click', \(\) => \{\s*search\.value = '';\s*status\.value = 'all';\s*from\.value = '';\s*to\.value = '';\s*sort\.value = 'newest';\s*update\(\);\s*\}\)/);
+  assert.match(history, /reset\.disabled = !filters\.search && filters\.status === 'all' &&\s*!filters\.from && !filters\.to && filters\.sort === 'newest'/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-reset:focus-visible/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-meta/);
+});
+
+test('complaint history shows judge outcome pill in the decision card heading', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /'<div class="appeal-history-verdict">' \+\s*'<div class="appeal-history-verdict-header"><strong>' \+/);
+  assert.match(history, /localized\('appeals\.historyVerdict'\) \+ '<\/strong>' \+/);
+  assert.match(history, /'<span class="appeal-history-status appeal-history-status-' \+ allowedStatus \+ '\">' \+/);
+  assert.match(history, /localized\('appeals\.status\.' \+ item\.status\) \+ '<\/span>' \+/);
+  assert.match(history, /safe\(item\.verdict \|\| this\.locale\.t\('appeals\.notDecided'\)\)/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-verdict-header/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-upheld/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-rejected/);
+});
