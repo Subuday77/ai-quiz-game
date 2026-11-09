@@ -9,6 +9,7 @@ from unittest.mock import patch
 from uuid import UUID
 
 from platinum_helper.core import choose_presentation_style
+from helper_fallback_fixtures import russian_templates
 from platinum_helper.responder import _prompt, _validate, talk
 
 
@@ -171,7 +172,7 @@ class SpeechFrameTests(unittest.TestCase):
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(d, client=client), "Я знаю: «Словения».")
+            self.assertEqual(talk(d, client=client, fallback_loader=russian_templates), "Я знаю: «Словения».")
         self.assertEqual(len(client.requests), 1)
         self.assertIn("Delivery approach: A direct", client.requests[0]["instructions"])
         self.assertIn("Unicode em dash (U+2014)", client.requests[0]["instructions"])
@@ -184,7 +185,7 @@ class SpeechFrameTests(unittest.TestCase):
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[1]
-            result = talk(d, client=client)
+            result = talk(d, client=client, fallback_loader=russian_templates)
         self.assertEqual(result, "Ну, здесь точно «Словения».")
         self.assertEqual(len(client.requests), 1)
         request = client.requests[0]
