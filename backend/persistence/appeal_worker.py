@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+from time import perf_counter
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -30,7 +31,9 @@ from persistence.appeal_policy import (MAX_IMMEDIATE_JUDGE_ATTEMPTS,
                                       must_close_technical)  # noqa: E402
 from persistence.appeal_ai_security import (keddy_messages, judge_messages,
                                             parse_keddy, parse_judge,
-                                            decision_for_policy)  # noqa: E402
+                                            decision_for_policy, response_json_schema,
+                                            UnsafeAppealPayload)  # noqa: E402
+from persistence.appeal_logging import emit, validation_summary  # noqa: E402
 
 LOG = logging.getLogger(__name__)
 LEASE = timedelta(minutes=30)
@@ -55,18 +58,45 @@ def _config(role: str) -> tuple[str, str, int, float]:
     return model, effort, tokens, timeout
 
 
-def _completion(messages: list[dict], role: str) -> str:
+def _completion(messages: list[dict], role: str, *,
+                appeal_id: UUID | None = None, attempt: int | None = None) -> str:
     model, effort, tokens, timeout = _config(role)
-    # Hard model separation even when a deployment changes generator settings.
+    # Hard separation: the models receive no database or financial tools.
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"],
                     timeout=timeout, max_retries=0)
-    result = client.responses.create(
-        model=model, input=messages, reasoning={"effort": effort},
-        max_output_tokens=tokens, text={"format": {"type": "json_object"}},
-    )
-    if result.status != "completed" or not result.output_text:
-        raise RuntimeError("Incomplete complaint model response")
-    return result.output_text
+    stage = role.lower()
+    emit("INFO", stage + "_started", appeal_id=str(appeal_id) if appeal_id else None,
+         stage=stage, model=model, attempt=attempt)
+    started = perf_counter()
+    try:
+        result = client.responses.create(
+            model=model, input=messages, reasoning={"effort": effort},
+            max_output_tokens=tokens,
+            text={"format": {"type": "json_schema",
+                             "name": "quiz_appeal_" + stage,
+                             "strict": True, "schema": response_json_schema(role)}},
+        )
+        elapsed_ms = round((perf_counter() - started) * 1000)
+        usage = getattr(result, "usage", None)
+        details = getattr(usage, "output_tokens_details", None) if usage else None
+        status = getattr(result, "status", "unknown")
+        stop = getattr(getattr(result, "incomplete_details", None), "reason", None)
+        emit("INFO", stage + "_completed",
+             appeal_id=str(appeal_id) if appeal_id else None, stage=stage,
+             model=model, attempt=attempt, elapsed_ms=elapsed_ms,
+             response_status=status, stop_reason=stop,
+             input_tokens=getattr(usage, "input_tokens", None),
+             output_tokens=getattr(usage, "output_tokens", None),
+             reasoning_tokens=getattr(details, "reasoning_tokens", None))
+        if status != "completed" or not result.output_text:
+            raise RuntimeError("Incomplete complaint model response")
+        return result.output_text
+    except Exception as exc:
+        emit("WARNING", stage + "_failed",
+             appeal_id=str(appeal_id) if appeal_id else None, stage=stage,
+             model=model, attempt=attempt, error_type=type(exc).__name__,
+             elapsed_ms=round((perf_counter() - started) * 1000))
+        raise
 
 
 def _evidence(appeal: QuestionAppeal) -> dict:
@@ -109,6 +139,13 @@ def _finalize(db: Session, appeal_id: UUID, *, decision: str,
     settle_appeal(db, appeal=row, decision=decision,
                   verdict_en=en, verdict_localized=localized, verdict_data=data)
     db.commit()
+    emit("INFO", "appeal_settled", appeal_id=str(row.id),
+         question_id=str(row.question_id), decision=decision,
+         refund_deposit=row.deposit_refunded_at is not None,
+         compensation_tier=("platinum" if row.question_number == 16 else row.deposit_tier),
+         compensation_amount=int(row.compensated_at is not None),
+         expenses_refunded=len((row.verdict_data or {}).get("expenses_refunded", [])),
+         wager_refunded=row.bonus_wager_refunded_at is not None)
 
 
 def process_appeal(appeal_id: UUID) -> str:
@@ -137,7 +174,8 @@ def process_appeal(appeal_id: UUID) -> str:
         # Never let the generator of this question adjudicate its own result.
         judge_model = os.getenv("QUIZ_COMPLAINT_JUDGE_MODEL_ID", "").strip()
         if question.generator_model == judge_model:
-            LOG.error("Appeal judge equals generator for question %s", row.question_id)
+            emit("ERROR", "appeal_model_conflict", appeal_id=str(appeal_id),
+                 question_id=str(row.question_id), stage="judge", model=judge_model)
             row.status = "retry_pending"
             row.next_retry_at = min(now + timedelta(days=1),
                                     _aware(row.submitted_at) + timedelta(days=7))
@@ -147,8 +185,11 @@ def process_appeal(appeal_id: UUID) -> str:
         row.status = "retry_pending"
         row.next_retry_at = now + LEASE
         db.commit()
+        emit("INFO", "appeal_started", appeal_id=str(appeal_id),
+             question_id=str(row.question_id))
 
-    for _ in range(MAX_IMMEDIATE_JUDGE_ATTEMPTS):
+    for attempt_no in range(1, MAX_IMMEDIATE_JUDGE_ATTEMPTS + 1):
+        stage = "evidence"
         try:
             with SessionFactory() as db:
                 appeal = db.get(QuestionAppeal, appeal_id)
@@ -156,10 +197,23 @@ def process_appeal(appeal_id: UUID) -> str:
                     return "already_settled"
                 evidence = _evidence(appeal)
                 answer_key = appeal.context["correct_key"]
-            keddy = parse_keddy(_completion(keddy_messages(evidence), "CADDY"))
-            verdict = parse_judge(_completion(judge_messages(
-                evidence, correct_key=answer_key, preliminary=keddy,
-            ), "JUDGE"))
+            stage = "keddy_input"
+            messages = keddy_messages(evidence)
+            stage = "keddy"
+            raw = _completion(messages, "CADDY", appeal_id=appeal_id, attempt=attempt_no)
+            stage = "keddy_validation"
+            keddy = parse_keddy(raw)
+            stage = "judge_input"
+            messages = judge_messages(evidence, correct_key=answer_key,
+                                      preliminary=keddy)
+            stage = "judge"
+            raw = _completion(messages, "JUDGE", appeal_id=appeal_id, attempt=attempt_no)
+            stage = "judge_validation"
+            verdict = parse_judge(raw)
+            emit("INFO", "judge_verdict", appeal_id=str(appeal_id),
+                 stage="judge", model=_config("JUDGE")[0],
+                 attempt=attempt_no, decision=verdict.decision)
+            stage = "settlement"
             with SessionFactory() as db:
                 _finalize(
                     db, appeal_id, decision=decision_for_policy(verdict),
@@ -173,9 +227,12 @@ def process_appeal(appeal_id: UUID) -> str:
                 )
             return "settled"
         except Exception as exc:
-            # No player-controlled text, answers, or tokens in logs.
-            LOG.warning("Appeal adjudication attempt failed id=%s type=%s",
-                        appeal_id, type(exc).__name__)
+            reason, fields = validation_summary(exc)
+            emit("WARNING", "appeal_attempt_failed", appeal_id=str(appeal_id),
+                 stage=stage, attempt=attempt_no, error_type=type(exc).__name__)
+            emit("DEBUG", "appeal_validation_detail", appeal_id=str(appeal_id),
+                 stage=stage, attempt=attempt_no, error_code=reason,
+                 validation_fields=fields)
             with SessionFactory() as db:
                 row = db.scalar(select(QuestionAppeal).where(
                     QuestionAppeal.id == appeal_id).with_for_update())
@@ -183,6 +240,14 @@ def process_appeal(appeal_id: UUID) -> str:
                     return "already_settled"
                 row.judge_attempts += 1
                 db.commit()
+            # Retrying unchanged invalid INPUT or inaccessible model credentials
+            # cannot repair the payload. A malformed MODEL OUTPUT may improve.
+            if stage in ("evidence", "keddy_input", "judge_input") or type(exc).__name__ in (
+                    "BadRequestError", "AuthenticationError", "PermissionDeniedError"):
+                emit("DEBUG", "appeal_nontransient_error",
+                     appeal_id=str(appeal_id), stage=stage,
+                     attempt=attempt_no, error_type=type(exc).__name__)
+                break
 
     with SessionFactory() as db:
         row = db.scalar(select(QuestionAppeal).where(
@@ -198,6 +263,9 @@ def process_appeal(appeal_id: UUID) -> str:
         row.next_retry_at = min(_now() + timedelta(days=1),
                                 _aware(row.submitted_at) + timedelta(days=7))
         db.commit()
+        emit("INFO", "appeal_retry_scheduled", appeal_id=str(appeal_id),
+             next_retry_at=row.next_retry_at.isoformat(),
+             status=row.status)
     return "retry_pending"
 
 
