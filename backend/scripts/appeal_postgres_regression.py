@@ -54,8 +54,9 @@ def fixture(db: Session, *, number: int, losing: bool = False,
     db.add(attempt)
     db.add(WalletTransaction(
         user_id=user.id, run_id=run.id, idempotency_key="fixture:" + suffix,
-        amount=8, reason=("star/gold/test-credit" if number >= 11
-                          else "star/bronze/test-credit")))
+        amount=8, reason=("star/gold/test-credit" if number >= 11 else
+                "star/silver/test-credit" if number >= 6 else
+                "star/bronze/test-credit")))
     if expenses:
         db.add(WalletTransaction(
             user_id=user.id, run_id=run.id, idempotency_key="fixture:hint:" + suffix,
