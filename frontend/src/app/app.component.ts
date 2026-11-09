@@ -595,7 +595,8 @@ export class AppComponent implements OnInit, OnDestroy {
             Swal.showValidationMessage(this.locale.t('appeals.invalid'));
             return false;
           }
-          return { reasons, comment, source_links: links, confirm_nonrefundable_fee: confirmFee };
+          return { reasons, comment, source_links: links, confirm_nonrefundable_fee: confirmFee,
+            expected_fee_bronze: quote.filing_fee_bronze };
         }
       });
       if (!result.isConfirmed || !result.value) return;
