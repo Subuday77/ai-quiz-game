@@ -14,6 +14,7 @@ import unicodedata
 from openai import OpenAI
 
 from platinum_helper.fallback_locale import HelperFallbackKey
+from platinum_helper.debug import response_source
 from platinum_helper.settings import HelperSettings
 
 
@@ -435,9 +436,10 @@ def _fallback(data: dict, templates: dict[str, str]) -> str:
 
 
 def talk(data: dict, *, client=None, fallback_loader=None) -> str:
-    """Exactly one provider request; any failure produces a safe paid reply."""
+    """Exactly one provider request, then a localized template if necessary."""
     settings = HelperSettings.from_env()
     instructions, prompt = _prompt(data)
+    failure_reason = "model_incomplete"
     try:
         sdk = client or OpenAI()
         response = sdk.with_options(
@@ -450,15 +452,34 @@ def talk(data: dict, *, client=None, fallback_loader=None) -> str:
         if response.status == "completed":
             speech = _validate(response.output_text or "", data)
             if speech:
+                response_source(
+                    call_id=data.get("call_id"), source="model", model=settings.model,
+                )
                 return speech
+            failure_reason = "model_speech_rejected"
     except Exception:
-        # Includes SDK setup, provider timeout, or malformed model response.
-        pass
+        # Includes SDK setup, missing model, provider timeout, bad API response.
+        # Never log exception text or private response contents here.
+        failure_reason = "provider_error"
+
     # No retry, no second model, no re-selection of the answer.
     if fallback_loader is None:
+        response_source(
+            call_id=data.get("call_id"), source="unavailable",
+            model=settings.model, reason="missing_fallback_loader",
+        )
         raise HelperUnavailable("Localized fallback dictionary was not provided")
     try:
         templates = fallback_loader()
+        speech = _fallback(data, templates)
     except Exception as exc:
-        raise HelperUnavailable("Localized fallback is not cached") from exc
-    return _fallback(data, templates)
+        response_source(
+            call_id=data.get("call_id"), source="unavailable",
+            model=settings.model, reason="fallback_unavailable",
+        )
+        raise HelperUnavailable("Localized fallback is not available") from exc
+    response_source(
+        call_id=data.get("call_id"), source="fallback",
+        model=settings.model, reason=failure_reason,
+    )
+    return speech
