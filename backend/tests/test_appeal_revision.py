@@ -42,14 +42,13 @@ class AppealRevisionTests(unittest.TestCase):
             (datetime(2026, 12, 31, 23, tzinfo=timezone.utc),
              "2027-01-01T00:00:00+00:00"),
         ):
-            with self.subTest(moment=moment), (
-                patch("persistence.appeal_service.owned_game", return_value=object()),
-                patch("persistence.appeal_service._eligible_attempt",
-                      return_value=(SimpleNamespace(number=1), None, True)),
-                patch("persistence.appeal_service._filings_this_month",
-                      return_value=2),
-                patch("persistence.appeal_service._now", return_value=moment)
-            ):
+            with (self.subTest(moment=moment),
+                  patch("persistence.appeal_service.owned_game", return_value=object()),
+                  patch("persistence.appeal_service._eligible_attempt",
+                        return_value=(SimpleNamespace(number=1), None, True)),
+                  patch("persistence.appeal_service._filings_this_month",
+                        return_value=2),
+                  patch("persistence.appeal_service._now", return_value=moment)):
                 quote = quote_appeal(
                     db, run_id=uuid4(), user_id=uuid4(), question_id=uuid4()
                 )
