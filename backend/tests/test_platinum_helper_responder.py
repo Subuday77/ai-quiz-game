@@ -190,7 +190,13 @@ class HelperResponderTests(unittest.TestCase):
                 data["delivery_style"] = style
                 with self.subTest(language=language, style=style):
                     for index in (0, 1):
-                        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+                        # This loop tests the key/placeholder contract, not
+                        # AI Localizer fluency. The latter is covered by cache
+                        # integration and real-language validator tests.
+                        with patch("platinum_helper.responder.random.SystemRandom") as rng, patch(
+                            "platinum_helper.responder._validate",
+                            side_effect=lambda raw, _: raw.split("SPEECH: ", 1)[1],
+                        ):
                             rng.return_value.choice.side_effect = lambda variants: variants[index]
                             response = _fallback(data, english_templates())
                         self.assertIn("395", response)
@@ -198,9 +204,11 @@ class HelperResponderTests(unittest.TestCase):
                             self.assertNotIn(other, response)
                         self.assertTrue(response.strip())
             data["outcome"] = "UNSURE"
-            self.assertTrue(_fallback(data, english_templates()))
-            for option in data["choices"].values():
-                self.assertNotIn(option, _fallback(data, english_templates()))
+            with patch("platinum_helper.responder._validate",
+                       side_effect=lambda raw, _: raw.split("SPEECH: ", 1)[1]):
+                self.assertTrue(_fallback(data, english_templates()))
+                for option in data["choices"].values():
+                    self.assertNotIn(option, _fallback(data, english_templates()))
 
 
 if __name__ == "__main__":
