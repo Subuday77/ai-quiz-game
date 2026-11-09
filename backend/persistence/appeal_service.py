@@ -23,6 +23,7 @@ from persistence.models import (
     PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
+from persistence.appeal_logging import emit
 from star_perks import PerkUnavailable
 
 
@@ -87,6 +88,9 @@ def _credit(db: Session, *, appeal: QuestionAppeal,
     key = f"appeal:{appeal.id}:{action}"
     existing = db.scalar(select(WalletTransaction.id).where(
         WalletTransaction.idempotency_key == key))
+    emit("DEBUG", "appeal_wallet_credit_checked", appeal_id=str(appeal.id),
+         stage=action, deposit_tier=tier, deposit_amount=amount,
+         already_applied=existing is not None)
     if existing is None:
         db.add(WalletTransaction(
             user_id=appeal.user_id, run_id=appeal.run_id,
@@ -249,6 +253,10 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                           verdict_localized="Appeal upheld automatically.",
                           verdict_data={"automated": True})
         db.commit()
+        if appeal.status == "upheld":
+            emit("INFO", "appeal_settled", appeal_id=str(appeal.id),
+                 question_id=str(appeal.question_id), decision=appeal.status,
+                 refund_deposit=appeal.deposit_refunded_at is not None)
         return appeal
     except Exception:
         db.rollback()
