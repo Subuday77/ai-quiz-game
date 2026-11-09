@@ -942,8 +942,12 @@ export class AppComponent implements OnInit, OnDestroy {
             (item.source_links.length ? '<div class="appeal-history-note"><strong>' +
               localized('appeals.historySources') + '</strong><p>' +
               safe(item.source_links.join(' | ')) + '</p></div>' : '') +
-            '<div class="appeal-history-verdict"><strong>' + localized('appeals.historyVerdict') +
-              '</strong><p dir="auto">' +
+            '<div class="appeal-history-verdict">' +
+              '<div class="appeal-history-verdict-header"><strong>' +
+                localized('appeals.historyVerdict') + '</strong>' +
+                '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
+                  localized('appeals.status.' + item.status) + '</span>' +
+              '</div><p dir="auto">' +
               safe(item.verdict || this.locale.t('appeals.notDecided')) + '</p></div>' +
             '<div class="appeal-history-economy">' +
               field('appeals.deposit',
@@ -965,7 +969,11 @@ export class AppComponent implements OnInit, OnDestroy {
           '</div></details>';
       }).join('');
       const body = filterHtml +
-        '<p class="appeal-history-count" id="appeal-history-count" role="status" aria-live="polite"></p>' +
+        '<div class="appeal-history-meta">' +
+          '<p class="appeal-history-count" id="appeal-history-count" role="status" aria-live="polite"></p>' +
+          '<button id="appeal-history-reset" class="appeal-history-reset" type="button">' +
+            localized('appeals.historyReset') + '</button>' +
+        '</div>' +
         '<div class="appeal-scroll-wrap appeal-history-scroll-wrap">' +
           '<div class="appeal-history" id="appeal-history-list">' + itemsHtml + '</div>' +
           '<p class="appeal-history-empty" id="appeal-history-empty" hidden></p>' +
@@ -988,9 +996,10 @@ export class AppComponent implements OnInit, OnDestroy {
           const to = popup.querySelector<HTMLInputElement>('#appeal-history-to');
           const sort = popup.querySelector<HTMLSelectElement>('#appeal-history-sort');
           const count = popup.querySelector<HTMLElement>('#appeal-history-count');
+          const reset = popup.querySelector<HTMLButtonElement>('#appeal-history-reset');
           const empty = popup.querySelector<HTMLElement>('#appeal-history-empty');
           const hint = popup.querySelector<HTMLElement>('.appeal-scroll-hint');
-          if (!list || !search || !status || !from || !to || !sort || !count || !empty || !hint) return;
+          if (!list || !search || !status || !from || !to || !sort || !count || !reset || !empty || !hint) return;
           const nodes = new Map(records.map((item, index) => [
             item.id, list.querySelector<HTMLElement>('[data-history-index="' + index + '"]'),
           ]));
@@ -1005,6 +1014,8 @@ export class AppComponent implements OnInit, OnDestroy {
               search: search.value, from: from.value, to: to.value,
               sort: sort.value as AppealHistorySort,
             };
+            reset.disabled = !filters.search && filters.status === 'all' &&
+              !filters.from && !filters.to && filters.sort === 'newest';
             const matches = filterAppealHistory(records, filters);
             const ids = new Set(matches.map(item => item.id));
             for (const [id, node] of nodes) {
@@ -1023,6 +1034,14 @@ export class AppComponent implements OnInit, OnDestroy {
             list.scrollTop = 0;
             updateScroll();
           };
+          reset.addEventListener('click', () => {
+            search.value = '';
+            status.value = 'all';
+            from.value = '';
+            to.value = '';
+            sort.value = 'newest';
+            update();
+          });
           search.addEventListener('input', update);
           for (const input of [status, from, to, sort]) {
             input.addEventListener('change', update);
