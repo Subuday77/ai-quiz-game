@@ -498,6 +498,9 @@ def hide_wrong_options(
         spend_star(db, user_id=user_id, run_id=run_id, tier="bronze",
                    amount=price, action=f"hide-{count}",
                    operation_key=operation_key)
+        previous_expenses = dict(attempt.appeal_expenses or {})
+        previous_expenses["hint_bronze"] = int(previous_expenses.get("hint_bronze", 0)) + price
+        attempt.appeal_expenses = previous_expenses
         attempt.hints_used += count
         run.hints_used += 1  # One action, whether it hides one or two.
         db.commit()
