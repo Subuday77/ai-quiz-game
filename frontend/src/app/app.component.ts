@@ -652,8 +652,13 @@ export class AppComponent implements OnInit, OnDestroy {
     const accountId = this.account.id;
     try {
       const { default: Swal } = await import('sweetalert2');
-      const records = await firstValueFrom(this.http.get<AppealRecord[]>(
-        '/api/v2/appeals').pipe(timeout(15000)));
+      const records: AppealRecord[] = [];
+      for (let offset = 0; ; offset += 100) {
+        const page = await firstValueFrom(this.http.get<AppealRecord[]>(
+          '/api/v2/appeals?offset=' + offset + '&limit=100').pipe(timeout(15000)));
+        records.push(...page);
+        if (page.length < 100) break;
+      }
       if (this.account?.id !== accountId) return;
       const safe = (value: unknown) => this.escapeAppealHtml(value);
       const html = records.length ? records.map(item => {
@@ -663,18 +668,22 @@ export class AppComponent implements OnInit, OnDestroy {
         const costs = item.expenses_refunded.map(v =>
           safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
         return '<details class="appeal-history-item"><summary>' +
-          safe(new Date(item.submitted_at).toLocaleString()) + ' · Q' +
+          safe(new Date(item.submitted_at).toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit' })) + ' · Q' +
           item.question_number + ' · ' + safe(this.locale.t('appeals.status.' + item.status)) +
           '</summary><p><strong>' + safe(item.question_snapshot.question) +
           '</strong></p><ol>' + answers + '</ol><p>' +
           safe(item.reasons.map(r => this.locale.t('appeals.reason.' + r)).join(', ')) +
           '</p><p>' + safe(item.comment) + '</p><p>' +
+          safe(item.source_links.join(' | ')) + '</p><p>' +
           safe(item.verdict || this.locale.t('appeals.notDecided')) + '</p><p>' +
           safe(this.locale.t('appeals.closed')) + ': ' +
           safe(item.closed_at ? new Date(item.closed_at).toLocaleDateString() : '—') +
           '</p><p>' + safe(this.locale.t('appeals.deposit')) + ': ' +
           safe(item.deposit.amount + ' ' + this.locale.t('stars.' + item.deposit.tier)) +
-          (item.deposit.refunded ? ' (' + safe(this.locale.t('appeals.refunded')) + ')' : '') +
+          (' (' + safe(this.locale.t(item.deposit.refunded ? 'appeals.refunded' :
+            item.status === 'rejected' ? 'appeals.depositForfeited' : 'appeals.depositPending')) + ')') +
           '</p><p>' + safe(this.locale.t('appeals.fee')) + ': ' + item.filing_fee_bronze +
           ' ' + safe(this.locale.t('stars.bronze')) +
           '</p><p>' + safe(this.locale.t('appeals.compensation')) + ': ' +
