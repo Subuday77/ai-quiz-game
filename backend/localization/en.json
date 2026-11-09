@@ -316,8 +316,8 @@
   "appeals.rulesRejected": "If your complaint is rejected, the deposit is not refunded, expenses are not reimbursed, and no compensation is paid. The filing fee is never returned under any outcome.",
   "appeals.rulesTechnical": "If technical failures prevent a decision, the system retries. If there is still no decision after seven days, your deposit is refunded, but no additional compensation is paid. Any filing fee remains non-refundable.",
   "appeals.rulesHistory": "All complaints, their statuses and the Judge's explanations are available in My Complaints in your profile. Results do not open automatically.",
-  "appeals.costTitle": "Complaint cost",
-  "appeals.filingPrice": "Filing fee",
+  "appeals.costTitle": "Total complaint cost",
+  "appeals.filingPrice": "Complaint fee",
   "appeals.depositRule": "The deposit is charged now and returned only if the complaint is upheld or closed after seven days for technical reasons.",
   "appeals.nowDebit": "Deducted now",
   "appeals.confirmTitle": "Confirm complaint",
@@ -330,5 +330,7 @@
   "appeals.yourAnswer": "Your answer",
   "appeals.gameAnswer": "Game answer key",
   "appeals.notAnswered": "You did not select an answer",
-  "appeals.keyHidden": "The answer key is hidden until the game ends"
+  "appeals.keyHidden": "The answer key is hidden until the game ends",
+  "appeals.freeQuota": "Free complaints: {{remaining}}/{{total}}",
+  "appeals.freeReset": "Refresh {{date}}"
 }
