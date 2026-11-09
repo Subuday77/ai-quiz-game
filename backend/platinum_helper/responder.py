@@ -377,8 +377,8 @@ def _validate(raw: str, data: dict) -> str | None:
 # Two variants per confidence level and one for UNSURE, in all UI languages.
 _FALLBACK = {
     "russian": {
-        "CONFIDENT": ("Я знаю, это «{answer}».", "Ну, здесь точно «{answer}»."),
-        "TENTATIVE": ("Мне кажется, это «{answer}».", "Скорее «{answer}», но это не точно."),
+        "CONFIDENT": ("Я знаю: «{answer}».", "Ну, здесь точно «{answer}»."),
+        "TENTATIVE": ("Мне кажется, здесь «{answer}».", "Скорее «{answer}», но это не точно."),
         "UNSURE": "Тут я помочь не могу.",
     },
     "english": {
