@@ -44,6 +44,15 @@ class HelperSettings:
     threshold_levels_1_3: int
     threshold_levels_4_15: int
 
+    @property
+    def max_attempts(self) -> int:
+        """Read-only API budget for older offline QA runners: always ONE call.
+
+        Unlike the removed QUIZ_HELPER_MAX_ATTEMPTS env variable, this
+        compatibility property cannot enable retries.
+        """
+        return 1
+
     @classmethod
     def from_env(cls) -> "HelperSettings":
         model = os.getenv("QUIZ_HELPER_MODEL_ID", "gpt-5.4").strip()
