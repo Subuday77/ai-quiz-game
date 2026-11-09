@@ -125,6 +125,24 @@ def reserved(purchase, call, question, category: str, run_id, *,
     )
 
 
+
+def response_source(*, call_id, source: str, model: str, reason: str | None = None) -> None:
+    """Server-only trace: which path prepared a speech, not its correctness.
+
+    Called before finish_call; use helper_consultation_finished to confirm
+    whether the prepared reply was actually persisted and charged.
+    """
+    if not enabled() or call_id is None:
+        return
+    _emit(
+        "helper_response_prepared",
+        call_id=str(call_id),
+        source=source,
+        model=model,
+        fallback_reason=reason if source != "model" else None,
+    )
+
+
 def finished(db, purchase, call, *, reply: str | None, charged: bool) -> None:
     if not enabled():
         return
