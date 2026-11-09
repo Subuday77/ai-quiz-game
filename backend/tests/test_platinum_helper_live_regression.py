@@ -8,6 +8,7 @@ from unittest.mock import patch
 from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
 
+from helper_fallback_fixtures import russian_templates
 from scripts import helper_live_regression as qa
 
 
@@ -90,7 +91,7 @@ class HelperLiveQATests(unittest.TestCase):
                 "KEY: B\nSPEECH: Но правильный ответ 476.",
                 "KEY: B\nSPEECH: Я бы выбрал 395.",
             ])
-            result = qa.evaluate(s, sdk, attempts, 2.5, 15.0)
+            result = qa.evaluate(s, sdk, attempts, 2.5, 15.0, fallback_loader=russian_templates)
             self.assertEqual(result["status"], "completed", result)
             self.assertEqual(result["guard_rejections"], 1)
             self.assertEqual(result["api_requests"], 1)
@@ -105,7 +106,8 @@ class HelperLiveQATests(unittest.TestCase):
             result = qa.evaluate(s, FakeSDK([
                 "KEY: B\nSPEECH: Правильный ответ 476.",
                 "KEY: B\nSPEECH: Ответ 476.",
-            ]), Path(temp) / "attempts.jsonl", 2.5, 15.0)
+            ]), Path(temp) / "attempts.jsonl", 2.5, 15.0,
+            fallback_loader=russian_templates)
             self.assertEqual(result["status"], "completed", result)
             self.assertTrue(result["is_fallback"])
             self.assertEqual(result["guard_rejections"], 1)
