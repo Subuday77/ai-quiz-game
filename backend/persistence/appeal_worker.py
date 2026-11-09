@@ -132,11 +132,12 @@ def process_appeal(appeal_id: UUID) -> str:
             db.rollback()
             return "question_missing"
         # Never let the generator of this question adjudicate its own result.
-        judge_model = _config("JUDGE")[0]
+        judge_model = os.getenv("QUIZ_COMPLAINT_JUDGE_MODEL_ID", "").strip()
         if question.generator_model == judge_model:
             LOG.error("Appeal judge equals generator for question %s", row.question_id)
             row.status = "retry_pending"
-            row.next_retry_at = now + timedelta(days=1)
+            row.next_retry_at = min(now + timedelta(days=1),
+                                    _aware(row.submitted_at) + timedelta(days=7))
             db.commit()
             return "model_conflict"
         # Commit the lease BEFORE network IO.
@@ -191,7 +192,8 @@ def process_appeal(appeal_id: UUID) -> str:
                       en="Unable to complete review within seven days.",
                       localized="Review could not be completed for technical reasons.")
             return "technical_unresolved"
-        row.next_retry_at = _now() + timedelta(days=1)
+        row.next_retry_at = min(_now() + timedelta(days=1),
+                                _aware(row.submitted_at) + timedelta(days=7))
         db.commit()
     return "retry_pending"
 
