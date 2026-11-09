@@ -398,7 +398,7 @@ _FALLBACK = {
     },
     "spanish": {
         "CONFIDENT": ("Esta la sé: {answer}.", "Seguro que es {answer}."),
-        "TENTATIVE": ("Creo que es {answer}.", "Quizá {answer}, pero no estoy seguro."),
+        "TENTATIVE": ("Creo que es {answer}.", "Quizá {answer}, pero no tengo certeza."),
         "UNSURE": "Con esta no puedo ayudar.",
     },
     "italian": {
@@ -412,7 +412,7 @@ _FALLBACK = {
         "UNSURE": "Nesta não consigo ajudar.",
     },
     "hebrew": {
-        "CONFIDENT": ("את זה אני יודע: {answer}.", "זה בטוח {answer}."),
+        "CONFIDENT": ("ברור לי שזה {answer}.", "זה בטוח {answer}."),
         "TENTATIVE": ("נראה לי שזה {answer}.", "אולי {answer}, אבל לא בטוח."),
         "UNSURE": "בזה אין לי איך לעזור.",
     },
