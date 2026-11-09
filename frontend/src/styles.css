@@ -71,6 +71,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .swal2-popup .appeal-history-item li { overflow-wrap: anywhere; }
 
 
+/* Monthly quota is visible beneath the title, outside the scrolling form. */
+.swal2-popup .appeal-quota-header {
+  margin: .1rem .6rem .85rem; padding: .7rem 1rem;
+  border-radius: 9px; border: 1px solid #deddf0;
+  background: #f6f5fd; color: #413f63;
+  font-size: .93rem; font-weight: 650; text-align: start;
+}
+
 /* Clear, visible costs and scrolling hint inside SweetAlert's fixed-height form. */
 .swal2-popup .appeal-scroll-wrap { position: relative; }
 .swal2-popup .appeal-scroll-wrap .appeal-form { padding-bottom: 2.2rem; }
