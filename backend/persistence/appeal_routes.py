@@ -24,6 +24,7 @@ class AppealInput(BaseModel):
     comment: str = Field(default="", max_length=1000)
     source_links: list[str] = Field(default_factory=list, max_length=5)
     confirm_nonrefundable_fee: bool = False
+    expected_fee_bronze: int = Field(ge=0)
 
 
 def _public(appeal: QuestionAppeal) -> dict:
@@ -96,6 +97,7 @@ def submit_appeal(run_id: UUID, payload: AppealInput, request: Request,
             request_id=payload.request_id, reasons=payload.reasons,
             comment=payload.comment, source_links=links,
             confirm_nonrefundable_fee=payload.confirm_nonrefundable_fee,
+            expected_fee_bronze=payload.expected_fee_bronze,
         )
         if appeal.status in ("pending", "retry_pending"):
             # Best-effort immediate processing; durable retries use the worker CLI.
