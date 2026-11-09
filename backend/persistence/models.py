@@ -411,6 +411,23 @@ class QuestionAppeal(Base):
     bonus_wager_refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AppealQaFreeQuota(Base):
+    """Extra free filings for explicitly enabled local QA, never for production.
+
+    Month start is UTC. This table does not alter appeals, their verdicts,
+    monthly submission counts or wallet transactions.
+    """
+    __tablename__ = "appeal_qa_free_quota"
+    __table_args__ = (CheckConstraint("extra_free >= 0 AND extra_free <= 1000",
+                                     name="ck_appeal_qa_free_limit"),)
+
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+                            primary_key=True)
+    month_start = mapped_column(DateTime(timezone=True), primary_key=True)
+    extra_free: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at = datetime_column()
+
+
 class QuestionModeration(Base):
     """Counters remain independent from any single player's verdict."""
     __tablename__ = "question_moderation"
