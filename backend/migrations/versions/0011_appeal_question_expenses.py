@@ -15,9 +15,7 @@ depends_on = None
 
 def upgrade():
     op.add_column("question_attempts", sa.Column(
-        "appeal_expenses", sa.JSON().with_variant(
-            __import__("sqlalchemy.dialects.postgresql", fromlist=["JSONB"]).JSONB(),
-            "postgresql"),
+        "appeal_expenses", sa.JSON().with_variant(JSONB(), "postgresql"),
         nullable=False, server_default=sa.text("'{}'"),
     ))
 
