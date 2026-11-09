@@ -10,6 +10,8 @@ from random import Random
 from typing import Literal
 from uuid import UUID, uuid4
 
+from category_taxonomy import CATEGORY_TOPICS
+
 Skill = Literal["HIGH", "MEDIUM", "LOW"]
 Outcome = Literal["KNOW", "MISTAKEN", "UNSURE"]
 
@@ -56,60 +58,6 @@ assert all(
     for profession, related in PROFESSIONAL_RELATED_SKILLS.items()
 )
 
-# The actual game uses about 50 fine-grained categories. Each maps to exactly
-# one of the twenty broad profile areas; never trust a client-supplied topic.
-CATEGORY_TOPICS = {
-    "Ancient history": "History",
-    "Medieval history": "History",
-    "Modern history": "History",
-    "World geography": "Geography",
-    "Countries and capitals": "Geography",
-    "Cities and landmarks": "Geography",
-    "Oceans, rivers, and lakes": "Geography",
-    "Mountains and natural landscapes": "Geography",
-    "Astronomy and space": "Astronomy",
-    "Physics": "Physics",
-    "Chemistry": "Chemistry",
-    "Biology": "Biology",
-    "Human anatomy": "Medicine",
-    "Medicine and health": "Medicine",
-    "Animals": "Biology",
-    "Plants and botany": "Biology",
-    "Earth science and geology": "Geography",
-    "Weather and climate": "Meteorology",
-    "Mathematics": "Mathematics",
-    "Computer science": "Technology",
-    "Technology": "Technology",
-    "Inventions and discoveries": "Technology",
-    "Engineering": "Engineering",
-    "Literature": "Literature",
-    "Poetry": "Literature",
-    "Authors and books": "Literature",
-    "Languages and linguistics": "Literature",
-    "Mythology": "Mythology",
-    "Religion and world beliefs": "Mythology",
-    "Philosophy": "Culture",
-    "Psychology": "Medicine",
-    "Visual arts": "Art",
-    "Architecture": "Engineering",
-    "Classical music": "Music",
-    "Popular music": "Music",
-    "Musical instruments": "Music",
-    "Cinema": "Cinema",
-    "Television": "Cinema",
-    "Theater": "Art",
-    "Comics and graphic novels": "Comics",
-    "Video games": "Technology",
-    "Board games and puzzles": "Culture",
-    "Sports": "Sports",
-    "Olympic Games": "Sports",
-    "Food and cooking": "Culture",
-    "Drinks and culinary traditions": "Culture",
-    "Fashion and clothing": "Art",
-    "Transportation": "Engineering",
-    "Everyday objects and household knowledge": "Culture",
-    "Traditions, customs, and world culture": "Culture",
-}
 KNOW_DECAY_PER_QUESTION = {"HIGH": 0.5, "MEDIUM": 2.5, "LOW": 5.0}
 
 

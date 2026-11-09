@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
+from category_taxonomy import category_family, prefer_other_family
 from diagnostics import event
 from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
@@ -26,7 +27,7 @@ from persistence.gameplay import (
 )
 from persistence.categories import (
     allowed_categories, available_categories, category_snapshot,
-    exclude_pregame_categories,
+    exclude_pregame_categories, preceding_question_category,
 )
 from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic, User, WalletTransaction
 from persistence.seed_topics import category_slug
@@ -262,18 +263,20 @@ def _category_for_round(run_id: UUID, number: int,
     allowed = list(allowed_categories(run))
     categories = random.Random(run_id.int).sample(allowed, k=len(allowed))
     unused = set(available_categories(db, run, number))
+    previous = preceding_question_category(db, run_id, number)
     base = (15 + bonus_topic_index) if number == 16 else number - 1
-    # Bonus retry walks the available-first order. Once all unused topics
-    # have been tried, cycle only within this player's permitted categories.
-    # With the default complete catalog, the order is identical to v2.
+    # Bonus recovery must still visit every permitted category. Within each
+    # availability tier, try unrelated families before returning to Q15's.
     if number == 16:
         rotation = categories[15:] + categories[:15]
-        ordered = ([cat for cat in rotation if cat in unused] +
-                   [cat for cat in rotation if cat not in unused])
+        ordered = (
+            prefer_other_family([cat for cat in rotation if cat in unused], previous)
+            + prefer_other_family([cat for cat in rotation if cat not in unused], previous)
+        )
         return ordered[bonus_topic_index % len(ordered)]
     rotated = categories[base % len(categories):] + categories[:base % len(categories)]
-    return next((category for category in rotated if category in unused),
-                rotated[0])
+    candidates = [cat for cat in rotated if cat in unused] or rotated
+    return prefer_other_family(candidates, previous)[0]
 
 
 
@@ -289,8 +292,11 @@ def _alternate_main_category(db: Session, run: GameRun, number: int,
     order = random.Random(run.id.int).sample(allowed, k=len(allowed))
     offset = (number - 1) % len(order)
     rotated = order[offset:] + order[:offset]
-    return next((item for item in rotated
-                 if item != primary and item in available), None)
+    candidates = [item for item in rotated if item != primary and item in available]
+    ranked = prefer_other_family(
+        candidates, preceding_question_category(db, run.id, number),
+    )
+    return ranked[0] if ranked else None
 
 
 def _advance_bonus_topic_after_failure(
@@ -866,7 +872,13 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
         raise HTTPException(status_code=409, detail="No unused categories available")
     if manual and payload.category not in options:
         raise HTTPException(status_code=409, detail="Category is not available")
-    chosen = payload.category if manual else secrets.choice(options)
+    if manual:
+        chosen = payload.category  # An explicit purchase overrides auto-diversity.
+    else:
+        previous = preceding_question_category(db, run.id, attempt.number)
+        other_family = ([cat for cat in options
+                         if previous is None or category_family(cat) != category_family(previous)])
+        chosen = secrets.choice(other_family or options)
     old_attempt_id = attempt.id
     difficulty = attempt.requested_difficulty
     language = run.language

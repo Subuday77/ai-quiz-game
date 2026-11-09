@@ -50,6 +50,31 @@ def answered_category_slugs(db: Session, run_id: UUID) -> set[str]:
     ))
 
 
+
+def preceding_question_category(db: Session, run_id: UUID, number: int) -> str | None:
+    """Last displayed, completed question of the immediately previous slot.
+
+    Answered and paid-skipped questions both count; replaced revisions do not.
+    Query persisted history rather than client state, including after restart.
+    """
+    if number <= 1:
+        return None
+    labels = db.scalar(
+        select(Topic.labels)
+        .join(Question, Question.topic_id == Topic.id)
+        .join(QuestionAttempt, QuestionAttempt.question_id == Question.id)
+        .where(
+            QuestionAttempt.run_id == run_id,
+            QuestionAttempt.number == number - 1,
+            QuestionAttempt.answered_at.is_not(None),
+            QuestionAttempt.superseded_at.is_(None),
+        )
+        .order_by(QuestionAttempt.revision.desc())
+        .limit(1)
+    )
+    return labels.get("en") if isinstance(labels, dict) else None
+
+
 def attempted_category_slugs(db: Session, run_id: UUID, number: int) -> set[str]:
     """All shown categories in the current slot, including superseded ones."""
     return set(db.scalars(
