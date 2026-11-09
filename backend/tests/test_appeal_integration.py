@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from api import app
+from persistence.appeal_routes import router as appeal_router
 from persistence.appeal_ai_security import parse_judge
 from persistence.appeal_routes import AppealInput, _public
 from persistence.appeal_worker import _config, _completion, _evidence
@@ -13,7 +13,7 @@ from persistence.appeal_worker import _config, _completion, _evidence
 
 class AppealIntegrationTests(unittest.TestCase):
     def test_private_api_is_registered(self):
-        paths = {(method, route.path) for route in app.routes
+        paths = {(method, route.path) for route in appeal_router.routes
                  for method in getattr(route, "methods", ())}
         for pair in (("GET", "/api/v2/games/{run_id}/appeals/{question_id}/quote"),
                      ("POST", "/api/v2/games/{run_id}/appeals"),
