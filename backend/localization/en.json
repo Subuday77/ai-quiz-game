@@ -304,7 +304,7 @@
   "appeals.status.upheld": "Upheld",
   "appeals.status.rejected": "Rejected",
   "appeals.status.technical_unresolved": "Not reviewed due to technical reasons",
-  "appeals.depositForfeited": "forfeited",
+  "appeals.depositForfeited": "not refunded",
   "appeals.depositPending": "deducted, review pending",
   "appeals.freeCount": "Free complaints: {{count}}",
   "appeals.rulesTitle": "How complaints work",
