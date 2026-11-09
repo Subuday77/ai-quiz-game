@@ -104,6 +104,9 @@ interface AppealQuote {
   deposit_amount: number;
   filing_fee_bronze: number;
   free_appeals_remaining: number;
+  hint_refund_bronze_if_upheld: number;
+  loss_compensation_tier_if_upheld: StarTier | null;
+  bonus_wager_refund_if_upheld: boolean;
   question_snapshot: {
     question_id: string; question: string;
     answers: Record<Choice, string>; hidden_keys: Choice[];
@@ -592,6 +595,16 @@ export class AppComponent implements OnInit, OnDestroy {
         ? star('bronze', quote.deposit_amount + quote.filing_fee_bronze)
         : deposit + (quote.filing_fee_bronze
             ? ' + ' + star('bronze', quote.filing_fee_bronze) : '');
+      const successExtras = [
+        quote.hint_refund_bronze_if_upheld > 0
+          ? this.locale.t('appeals.hintRefunds') + ': ' +
+            star('bronze', quote.hint_refund_bronze_if_upheld) : '',
+        quote.loss_compensation_tier_if_upheld
+          ? this.locale.t('appeals.compensation') + ': ' +
+            star(quote.loss_compensation_tier_if_upheld, 1) : '',
+        quote.bonus_wager_refund_if_upheld
+          ? this.locale.t('appeals.wagerRefunded') + ': ' + star('gold', 1) : '',
+      ].filter(Boolean).map(row => '<p>' + safe(row) + '</p>').join('');
       const costHtml =
         '<section class="appeal-cost"><h3>' + safe(this.locale.t('appeals.costTitle')) +
         '</h3><p><strong>' + safe(this.locale.t('appeals.deposit')) + ':</strong> ' +
@@ -675,8 +688,8 @@ export class AppComponent implements OnInit, OnDestroy {
             safe(this.locale.t('appeals.nowDebit')) + ': <strong>' +
             safe(totalNow) + '</strong></p><p class="appeal-confirm-total">' +
             safe(this.locale.t('appeals.ifUpheldRefund')) + ': <strong>' +
-            safe(deposit) + '</strong></p><p>' +
-            safe(this.locale.t('appeals.hintRefundRule')) + '</p>' +
+            safe(deposit) + '</strong></p>' + successExtras +
+            '<p>' + safe(this.locale.t('appeals.hintRefundRule')) + '</p>' +
             '<p class="appeal-warning">' +
             safe(this.locale.t('appeals.rejectedRule')) + '</p>' +
             (quote.filing_fee_bronze > 0 ? '<p class="appeal-warning">' +
