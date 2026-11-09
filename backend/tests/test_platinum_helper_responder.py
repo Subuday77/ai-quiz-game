@@ -88,6 +88,39 @@ class HelperResponderTests(unittest.TestCase):
             "KEY: B\nSPEECH: Я бы взял Кассини.", titan
         ), "Я бы взял Кассини.")
 
+    def test_dotted_initials_are_not_mistaken_for_extra_explanation(self):
+        data = sample("KNOW")
+        data.update(
+            letter="A", delivery_style="TENTATIVE",
+            question_text="Кто написал роман «Гарри Поттер и философский камень»?",
+            choices={
+                "A": "Дж. К. Роулинг", "B": "Дж. Р. Р. Толкин",
+                "C": "Клайв С. Льюис", "D": "Роальд Даль",
+            },
+            correct_option_text="Дж. К. Роулинг",
+        )
+        speech = "Мне кажется, здесь «Дж. К. Роулинг»."
+        self.assertEqual(_validate("KEY: A\nSPEECH: " + speech, data), speech)
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: " + speech + " Она написала книгу.", data
+        ))
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: Советую «Дж. Р. Р. Толкин».", data
+        ))
+        for index in (0, 1):
+            with self.subTest(template=index), patch(
+                "platinum_helper.responder.random.SystemRandom"
+            ) as rng:
+                rng.return_value.choice.side_effect = lambda variants: variants[index]
+                fallback = _fallback(data, russian_templates())
+                self.assertIn("Дж. К. Роулинг", fallback)
+                self.assertEqual(_validate("KEY: A\nSPEECH: " + fallback, data), fallback)
+        sdk = FakeClient(["KEY: A\nSPEECH: " + speech])
+        self.assertEqual(
+            talk(data, client=sdk, fallback_loader=russian_templates), speech
+        )
+        self.assertEqual(sdk.calls, 1)
+
     def test_self_negation_and_no_false_numeric_substrings(self):
         data = sample()
         self.assertIsNone(_validate(
