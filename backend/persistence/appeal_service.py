@@ -20,7 +20,7 @@ from persistence.appeal_policy import (
 from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import (
     GameRun, Question, QuestionAppeal, QuestionAttempt, QuestionModeration,
-    WalletTransaction,
+    PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
 from star_perks import PerkUnavailable
@@ -108,7 +108,8 @@ def _moderation(db: Session, *, question_id: UUID) -> QuestionModeration:
 def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 question_id: UUID, request_id: UUID, reasons: list[str],
                 comment: str, source_links: list[str],
-                confirm_nonrefundable_fee: bool) -> QuestionAppeal:
+                confirm_nonrefundable_fee: bool,
+                expected_fee_bronze: int | None = None) -> QuestionAppeal:
     """Create one complaint and its two separate possible debits atomically."""
     try:
         lock_user_stars(db, user_id)
@@ -146,6 +147,8 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
         fee = appeal_fee_bronze(_filings_this_month(
             db, user_id=user_id, now=now))
         deposit_tier = appeal_deposit_tier(attempt.number)
+        if expected_fee_bronze is not None and fee != expected_fee_bronze:
+            raise GameConflict("Filing fee changed; review the latest quote")
         if fee and not confirm_nonrefundable_fee:
             raise GameConflict("Explicit consent required for nonrefundable fee")
         needed_bronze = fee + (1 if deposit_tier == "bronze" else 0)
@@ -159,6 +162,14 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
         answers = {key: question.choices[key] for key in "ABCD"}
         from persistence.gameplay import hidden_choices
         hidden_keys = list(hidden_choices(db, attempt, question))
+        helper = db.scalar(select(PlatinumHelperPurchase).where(
+            PlatinumHelperPurchase.run_id == run.id))
+        helper_call_on_question = bool(helper is not None and db.scalar(
+            select(PlatinumHelperCall.id).where(
+                PlatinumHelperCall.purchase_id == helper.id,
+                PlatinumHelperCall.question_attempt_id == attempt.id,
+                PlatinumHelperCall.status == "completed",
+            ).limit(1)) is not None)
         snapshot = {
             "question_id": str(question.id), "number": attempt.number,
             "difficulty": attempt.requested_difficulty,
@@ -176,6 +187,8 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 "correct_key": question.correct_key,  # private judge input
                 "hints_used": attempt.hints_used,
                 "expenses": dict(attempt.appeal_expenses or {}),
+                "helper_purchase_id": str(helper.id) if helper else None,
+                "helper_used_on_question": helper_call_on_question,
                 "bonus_wager_accepted": run.bonus_wager_accepted,
                 "run_status_at_submission": run.status,
             },
@@ -275,6 +288,42 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
             result_data["expenses_refunded"] = [{"tier": "bronze", "amount": hint_bronze,
                                                   "reason": "hints"}]
             appeal.verdict_data = result_data
+    if decision == "upheld":
+        helper_id = (appeal.context or {}).get("helper_purchase_id")
+        if helper_id:
+            purchase = db.get(PlatinumHelperPurchase, UUID(helper_id),
+                              with_for_update=True)
+            if purchase and purchase.run_id == appeal.run_id and purchase.user_id == appeal.user_id:
+                if appeal.context.get("helper_used_on_question"):
+                    # One additional gold compensation per hired helper,
+                    # independent of how often the worker or player retries.
+                    key = f"helper:{purchase.id}:appeal-gold"
+                    if db.scalar(select(WalletTransaction.id).where(
+                            WalletTransaction.idempotency_key == key)) is None:
+                        db.add(WalletTransaction(
+                            user_id=appeal.user_id, run_id=appeal.run_id,
+                            idempotency_key=key, amount=1,
+                            reason="star/gold/helper-appeal-compensation"))
+                        data = dict(appeal.verdict_data or {})
+                        data.setdefault("expenses_refunded", []).append(
+                            {"tier": "gold", "amount": 1, "reason": "helper"})
+                        appeal.verdict_data = data
+                elif purchase.consultations_used == 0 and not purchase.refunded:
+                    # Never refund a helper that was subsequently used, or
+                    # one already refunded for a successful Q15 run.
+                    key = f"helper:{purchase.id}:refund"
+                    if db.scalar(select(WalletTransaction.id).where(
+                            WalletTransaction.idempotency_key == key)) is None:
+                        db.add(WalletTransaction(
+                            user_id=appeal.user_id, run_id=appeal.run_id,
+                            idempotency_key=key, amount=purchase.price,
+                            reason="star/platinum/helper-refund"))
+                        purchase.refunded = True
+                        data = dict(appeal.verdict_data or {})
+                        data.setdefault("expenses_refunded", []).append(
+                            {"tier": "platinum", "amount": purchase.price,
+                             "reason": "unused_helper"})
+                        appeal.verdict_data = data
     if decision == "upheld" and caused_loss:
         _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
                 action="appeal-compensation")
