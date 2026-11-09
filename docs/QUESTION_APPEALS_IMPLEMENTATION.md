@@ -20,6 +20,8 @@ approved economy, merge the branch, or deploy paid model requests.**
 - `backend/persistence/appeal_worker.py`: separate Keddy and Judge API calls,
   bounded retries, content-inconclusive player-favoring policy and
   seven-day technical-expiry refund.
+- `backend/persistence/appeal_scheduler.py`: lightweight retry polling
+  attached automatically to FastAPI's lifespan; no second server/terminal.
 - `backend/migrations/versions/0010_question_appeals.py`: durable appeal and
   moderation records; `0011_appeal_question_expenses.py`: per-attempt expenses.
 - `frontend/src/app/app.component.ts` / `.html`: SweetAlert complaint form
@@ -66,17 +68,17 @@ python -m unittest discover -s tests -v
 python -m uvicorn api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-For durable scheduled processing, start a **separate terminal or service**
-from the `backend` directory with:
+**No second process is necessary.** The existing FastAPI app automatically
+starts a lightweight scheduled retry check when PostgreSQL is configured.
+On receiving a complaint, it also attempts immediate processing after the
+HTTP response. On restart it scans overdue cases; while the server is running
+it checks for due retries once a minute. The retry dates and seven-day deadline
+are stored in PostgreSQL and shared between web workers.
 
-```powershell
-python -m persistence.appeal_worker --loop
-```
-
-One-shot for an external scheduler: `python -m persistence.appeal_worker --once`.
-The HTTP submission schedules immediate best-effort handling, but is **not**
-a replacement for this dedicated worker. Never run `--loop` with the
-reloading web server's process.
+If the application is completely shut down, no process can execute a deadline
+at that moment; overdue work is picked up the next time FastAPI starts. For
+one-time manual recovery only (not normal startup), use
+`python -m persistence.appeal_worker --once`.
 
 Frontend is still Angular and runs separately in VS Code:
 `cd frontend; npm install; npm start`.
