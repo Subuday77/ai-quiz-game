@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from persistence.appeal_qa_quota import allowance, extra_free_for_month
 from persistence.appeal_policy import month_bounds
+from persistence.models import AppealQaFreeQuota
+from scripts.grant_test_appeals import grant
 
 
 class AppealQaQuotaTests(unittest.TestCase):
@@ -40,7 +42,7 @@ class AppealQaQuotaTests(unittest.TestCase):
                     self.assertEqual(info["filing_fee_bronze"], fee)
             first, _ = month_bounds(self.now)
             self.db.get.assert_any_call(
-                __import__("persistence.models", fromlist=["AppealQaFreeQuota"]).AppealQaFreeQuota,
+                AppealQaFreeQuota,
                 (self.user_id, first),
             )
 
@@ -56,6 +58,49 @@ class AppealQaQuotaTests(unittest.TestCase):
         self.assertEqual(december["free_appeals_total"], 5)
         self.assertEqual(december["free_appeals_refresh_at"],
                          "2027-01-01T00:00:00+00:00")
+
+    def test_cli_dry_run_never_mutates_database(self):
+        with (patch.dict(os.environ, {"QUIZ_QA_APPEAL_CREDITS_ENABLED": "true"}),
+              patch("scripts.grant_test_appeals.engine"),
+              patch("scripts.grant_test_appeals.Session") as session,
+              patch("scripts.grant_test_appeals._filings_this_month", return_value=2)):
+            db = session.return_value.__enter__.return_value
+            db.scalar.return_value = SimpleNamespace(
+                id=self.user_id, username="AI_Tester_1")
+            db.get.return_value = None
+            result = grant(username="AI_Tester_1", count=10, now=self.now)
+            self.assertEqual(result["mode"], "DRY_RUN")
+            self.assertEqual(result["free_remaining"], 13)
+            self.assertEqual(result["free_total"], 15)
+            db.add.assert_not_called()
+            db.commit.assert_not_called()
+            db.rollback.assert_called_once()
+
+    def test_cli_apply_updates_one_scoped_month_only(self):
+        with (patch.dict(os.environ, {"QUIZ_QA_APPEAL_CREDITS_ENABLED": "true"}),
+              patch("scripts.grant_test_appeals.engine"),
+              patch("scripts.grant_test_appeals.Session") as session,
+              patch("scripts.grant_test_appeals.lock_user_stars") as lock,
+              patch("scripts.grant_test_appeals._filings_this_month", return_value=3)):
+            db = session.return_value.__enter__.return_value
+            db.scalar.return_value = SimpleNamespace(
+                id=self.user_id, username="AI_Tester_1")
+            db.get.return_value = SimpleNamespace(extra_free=2)
+            result = grant(username="AI_Tester_1", count=8, now=self.now, apply=True)
+            lock.assert_called_once_with(db, self.user_id)
+            self.assertEqual(result["new_qa_credits"], 10)
+            self.assertEqual(result["free_remaining"], 12)
+            self.assertEqual(db.get.return_value.extra_free, 10)
+            db.commit.assert_called_once()
+            db.add.assert_not_called()
+
+    def test_cli_requires_explicit_opt_in_and_bounded_count(self):
+        with patch.dict(os.environ, {"QUIZ_QA_APPEAL_CREDITS_ENABLED": "false"}):
+            with self.assertRaisesRegex(RuntimeError, "QUIZ_QA_APPEAL_CREDITS_ENABLED"):
+                grant(username="AI_Tester_1", count=10, now=self.now)
+        with patch.dict(os.environ, {"QUIZ_QA_APPEAL_CREDITS_ENABLED": "true"}):
+            with self.assertRaisesRegex(ValueError, "between 1 and 100"):
+                grant(username="AI_Tester_1", count=1001, now=self.now)
 
     def test_negative_count_rejected(self):
         with self.assertRaises(ValueError):
