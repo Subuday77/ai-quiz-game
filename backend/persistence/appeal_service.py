@@ -69,7 +69,9 @@ def quote_appeal(db: Session, *, run_id: UUID, user_id: UUID,
     ))
     if old is not None:
         raise GameConflict("Question already appealed")
-    count = _filings_this_month(db, user_id=user_id, now=_now())
+    now = _now()
+    count = _filings_this_month(db, user_id=user_id, now=now)
+    _, refresh_at = month_bounds(now)
     return {
         "question_id": str(question_id),
         "number": attempt.number,
@@ -78,6 +80,8 @@ def quote_appeal(db: Session, *, run_id: UUID, user_id: UUID,
         "deposit_amount": 1,
         "filing_fee_bronze": appeal_fee_bronze(count),
         "free_appeals_remaining": max(0, 5 - count),
+        "free_appeals_total": 5,
+        "free_appeals_refresh_at": refresh_at.isoformat(),
         "filing_fee_never_refunded": True,
     }
 
