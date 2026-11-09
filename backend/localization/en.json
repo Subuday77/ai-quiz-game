@@ -301,6 +301,7 @@
   "appeals.historyOldest": "Oldest first",
   "appeals.historyCount": "Showing {{shown}} of {{total}} complaints",
   "appeals.historyNoMatches": "No complaints match your filters.",
+  "appeals.historyReset": "Clear filters",
   "appeals.historyReasons": "Reasons",
   "appeals.historyComment": "Your explanation",
   "appeals.historySources": "Sources",
