@@ -404,6 +404,11 @@
       <p>{{ locale.t(finishedPhase === 'lost' ? 'game.resultsLost' : 'game.resultsCompleted') }}</p>
       <p>{{ locale.format('game.roundScore', { count: gameCorrectAnswers }) }}</p>
       <div class="star-list" *ngIf="stars.length">★ {{ starNames }}</div>
+      <button *ngIf="finishedPhase === 'lost' && current" class="outline-button appeal-report-button"
+              type="button" (click)="openAppealForm()"
+              [disabled]="appealBusy || appealedQuestionIds.has(current.question_id)">
+        {{ locale.t('appeals.reportQuestion') }}
+      </button>
       <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
     </div>
 
