@@ -1,0 +1,290 @@
+"""Transactional appeal submission, state changes and settlement.
+
+The public routes may file and read appeals; only a trusted internal judge
+worker may call settle_appeal(). No API lets a player decide a verdict.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from persistence.appeal_policy import (
+    appeal_deposit_tier, appeal_fee_bronze, bonus_wager_refund,
+    compensation_tier, loss_compensation_allowed, month_bounds,
+    permanent_block_reason, refund_deposit, should_auto_uphold,
+    validate_complaint,
+)
+from persistence.gameplay import GameConflict, GameNotFound, owned_game
+from persistence.models import (
+    GameRun, Question, QuestionAppeal, QuestionAttempt, QuestionModeration,
+    WalletTransaction,
+)
+from persistence.star_economy import lock_user_stars, spend_star, star_balance
+from star_perks import PerkUnavailable
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _eligible_attempt(db: Session, *, run: GameRun, question_id: UUID
+                      ) -> tuple[QuestionAttempt, Question, bool]:
+    attempt = db.scalar(select(QuestionAttempt).where(
+        QuestionAttempt.run_id == run.id,
+        QuestionAttempt.question_id == question_id,
+        QuestionAttempt.superseded_at.is_(None),
+    ).order_by(QuestionAttempt.shown_at.desc()).limit(1))
+    if attempt is None:
+        raise GameConflict("Question not present in this round")
+    if attempt.answered_at is None:
+        if run.status not in ("main", "bonus"):
+            raise GameConflict("Round is no longer active")
+        return attempt, db.get(Question, question_id), True
+    if attempt.is_correct is False and run.status == "lost":
+        return attempt, db.get(Question, question_id), False
+    raise GameConflict("Appeal is allowed before answering or after an incorrect loss")
+
+
+def _filings_this_month(db: Session, *, user_id: UUID, now: datetime) -> int:
+    start, end = month_bounds(now)
+    return int(db.scalar(select(func.count(QuestionAppeal.id)).where(
+        QuestionAppeal.user_id == user_id,
+        QuestionAppeal.submitted_at >= start,
+        QuestionAppeal.submitted_at < end,
+    )) or 0)
+
+
+def quote_appeal(db: Session, *, run_id: UUID, user_id: UUID,
+                 question_id: UUID) -> dict:
+    run = owned_game(db, run_id=run_id, user_id=user_id)
+    attempt, _, before = _eligible_attempt(
+        db, run=run, question_id=question_id)
+    old = db.scalar(select(QuestionAppeal.id).where(
+        QuestionAppeal.user_id == user_id,
+        QuestionAppeal.question_id == question_id,
+    ))
+    if old is not None:
+        raise GameConflict("Question already appealed")
+    count = _filings_this_month(db, user_id=user_id, now=_now())
+    return {
+        "question_id": str(question_id),
+        "number": attempt.number,
+        "before_answer": before,
+        "deposit_tier": appeal_deposit_tier(attempt.number),
+        "deposit_amount": 1,
+        "filing_fee_bronze": appeal_fee_bronze(count),
+        "free_appeals_remaining": max(0, 5 - count),
+        "filing_fee_never_refunded": True,
+    }
+
+
+def _credit(db: Session, *, appeal: QuestionAppeal,
+            tier: str, action: str, amount: int = 1) -> None:
+    """Ledger-credit exactly once per appeal and purpose."""
+    key = f"appeal:{appeal.id}:{action}"
+    existing = db.scalar(select(WalletTransaction.id).where(
+        WalletTransaction.idempotency_key == key))
+    if existing is None:
+        db.add(WalletTransaction(
+            user_id=appeal.user_id, run_id=appeal.run_id,
+            idempotency_key=key, amount=amount,
+            reason=f"star/{tier}/{action}",
+        ))
+        db.flush()
+
+
+def _moderation(db: Session, *, question_id: UUID) -> QuestionModeration:
+    moderation = db.get(QuestionModeration, question_id, with_for_update=True)
+    if moderation is None:
+        moderation = QuestionModeration(question_id=question_id)
+        db.add(moderation)
+        db.flush()
+    return moderation
+
+
+def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
+                question_id: UUID, request_id: UUID, reasons: list[str],
+                comment: str, source_links: list[str],
+                confirm_nonrefundable_fee: bool) -> QuestionAppeal:
+    """Create one complaint and its two separate possible debits atomically."""
+    try:
+        lock_user_stars(db, user_id)
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        key = f"appeal:{user_id}:{request_id}"
+        previous = db.scalar(select(QuestionAppeal).where(
+            QuestionAppeal.idempotency_key == key))
+        if previous is not None:
+            if (previous.user_id != user_id or previous.run_id != run_id
+                    or previous.question_id != question_id
+                    or previous.reasons != reasons
+                    or previous.comment != comment.strip()
+                    or previous.source_links != source_links):
+                raise GameConflict("Appeal request ID reused with different contents")
+            db.commit()
+            return previous
+
+        attempt, question, before = _eligible_attempt(
+            db, run=run, question_id=question_id)
+        if question is None:
+            raise GameConflict("Question missing")
+        validated_reasons, cleaned_comment = validate_complaint(
+            reasons, comment, before_answer=before)
+        if db.scalar(select(QuestionAppeal.id).where(
+            QuestionAppeal.user_id == user_id,
+            QuestionAppeal.question_id == question_id,
+        )) is not None:
+            raise GameConflict("Question already appealed")
+
+        # Serialize complaints by different players on the SAME question too.
+        db.scalar(select(Question.id).where(
+            Question.id == question_id).with_for_update())
+        moderation = _moderation(db, question_id=question_id)
+        now = _now()
+        fee = appeal_fee_bronze(_filings_this_month(
+            db, user_id=user_id, now=now))
+        deposit_tier = appeal_deposit_tier(attempt.number)
+        if fee and not confirm_nonrefundable_fee:
+            raise GameConflict("Explicit consent required for nonrefundable fee")
+        needed_bronze = fee + (1 if deposit_tier == "bronze" else 0)
+        if (needed_bronze and star_balance(db, user_id, "bronze") < needed_bronze
+                or deposit_tier != "bronze"
+                and star_balance(db, user_id, deposit_tier) < 1):
+            raise PerkUnavailable("Insufficient stars for the appeal")
+
+        # Only store the options the player actually saw after hints.
+        answers = dict(question.choices)
+        if attempt.hints_used:
+            from persistence.gameplay import hidden_choices
+            for option in hidden_choices(db, attempt, question):
+                answers.pop(option, None)
+        snapshot = {
+            "question_id": str(question.id), "number": attempt.number,
+            "difficulty": attempt.requested_difficulty,
+            "question": question.text, "answers": answers,
+            "language": run.language,
+        }
+        appeal = QuestionAppeal(
+            id=uuid4(), user_id=user_id, run_id=run_id,
+            attempt_id=attempt.id, question_id=question_id,
+            idempotency_key=key, question_snapshot=snapshot,
+            language=run.language, reasons=list(validated_reasons),
+            comment=cleaned_comment, source_links=source_links,
+            context={
+                "selected_key": attempt.selected_key,
+                "correct_key": question.correct_key,  # private judge input
+                "hints_used": attempt.hints_used,
+                "bonus_wager_accepted": run.bonus_wager_accepted,
+                "run_status_at_submission": run.status,
+            },
+            before_answer=before, question_number=attempt.number,
+            deposit_tier=deposit_tier, filing_fee_bronze=fee,
+            submitted_at=now, status="pending",
+        )
+        db.add(appeal)
+        db.flush()
+        spend_star(db, user_id=user_id, run_id=run_id,
+                   tier=deposit_tier, amount=1,
+                   action="appeal-deposit",
+                   operation_key=f"appeal:{appeal.id}:deposit")
+        db.flush()
+        if fee:
+            spend_star(db, user_id=user_id, run_id=run_id,
+                       tier="bronze", amount=fee,
+                       action="appeal-fee",
+                       operation_key=f"appeal:{appeal.id}:fee")
+            db.flush()
+
+        moderation.distinct_complainants += 1
+        reason = permanent_block_reason(
+            distinct_players=moderation.distinct_complainants,
+            upheld=moderation.upheld_count)
+        if reason is not None:
+            moderation.permanently_blocked = True
+            moderation.block_reason = moderation.block_reason or reason
+            question.status = "rejected"
+        else:
+            question.status = "quarantined"
+
+        # The current question can no longer be answered or paid for twice.
+        # GET /question generates another attempt of the same difficulty;
+        # offer_question must increment its revision for the same slot.
+        if before:
+            attempt.superseded_at = now
+        if should_auto_uphold(moderation.upheld_count):
+            settle_appeal(db, appeal=appeal, decision="upheld",
+                          verdict_en="Already upheld twice independently.",
+                          verdict_localized="Appeal upheld automatically.",
+                          verdict_data={"automated": True})
+        db.commit()
+        return appeal
+    except Exception:
+        db.rollback()
+        raise
+
+
+def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
+                  verdict_en: str | None = None,
+                  verdict_localized: str | None = None,
+                  verdict_data: dict | None = None) -> QuestionAppeal:
+    """Called by the trusted judge worker within its DB transaction.
+
+    A content-level inconclusive verdict should pass decision='upheld'.
+    Technical errors are retried and are NOT considered an upheld appeal.
+    """
+    if appeal.status in ("upheld", "rejected", "technical_unresolved"):
+        return appeal
+    if decision not in ("upheld", "rejected", "technical_unresolved"):
+        raise ValueError("Unknown appeal verdict")
+    moderation = _moderation(db, question_id=appeal.question_id)
+    question = db.get(Question, appeal.question_id, with_for_update=True)
+    now = _now()
+    appeal.status = decision
+    appeal.closed_at = now
+    appeal.verdict_en = verdict_en
+    appeal.verdict_localized = verdict_localized
+    appeal.verdict_data = verdict_data
+    if decision == "upheld":
+        moderation.upheld_count += 1
+    elif decision == "rejected":
+        moderation.rejected_count += 1
+
+    if refund_deposit(
+        upheld=(decision == "upheld"),
+        technical_unresolved=(decision == "technical_unresolved"),
+    ):
+        _credit(db, appeal=appeal, tier=appeal.deposit_tier,
+                action="appeal-deposit-refund")
+        appeal.deposit_refunded_at = now
+
+    caused_loss = (not appeal.before_answer and
+                   appeal.context.get("run_status_at_submission") == "lost"
+                   and loss_compensation_allowed(
+                       lost_question_id=str(appeal.question_id),
+                       appealed_question_id=appeal.question_snapshot["question_id"]))
+    if decision == "upheld" and caused_loss:
+        _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
+                action="appeal-compensation")
+        appeal.compensated_at = now
+        if bonus_wager_refund(question_number=appeal.question_number,
+                              upheld=True, caused_loss=caused_loss):
+            _credit(db, appeal=appeal, tier="gold",
+                    action="appeal-bonus-wager-refund")
+            appeal.bonus_wager_refunded_at = now
+
+    reason = permanent_block_reason(
+        distinct_players=moderation.distinct_complainants,
+        upheld=moderation.upheld_count)
+    if reason is not None:
+        moderation.permanently_blocked = True
+        moderation.block_reason = moderation.block_reason or reason
+        question.status = "rejected"
+    elif db.scalar(select(func.count(QuestionAppeal.id)).where(
+        QuestionAppeal.question_id == appeal.question_id,
+        QuestionAppeal.id != appeal.id,
+        QuestionAppeal.status.in_(("pending", "retry_pending")),
+    )) == 0:
+        question.status = "approved"
+    return appeal
