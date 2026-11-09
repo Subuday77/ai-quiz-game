@@ -285,10 +285,47 @@ def process_due(*, limit: int = 50) -> dict[str, int]:
     return counts
 
 
+def retry_now(appeal_id: UUID) -> str:
+    """Operator-only bypass of a DAILY defer (never an in-flight 30m lease).
+
+    Changes no wallet data.  Adjudication still uses the same idempotent DB
+    settlement and claimed lease as normal scheduled work.
+    """
+    SessionFactory = sessionmaker(bind=engine(), expire_on_commit=False)
+    with SessionFactory() as db:
+        row = db.scalar(select(QuestionAppeal).where(
+            QuestionAppeal.id == appeal_id).with_for_update())
+        if row is None:
+            return "not_found"
+        if row.status != "retry_pending":
+            return row.status
+        now = _now()
+        if must_close_technical(_aware(row.submitted_at), now):
+            # Do not override expiry; standard processing closes it correctly.
+            row.next_retry_at = now
+        elif row.next_retry_at is not None and (
+            _aware(row.next_retry_at) - now < timedelta(hours=1)
+        ):
+            # A retry in the next hour may be the lease of active model IO.
+            return "already_processing_or_soon_due"
+        else:
+            row.next_retry_at = now
+        db.commit()
+    emit("INFO", "appeal_manual_retry", appeal_id=str(appeal_id))
+    return process_appeal(appeal_id)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Manually process due appeals once")
-    parser.add_argument("--once", action="store_true",
-                        help="Optional, also processed automatically by FastAPI")
-    parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
-    print(process_due())
+    parser = argparse.ArgumentParser(description="Appeal maintenance and guarded rechecks")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--once", action="store_true",
+                       help="Process cases currently due (normally automatic)")
+    group.add_argument("--retry-now", type=UUID, action="append",
+                       metavar="APPEAL_UUID",
+                       help="Force an already deferred case now; repeat for multiple IDs")
+    args = parser.parse_args()
+    if args.retry_now:
+        for appeal_id in args.retry_now:
+            print(f"{appeal_id}: {retry_now(appeal_id)}")
+    else:
+        print(process_due())
