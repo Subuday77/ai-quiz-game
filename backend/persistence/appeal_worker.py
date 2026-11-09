@@ -230,6 +230,10 @@ def process_appeal(appeal_id: UUID) -> str:
             reason, fields = validation_summary(exc)
             emit("WARNING", "appeal_attempt_failed", appeal_id=str(appeal_id),
                  stage=stage, attempt=attempt_no, error_type=type(exc).__name__)
+            if isinstance(exc, UnsafeAppealPayload):
+                emit("WARNING", "appeal_security_rejected",
+                     appeal_id=str(appeal_id), stage=stage,
+                     attempt=attempt_no, error_type=type(exc).__name__)
             emit("DEBUG", "appeal_validation_detail", appeal_id=str(appeal_id),
                  stage=stage, attempt=attempt_no, error_code=reason,
                  validation_fields=fields)
