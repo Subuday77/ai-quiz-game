@@ -180,6 +180,7 @@ export class AppComponent implements OnInit, OnDestroy {
   bonusDecisionAvailable = false;
 
 
+  profileMenuOpen = false;
   appealBusy = false;
   appealMessage = '';
   appealedQuestionIds = new Set<string>();
@@ -648,6 +649,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async openAppealHistory(): Promise<void> {
     if (!this.account || this.appealBusy) return;
+    this.profileMenuOpen = false;
     this.appealBusy = true;
     const accountId = this.account.id;
     try {
@@ -1835,6 +1837,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.feedback = null;
     this.finishedPhase = null;
     this.appealMessage = '';
+    this.profileMenuOpen = false;
     this.appealedQuestionIds.clear();
     this.helperCard = null;
     this.showAbandonConfirm = false;
