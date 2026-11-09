@@ -105,7 +105,7 @@ class HelperResponderTests(unittest.TestCase):
         )
 
     def test_one_successful_model_request_keeps_frozen_key(self):
-        client = FakeClient(["KEY: A\\nSPEECH: Я выбираю 395."])
+        client = FakeClient(["KEY: A\nSPEECH: Я выбираю 395."])
         with patch.dict("os.environ", {"QUIZ_HELPER_MODEL_ID": "gpt-5.4"}):
             self.assertEqual(talk(sample(), client=client), "Я выбираю 395.")
         self.assertEqual(client.calls, 1)
@@ -117,8 +117,8 @@ class HelperResponderTests(unittest.TestCase):
 
     def test_invalid_model_reply_uses_template_without_retry(self):
         client = FakeClient([
-            "KEY: A\\nSPEECH: 476 — правильный ответ.",
-            "KEY: A\\nSPEECH: Я выбираю 395.",
+            "KEY: A\nSPEECH: 476 — правильный ответ.",
+            "KEY: A\nSPEECH: Я выбираю 395.",
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
@@ -133,7 +133,7 @@ class HelperResponderTests(unittest.TestCase):
         self.assertEqual(client.calls, 1)
 
     def test_incomplete_model_reply_uses_template_without_retry(self):
-        client = FakeClient([("incomplete", ""), ("completed", "KEY: A\\nSPEECH: 395.")])
+        client = FakeClient([("incomplete", ""), ("completed", "KEY: A\nSPEECH: 395.")])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
             self.assertEqual(talk(sample(), client=client), "Я знаю, это «395».")
