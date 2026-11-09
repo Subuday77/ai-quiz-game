@@ -34,8 +34,9 @@ from persistence.auth import router as auth_router  # noqa: E402
 from persistence.analytics import router as profile_router  # noqa: E402
 from localization.routes import router as localization_router  # noqa: E402
 from localization.dev_tools import router as localization_dev_router  # noqa: E402
+from persistence.appeal_scheduler import appeal_lifespan  # noqa: E402
 
-app = FastAPI(title="AI Quiz Game", version="0.1.0")
+app = FastAPI(title="AI Quiz Game", version="0.1.0", lifespan=appeal_lifespan)
 app.include_router(auth_router)  # Accounts are DB-backed; game sessions still in memory.
 app.include_router(profile_router)  # Derived statistics are initially empty until game DB migration.
 app.include_router(localization_router)
