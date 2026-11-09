@@ -315,7 +315,7 @@
       </button>
       <div class="helper-call" *ngIf="helperCard && !question.bonus">
         <button *ngIf="!helperReply" class="outline-button" type="button" (click)="consultHelper()"
-                [disabled]="loading || perksBusy || helperBusy ||
+                [disabled]="loading || perksBusy || helperBusy || helperCard.refunded ||
                   (helperCard.consultations_remaining < 1 && !helperCallKey)">
           {{ locale.t(helperCallButtonKey) }}
         </button>
