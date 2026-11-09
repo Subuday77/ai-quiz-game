@@ -332,8 +332,21 @@ def _em_dash_outside_selected_name(speech: str, data: dict) -> bool:
     return "\u2014" in "".join(outside)
 
 
-def _single_recommendation_ok(speech: str) -> bool:
-    return _EXTRA_REASON.search(speech) is None
+def _single_recommendation_ok(speech: str, data: dict) -> bool:
+    """Ignore punctuation *inside* the frozen answer, not outside it.
+
+    Names such as «Дж. К. Роулинг» contain periods and spaces that are
+    legitimate parts of a single answer, not an added explanatory sentence.
+    The same guard still rejects extra sentences following that name.
+    """
+    selected = data.get("choices", {}).get(data.get("letter"))
+    if not isinstance(selected, str) or not selected:
+        return False
+    normalized = _norm(speech)
+    outside = list(normalized)
+    for start, end in _complete_option_spans(speech, selected):
+        outside[start:end] = [""] * (end - start)
+    return _EXTRA_REASON.search("".join(outside)) is None
 
 
 
@@ -362,7 +375,7 @@ def _validate(raw: str, data: dict) -> str | None:
     if (not speech or len(speech) > 450 or _DENIAL.search(speech)
             or _em_dash_outside_selected_name(speech, data)
             or not _language_script_ok(speech, data)
-            or not _single_recommendation_ok(speech)):
+            or not _single_recommendation_ok(speech, data)):
         return None
     # A valid KEY is not enough. The actual selected answer must be present
     # in the spoken recommendation as a complete unchanged name/text.
