@@ -7,6 +7,7 @@ import hashlib
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -223,7 +224,7 @@ class AccountAPITests(unittest.TestCase):
         self.assertEqual(created.status_code, 201, created.text)
         user_id = created.json()["id"]
         with Session(self.eng) as db:
-            owner = db.scalar(select(User).where(User.id == user_id))
+            owner = db.get(User, UUID(user_id))
             run = GameRun(user_id=owner.id, language="English", status="main")
             db.add(run)
             db.commit()
