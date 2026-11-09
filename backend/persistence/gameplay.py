@@ -327,8 +327,8 @@ def record_answer(
         if cached is None:
             raise GameConflict("No matching unanswered question")
         attempt, question = cached
-        if question.id != question_id:
-            raise GameConflict("No matching unanswered question")
+        if question.id != question_id or question.status != "approved":
+            raise GameConflict("No matching approved unanswered question")
 
         now = _now()
         state = game_state(run, db)
