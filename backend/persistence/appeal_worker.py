@@ -88,6 +88,8 @@ def _evidence(appeal: QuestionAppeal) -> dict:
             "hidden_keys": snapshot.get("hidden_keys", []),
             "prior_appeals_count": int(context.get("prior_appeals_count") or 0),
             "completed_games_count": int(context.get("completed_games_count") or 0),
+            "hint_bronze_spent": int((context.get("expenses") or {}).get("hint_bronze") or 0),
+            "helper_used_on_question": bool(context.get("helper_used_on_question")),
         },
     }
 
