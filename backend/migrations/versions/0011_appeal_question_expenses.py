@@ -5,6 +5,7 @@ Revises: 0010_question_appeals
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0011_appeal_question_expenses"
 down_revision = "0010_question_appeals"
