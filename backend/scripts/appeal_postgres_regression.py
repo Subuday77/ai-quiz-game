@@ -150,7 +150,29 @@ def run():
         assert ledger_count(db, appeal.id, "appeal-deposit-refund") == 1
         assert ledger_count(db, appeal.id, "appeal-compensation") == 0
         assert db.get(GameRun, run_id).status == "main"
-    print("PostgreSQL appeals regression: pre-answer, idempotence, Q16 and technical refund OK")
+    # Scope-limited test-data reset keeps the wallet ledger auditable.
+    from scripts.cleanup_test_appeals import cleanup
+    with Session(engine()) as db:
+        uid, run_id, qid, _ = fixture(db, number=2)
+        username = db.get(User, uid).username
+        appeal = file_appeal(
+            db, user_id=uid, run_id=run_id, question_id=qid,
+            request_id=uuid4(), reasons=["ambiguous"],
+            comment="test cleanup", source_links=[],
+            confirm_nonrefundable_fee=False, expected_fee_bronze=0)
+        aid = appeal.id
+        assert db.get(Question, qid).status == "quarantined"
+    dry = cleanup(username=username, ids=[aid])
+    assert len(dry) == 1 and dry[0]["status"] == "pending"
+    with Session(engine()) as db:
+        assert db.get(QuestionAppeal, aid) is not None
+    applied = cleanup(username=username, ids=[aid], apply=True)
+    assert len(applied) == 1
+    with Session(engine()) as db:
+        assert db.get(QuestionAppeal, aid) is None
+        assert db.get(Question, qid).status == "approved"
+        assert ledger_count(db, aid, "appeal-test-cleanup") == 1
+    print("PostgreSQL appeals regression: filing, settlement, cleanup & refunds OK")
 
 
 if __name__ == "__main__":
