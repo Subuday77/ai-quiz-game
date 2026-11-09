@@ -13,6 +13,7 @@ import unicodedata
 
 from openai import OpenAI
 
+from platinum_helper.fallback_locale import HelperFallbackKey
 from platinum_helper.settings import HelperSettings
 
 
@@ -372,90 +373,46 @@ def _validate(raw: str, data: dict) -> str | None:
     return speech
 
 
-# Preapproved templates: delivery confidence is independent of the frozen
-# KNOW/MISTAKEN outcome. The chosen letter never changes during fallback.
-# Two variants per confidence level and one for UNSURE, in all UI languages.
-_FALLBACK = {
-    "russian": {
-        "CONFIDENT": ("Я знаю: «{answer}».", "Ну, здесь точно «{answer}»."),
-        "TENTATIVE": ("Мне кажется, здесь «{answer}».", "Скорее «{answer}», но это не точно."),
-        "UNSURE": "Тут я помочь не могу.",
-    },
-    "english": {
-        "CONFIDENT": ("I know this one: {answer}.", "It's definitely {answer}."),
-        "TENTATIVE": ("I think it's {answer}.", "Probably {answer}, but I'm not certain."),
-        "UNSURE": "I can't help with this one.",
-    },
-    "german": {
-        "CONFIDENT": ("Das weiß ich: {answer}.", "Das ist ganz sicher {answer}."),
-        "TENTATIVE": ("Ich denke, es ist {answer}.", "Vielleicht {answer}, aber ganz sicher bin ich nicht."),
-        "UNSURE": "Da kann ich leider nicht helfen.",
-    },
-    "french": {
-        "CONFIDENT": ("Je sais, c'est {answer}.", "C'est forcément {answer}."),
-        "TENTATIVE": ("Je pense que c'est {answer}.", "Plutôt {answer}, mais sans certitude."),
-        "UNSURE": "Là, je ne peux pas aider.",
-    },
-    "spanish": {
-        "CONFIDENT": ("Esta la sé: {answer}.", "Seguro que es {answer}."),
-        "TENTATIVE": ("Creo que es {answer}.", "Quizá {answer}, pero no tengo certeza."),
-        "UNSURE": "Con esta no puedo ayudar.",
-    },
-    "italian": {
-        "CONFIDENT": ("Questa la so: {answer}.", "È sicuramente {answer}."),
-        "TENTATIVE": ("Credo sia {answer}.", "Forse {answer}, ma non ne ho la certezza."),
-        "UNSURE": "Qui non posso aiutare.",
-    },
-    "portuguese": {
-        "CONFIDENT": ("Esta eu sei: {answer}.", "É com certeza {answer}."),
-        "TENTATIVE": ("Acho que é {answer}.", "Talvez {answer}, mas não tenho certeza."),
-        "UNSURE": "Nesta não consigo ajudar.",
-    },
-    "hebrew": {
-        "CONFIDENT": ("ברור לי שזה {answer}.", "זה בטוח {answer}."),
-        "TENTATIVE": ("נראה לי שזה {answer}.", "אולי {answer}, אבל לא בטוח."),
-        "UNSURE": "בזה אין לי איך לעזור.",
-    },
-    "arabic": {
-        "CONFIDENT": ("أعرف هذه: {answer}.", "بالتأكيد {answer}."),
-        "TENTATIVE": ("أظن أنها {answer}.", "ربما {answer}، لكن ليس بالتأكيد."),
-        "UNSURE": "لا أستطيع المساعدة هنا.",
-    },
-    "japanese": {
-        "CONFIDENT": ("これは分かるよ、{answer}。", "絶対に{answer}だよ。"),
-        "TENTATIVE": ("たぶん{answer}だと思う。", "{answer}かな、でも自信はない。"),
-        "UNSURE": "これは分からない、力になれないよ。",
-    },
-    "chinese": {
-        "CONFIDENT": ("这个我知道，是{answer}。", "肯定是{answer}。"),
-        "TENTATIVE": ("我觉得是{answer}。", "可能是{answer}，但不太确定。"),
-        "UNSURE": "这题我帮不上忙。",
-    },
+# The source strings live in localization/en.json and their translated copies
+# in the shared UiTranslation PostgreSQL cache. The responder contains NO
+# language-specific text. These keys are fixed contract IDs, not model output.
+_FALLBACK_BY_STYLE = {
+    "CONFIDENT": (HelperFallbackKey.CONFIDENT_1, HelperFallbackKey.CONFIDENT_2),
+    "TENTATIVE": (HelperFallbackKey.TENTATIVE_1, HelperFallbackKey.TENTATIVE_2),
 }
-_LANG = {"ru": "russian", "en": "english", "de": "german", "fr": "french",
-         "es": "spanish", "it": "italian", "pt": "portuguese",
-         "he": "hebrew", "ar": "arabic", "ja": "japanese", "zh": "chinese"}
 
 
-def _fallback(data: dict) -> str:
-    raw_language = str(data.get("speech_language") or data["language"]).strip().casefold()
-    language = _LANG.get(raw_language, raw_language)
-    formats = _FALLBACK.get(language)
-    if formats is None:
-        raise HelperUnavailable("No safe fallback for language")
+def _fallback(data: dict, templates: dict[str, str]) -> str:
     if data["outcome"] == "UNSURE":
-        return formats["UNSURE"]
-    if data["outcome"] not in ("KNOW", "MISTAKEN"):
-        raise HelperUnavailable("Unsupported outcome")
-    style = data["delivery_style"]
-    if style not in ("CONFIDENT", "TENTATIVE"):
-        raise HelperUnavailable("Unsupported delivery style")
-    selected = data["choices"][data["letter"]]
-    # Randomness is only in the wording, NEVER the selected answer or outcome.
-    return random.SystemRandom().choice(formats[style]).format(answer=selected)
+        keys = (HelperFallbackKey.UNSURE,)
+    elif data["outcome"] in ("KNOW", "MISTAKEN"):
+        try:
+            keys = _FALLBACK_BY_STYLE[data["delivery_style"]]
+        except KeyError:
+            raise HelperUnavailable("Invalid helper confidence state") from None
+    else:
+        raise HelperUnavailable("Invalid helper outcome")
+
+    key = random.SystemRandom().choice(keys)
+    template = templates.get(key.value)
+    answer = data.get("choices", {}).get(data.get("letter"))
+    needed = 0 if data["outcome"] == "UNSURE" else 1
+    if (not isinstance(template, str) or not template.strip()
+            or template.count("{{answer}}") != needed):
+        raise HelperUnavailable("Missing or unsafe localized helper fallback")
+    if needed and (not isinstance(answer, str) or not answer.strip()):
+        raise HelperUnavailable("Missing frozen helper answer")
+
+    speech = template.replace("{{answer}}", answer or "")
+    # Localized templates are untrusted; apply the same anti-leak checks.
+    raw = ("SPEECH: " + speech if not needed
+           else "KEY: " + data["letter"] + "\nSPEECH: " + speech)
+    if _validate(raw, data) != speech:
+        raise HelperUnavailable("Localized helper fallback failed validation")
+    return speech
 
 
-def talk(data: dict, *, client=None) -> str:
+def talk(data: dict, *, client=None, fallback_loader=None) -> str:
     """Exactly one provider request; any failure produces a safe paid reply."""
     settings = HelperSettings.from_env()
     instructions, prompt = _prompt(data)
@@ -476,4 +433,10 @@ def talk(data: dict, *, client=None) -> str:
         # Includes SDK setup, provider timeout, or malformed model response.
         pass
     # No retry, no second model, no re-selection of the answer.
-    return _fallback(data)
+    if fallback_loader is None:
+        raise HelperUnavailable("Localized fallback dictionary was not provided")
+    try:
+        templates = fallback_loader()
+    except Exception as exc:
+        raise HelperUnavailable("Localized fallback is not cached") from exc
+    return _fallback(data, templates)
