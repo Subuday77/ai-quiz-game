@@ -8,6 +8,7 @@ on:
       - fix/qa-followups-20261108
   pull_request:
     branches:
+      - integration/quiz-helper-stable-20261108
       - feature/star-perks-shop
       - feature/platinum-helper-star-perks-integration
       - feature/platinum-helper-54-guardrails
