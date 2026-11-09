@@ -2350,3 +2350,50 @@ test('appeal popup uses dark theme, soft blur fade and animated double chevron',
   assert.match(styles, /prefers-reduced-motion:\s*reduce/);
   assert.match(source, /hint\.hidden = scroll\.scrollTop/);
 });
+
+
+test('complaint receipt remains during preparation and disappears only after next question is issued', () => {
+  const { app, requests } = setup();
+  app.appealMessage = 'Complaint submitted for review';
+  app.screen = 'feedback';
+  app.loading = false;
+  app.loadQuestion();
+  assert.equal(app.appealMessage, 'Complaint submitted for review');
+  assert.equal(app.current, null);
+  const load = requests.find(v => v.url === '/api/v2/games/existing-game/question');
+  assert.ok(load);
+  succeed(load, { ...question, question_id: 'next-question', number: 6 });
+  assert.equal(app.appealMessage, '');
+  assert.equal(app.current.question_id, 'next-question');
+  assert.equal(app.screen, 'question');
+});
+
+test('failed next-question generation leaves complaint receipt visible during retry', () => {
+  const { app, requests } = setup();
+  app.appealMessage = 'Complaint submitted for review';
+  app.loading = false;
+  app.loadQuestion();
+  const load = requests.find(v => v.url === '/api/v2/games/existing-game/question');
+  load.subject.error(new HttpErrorResponse({ status: 503 }));
+  assert.equal(app.appealMessage, 'Complaint submitted for review');
+  assert.equal(app.current, null);
+});
+
+test('profile settings are above complaint history and have two independently saved actions', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const menu = html.slice(html.indexOf('class="profile-menu"'),
+    html.indexOf('</div>', html.indexOf('class="profile-menu"')));
+  assert.ok(menu.indexOf('openAccountSettings()') >= 0);
+  assert.ok(menu.indexOf('openAccountSettings()') < menu.indexOf('openAppealHistory()'));
+  assert.equal(english['settings.title'], 'Settings');
+  assert.equal(english['settings.currentPassword'], 'Current password');
+  assert.equal(english['settings.newPassword'], 'New password');
+  assert.equal(english['settings.repeatPassword'], 'Repeat new password');
+  assert.match(source, /this\.http\.patch<Account>\([\s\S]*?'\/api\/auth\/username'/);
+  assert.match(source, /this\.http\.patch<void>\([\s\S]*?'\/api\/auth\/password'/);
+  assert.match(source, /new_password !== confirm_password/);
+  assert.match(source, /new_password === current_password/);
+  assert.match(source, /this\.account = result\.value as Account/);
+  assert.doesNotMatch(source.slice(source.indexOf('private async changeAccountUsername()'),
+    source.indexOf('private async changeAccountPassword()')), /resetGameView\(\)/);
+});
