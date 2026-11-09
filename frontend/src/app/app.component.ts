@@ -583,7 +583,7 @@ export class AppComponent implements OnInit, OnDestroy {
         preConfirm: () => {
           const popup = Swal.getPopup();
           if (!popup) return false;
-          const reasons = [...popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked')]
+          const reasons = Array.from(popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked'))
             .map(input => input.value);
           const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
           const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
