@@ -113,21 +113,24 @@ this after updating code and migrations; OpenAI requests may incur token costs.
 ## Test-data cleanup (do not run during active QA)
 
 Keep FastAPI **stopped** while applying cleanup, after reviewing a dry-run.
-The script requires an explicit username and specific appeal UUIDs. It only
-automatically reverses **still-unresolved, zero-fee** test complaints that
-have no other players' appeals, previous moderation outcomes or extra ledger
-entries. It restores each affected quarantined question and creates one
-auditable compensating credit for each paid test deposit. It refuses anything
-more complex rather than deleting verified real-player reports or guessing
-history.
+The script requires an explicit username and specific appeal UUIDs. It
+can reverse both unresolved and already adjudicated test complaints, including
+gold wager returns and platinum compensation, by writing exact inverse
+entries for the appeal's own ledger transactions. It then clears only the
+specified appeal/moderation records and restores their questions to approved.
+
+It refuses a question with other players' appeals, unexplained moderation or
+ledger entries, helper-linked credits (which need separate audit), or a user
+balance insufficient to reverse awarded test compensation. No wildcard
+cleanup or deletion of wallet transactions is allowed.
 
 ```powershell
 python -m scripts.cleanup_test_appeals --username AI_Tester_1 --appeal-id ed220a73-41df-474e-8a3b-1d9d23297dce --appeal-id ada6d5fd-0b3d-4e2a-8631-0bb091c6b856
 ```
 
 To apply, **after** reviewing the dry run and stopping FastAPI, append
-`--apply --confirm RESET-TEST-APPEALS`. Already decided/paid complaints
-require a separate reviewed recovery; do not broaden this command.
+`--apply --confirm RESET-TEST-APPEALS`. If it refuses a complex case, investigate
+manually rather than forcing a blanket database reset.
 
 ## User interface behavior
 
