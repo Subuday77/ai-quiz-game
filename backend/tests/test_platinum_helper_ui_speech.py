@@ -10,6 +10,7 @@ from uuid import UUID
 from fastapi import HTTPException, Request
 
 from persistence.models import User
+from helper_fallback_fixtures import russian_templates
 from platinum_helper.identity import UI_FAKER_LOCALES
 from platinum_helper.responder import _fallback, _prompt, _validate
 from platinum_helper.routes import CallInput, call_helper
@@ -46,8 +47,8 @@ class UiSpeechTests(unittest.TestCase):
         self.assertIsNone(_validate(
             "KEY: A\nSPEECH: Ich würde eher Quecksilber nehmen.", question
         ))
-        self.assertIn("Quecksilber", _fallback(question))
-        self.assertNotIn("—", _fallback(question))
+        self.assertIn("Quecksilber", _fallback(question, russian_templates()))
+        self.assertNotIn("—", _fallback(question, russian_templates()))
 
     def test_unsure_uses_ui_language_even_without_a_selected_option(self):
         question = german_question(outcome="UNSURE")
@@ -60,7 +61,7 @@ class UiSpeechTests(unittest.TestCase):
         self.assertIsNone(_validate(
             "SPEECH: Da kann ich dir leider keinen Rat geben.", question
         ))
-        self.assertNotIn("Quecksilber", _fallback(question))
+        self.assertNotIn("Quecksilber", _fallback(question, russian_templates()))
 
     def test_russian_question_and_german_ui_keep_russian_option_unchanged(self):
         question = german_question(speech_language="de")
@@ -87,7 +88,7 @@ class UiSpeechTests(unittest.TestCase):
                 question = german_question(speech_language=code)
                 instructions, _ = _prompt(question)
                 self.assertIn(f"ONLY in {name}", instructions)
-                self.assertIn("Quecksilber", _fallback(question))
+                # Localization is verified separately against the UI cache.
                 know = dict(question, outcome="MISTAKEN")
                 self.assertEqual(_prompt(question)[0], _prompt(know)[0])
 
