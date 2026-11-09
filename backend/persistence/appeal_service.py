@@ -157,6 +157,13 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 and star_balance(db, user_id, deposit_tier) < 1):
             raise PerkUnavailable("Insufficient stars for the appeal")
 
+        # Capture small non-identifying player-history counts for Keddy.
+        prior_appeals = int(db.scalar(select(func.count(QuestionAppeal.id)).where(
+            QuestionAppeal.user_id == user_id)) or 0)
+        completed_games = int(db.scalar(select(func.count(GameRun.id)).where(
+            GameRun.user_id == user_id,
+            GameRun.status.in_(("lost", "completed")))) or 0)
+
         # Preserve ALL four original options, plus explicit hidden keys. The
         # immutable snapshot lets the player review the exact hint state.
         answers = {key: question.choices[key] for key in "ABCD"}
@@ -199,6 +206,8 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 "bonus_wager_accepted": run.bonus_wager_accepted,
                 "run_status_at_submission": run.status,
                 "lost_question_id": str(lost_attempt.question_id) if lost_attempt else None,
+                "prior_appeals_count": prior_appeals,
+                "completed_games_count": completed_games,
             },
             before_answer=before, question_number=attempt.number,
             deposit_tier=deposit_tier, filing_fee_bronze=fee,
