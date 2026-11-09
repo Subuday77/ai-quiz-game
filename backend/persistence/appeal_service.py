@@ -294,7 +294,7 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
             purchase = db.get(PlatinumHelperPurchase, UUID(helper_id),
                               with_for_update=True)
             if purchase and purchase.run_id == appeal.run_id and purchase.user_id == appeal.user_id:
-                if appeal.context.get("helper_used_on_question"):
+                if appeal.context.get("helper_used_on_question") and not purchase.refunded:
                     # One additional gold compensation per hired helper,
                     # independent of how often the worker or player retries.
                     key = f"helper:{purchase.id}:appeal-gold"
