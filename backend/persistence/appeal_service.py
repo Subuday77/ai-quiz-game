@@ -24,6 +24,7 @@ from persistence.models import (
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
 from persistence.appeal_logging import emit
+from persistence.appeal_qa_quota import allowance
 from star_perks import PerkUnavailable
 
 
@@ -71,17 +72,14 @@ def quote_appeal(db: Session, *, run_id: UUID, user_id: UUID,
         raise GameConflict("Question already appealed")
     now = _now()
     count = _filings_this_month(db, user_id=user_id, now=now)
-    _, refresh_at = month_bounds(now)
+    quota = allowance(db, user_id=user_id, now=now, submitted=count)
     return {
         "question_id": str(question_id),
         "number": attempt.number,
         "before_answer": before,
         "deposit_tier": appeal_deposit_tier(attempt.number),
         "deposit_amount": 1,
-        "filing_fee_bronze": appeal_fee_bronze(count),
-        "free_appeals_remaining": max(0, 5 - count),
-        "free_appeals_total": 5,
-        "free_appeals_refresh_at": refresh_at.isoformat(),
+        **quota,
         "filing_fee_never_refunded": True,
     }
 
@@ -152,8 +150,9 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             Question.id == question_id).with_for_update())
         moderation = _moderation(db, question_id=question_id)
         now = _now()
-        fee = appeal_fee_bronze(_filings_this_month(
-            db, user_id=user_id, now=now))
+        count = _filings_this_month(db, user_id=user_id, now=now)
+        fee = allowance(db, user_id=user_id, now=now,
+                        submitted=count)["filing_fee_bronze"]
         deposit_tier = appeal_deposit_tier(attempt.number)
         if expected_fee_bronze is not None and fee != expected_fee_bronze:
             raise GameConflict("Filing fee changed; review the latest quote")
