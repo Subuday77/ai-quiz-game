@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 from uuid import UUID
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
-from persistence.models import Question, QuestionAppeal, User, WalletTransaction
+from persistence.models import GameRun, Question, QuestionAppeal, User
 from persistence.gameplay import GameConflict, GameNotFound
-from persistence.appeal_service import quote_appeal, file_appeal
+from persistence.appeal_service import quote_appeal, file_appeal, _filings_this_month
+from persistence.appeal_policy import appeal_fee_bronze
 from star_perks import PerkUnavailable
+from persistence.appeal_logging import emit
 
 router = APIRouter(prefix="/api/v2", tags=["Question appeals"])
 
@@ -27,8 +30,12 @@ class AppealInput(BaseModel):
     expected_fee_bronze: int = Field(ge=0)
 
 
-def _public(appeal: QuestionAppeal) -> dict:
-    """Explicit allowlist: NEVER return the private correct key or judge prompts."""
+def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
+    """Allowlist: hide the private answer key until the game is finished."""
+    reveal_key = not appeal.before_answer
+    if appeal.before_answer and db is not None and appeal.run_id is not None:
+        run = db.get(GameRun, appeal.run_id)
+        reveal_key = bool(run and run.status in ("lost", "completed", "abandoned"))
     return {
         "id": str(appeal.id), "question_id": str(appeal.question_id),
         "run_id": str(appeal.run_id) if appeal.run_id else None,
@@ -46,6 +53,8 @@ def _public(appeal: QuestionAppeal) -> dict:
                          "amount": 1 if appeal.compensated_at else 0},
         "bonus_wager_refunded": appeal.bonus_wager_refunded_at is not None,
         "expenses_refunded": (appeal.verdict_data or {}).get("expenses_refunded", []),
+        "selected_key": (appeal.context or {}).get("selected_key"),
+        "answer_key": ((appeal.context or {}).get("correct_key") if reveal_key else None),
     }
 
 
@@ -139,11 +148,28 @@ def submit_appeal(run_id: UUID, payload: AppealInput, request: Request,
             # Best-effort immediate processing; durable retries use the worker CLI.
             from persistence.appeal_worker import process_appeal
             background_tasks.add_task(process_appeal, appeal.id)
-        return _public(appeal)
+        emit("INFO", "appeal_submitted", appeal_id=str(appeal.id),
+             question_id=str(appeal.question_id), status=appeal.status,
+             deposit_tier=appeal.deposit_tier, deposit_amount=1,
+             filing_fee_bronze=appeal.filing_fee_bronze)
+        return _public(appeal, db=db)
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
     except (GameConflict, PerkUnavailable, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.get("/appeals/allowance")
+def monthly_appeal_allowance(user: User = Depends(authenticated_user),
+                             db: Session = Depends(get_db)):
+    """Current monthly free count and fee for the NEXT appeal, in UTC."""
+    count = _filings_this_month(db, user_id=user.id, now=datetime.now(timezone.utc))
+    return {
+        "free_remaining": max(0, 5 - count),
+        "free_total": 5,
+        "filed_this_month": count,
+        "next_filing_fee_bronze": appeal_fee_bronze(count),
+    }
 
 
 @router.get("/appeals")
@@ -155,7 +181,7 @@ def my_appeals(offset: int = Query(default=0, ge=0),
         QuestionAppeal.user_id == user.id,
     ).order_by(QuestionAppeal.submitted_at.desc(),
                QuestionAppeal.id.desc()).offset(offset).limit(limit)).all()
-    return [_public(item) for item in items]
+    return [_public(item, db=db) for item in items]
 
 
 @router.get("/appeals/{appeal_id}")
@@ -166,4 +192,4 @@ def my_appeal(appeal_id: UUID, user: User = Depends(authenticated_user),
     ))
     if appeal is None:
         raise HTTPException(status_code=404, detail="Appeal not found")
-    return _public(appeal)
+    return _public(appeal, db=db)
