@@ -23,6 +23,7 @@
       <ng-container *ngIf="!authLoading">
         <ng-container *ngIf="account as player; else signedOut">
           <span class="player-name" [title]="player.username">● {{ player.display_name || player.username }}</span>
+          <button class="account-button" type="button" (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">{{ locale.t('appeals.myComplaints') }}</button>
           <button class="account-button" type="button" (click)="logout()" [disabled]="loading || authBusy">
             {{ locale.t('account.signOut') }}
           </button>
@@ -300,7 +301,7 @@
       <div class="answers">
         <ng-container *ngFor="let choice of choices">
           <button *ngIf="question.answers[choice] as answerText"
-                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy">
+                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy || appealBusy">
             <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
           </button>
           <!-- Keep the original A/B/C/D cell occupied; otherwise CSS grid
@@ -308,6 +309,10 @@
           <span *ngIf="!question.answers[choice]" class="hidden-answer-slot" aria-hidden="true"></span>
         </ng-container>
       </div>
+      <button type="button" class="outline-button appeal-report-button" (click)="openAppealForm()"
+              [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(question.question_id)">
+        {{ locale.t('appeals.reportQuestion') }}
+      </button>
       <div class="helper-call" *ngIf="helperCard && !question.bonus">
         <button *ngIf="!helperReply" class="outline-button" type="button" (click)="consultHelper()"
                 [disabled]="loading || perksBusy || helperBusy ||
@@ -367,6 +372,11 @@
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
       <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
       <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
+      <button *ngIf="!result.correct && result.phase === 'lost' && current" type="button"
+              class="outline-button appeal-report-button" (click)="openAppealForm()"
+              [disabled]="loading || appealBusy || appealedQuestionIds.has(current.question_id)">
+        {{ locale.t('appeals.reportQuestion') }}
+      </button>
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
@@ -417,6 +427,7 @@
         </button>
       </div>
     </div>
+    <p class="intro" role="status" *ngIf="appealMessage">{{ appealMessage }}</p>
     <p class="error" role="alert" *ngIf="error && !duplicateExhausted && !canRetryQuestion">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
