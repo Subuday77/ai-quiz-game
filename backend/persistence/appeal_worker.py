@@ -86,6 +86,8 @@ def _evidence(appeal: QuestionAppeal) -> dict:
             "game_status": context.get("run_status_at_submission"),
             "bonus_wager_accepted": bool(context.get("bonus_wager_accepted")),
             "hidden_keys": snapshot.get("hidden_keys", []),
+            "prior_appeals_count": int(context.get("prior_appeals_count") or 0),
+            "completed_games_count": int(context.get("completed_games_count") or 0),
         },
     }
 
