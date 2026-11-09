@@ -8,7 +8,7 @@ from unittest.mock import patch
 from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
 
-from helper_fallback_fixtures import russian_templates
+from helper_fallback_fixtures import english_templates, russian_templates
 from scripts import helper_live_regression as qa
 
 
@@ -107,7 +107,7 @@ class HelperLiveQATests(unittest.TestCase):
                 "KEY: B\nSPEECH: Правильный ответ 476.",
                 "KEY: B\nSPEECH: Ответ 476.",
             ]), Path(temp) / "attempts.jsonl", 2.5, 15.0,
-            fallback_loader=russian_templates)
+            fallback_loader=english_templates)
             self.assertEqual(result["status"], "completed", result)
             self.assertTrue(result["is_fallback"])
             self.assertEqual(result["guard_rejections"], 1)
