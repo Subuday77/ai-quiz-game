@@ -34,8 +34,17 @@ class AppealSchedulerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(ran, "FastAPI did not start appeal maintenance")
             self.assertGreaterEqual(process_due.call_count, 1)
 
-    def test_server_wires_lifespan(self):
-        self.assertIs(app.router.lifespan_context, appeal_lifespan)
+    async def test_app_lifespan_includes_maintenance(self):
+        # FastAPI merges lifespan contexts when routers are included;
+        # inspect actual startup behavior, not function object identity.
+        invoked = threading.Event()
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql+psycopg://test/test"}), patch(
+            "persistence.appeal_scheduler.process_due", side_effect=lambda: invoked.set()
+        ):
+            async with app.router.lifespan_context(app):
+                self.assertTrue(
+                    await asyncio.wait_for(asyncio.to_thread(invoked.wait, 2), timeout=3)
+                )
 
 
 if __name__ == "__main__":
