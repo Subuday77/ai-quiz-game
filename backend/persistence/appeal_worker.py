@@ -1,12 +1,12 @@
-"""Durable, isolated appeal adjudication worker.
+"""Durable appeal adjudication engine, invoked by FastAPI automatically.
 
-Run once from cron (at least daily):
+Submissions schedule immediate processing. The FastAPI lifespan invokes
+process_due() periodically for retries, including overdue work on restart.
+State and wallet settlements survive reboots in PostgreSQL.
+
+An optional one-shot maintenance command is available to operators:
     cd backend && python -m persistence.appeal_worker --once
-Or run as a dedicated service:
-    cd backend && python -m persistence.appeal_worker --loop
-
-HTTP submission schedules a best-effort immediate run. All state, retry leases,
-and wallet settlements are persisted so service restarts cannot grant twice.
+No additional permanently running process is required.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import argparse
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from time import sleep
 from uuid import UUID
 
 from dotenv import find_dotenv, load_dotenv
@@ -219,15 +218,9 @@ def process_due(*, limit: int = 50) -> dict[str, int]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--once", action="store_true")
-    mode.add_argument("--loop", action="store_true")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Manually process due appeals once")
+    parser.add_argument("--once", action="store_true",
+                        help="Optional, also processed automatically by FastAPI")
+    parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    if args.once:
-        print(process_due())
-    else:
-        while True:
-            print(process_due())
-            sleep(60)
+    print(process_due())
