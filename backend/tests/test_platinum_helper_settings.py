@@ -37,7 +37,7 @@ class HelperEnvironmentTests(unittest.TestCase):
             "QUIZ_QUALITY_SKILL_MODE", "QUIZ_QUALITY_ARBITER_MODE",
             "QUIZ_QUALITY_ARBITER_MODEL_ID", "QUIZ_HELPER_MODEL_ID",
             "QUIZ_HELPER_REASONING_EFFORT", "QUIZ_HELPER_MAX_OUTPUT_TOKENS",
-            "QUIZ_HELPER_TIMEOUT_SECONDS", "QUIZ_HELPER_MAX_ATTEMPTS",
+            "QUIZ_HELPER_TIMEOUT_SECONDS",
             "QUIZ_HELPER_PLAUSIBILITY_LEVEL_0",
             "QUIZ_HELPER_PLAUSIBILITY_LEVELS_1_3",
             "QUIZ_HELPER_PLAUSIBILITY_LEVELS_4_15",
@@ -47,6 +47,7 @@ class HelperEnvironmentTests(unittest.TestCase):
                 self.assertIn(name, values)
                 self.assertTrue(values[name])
         self.assertNotIn("NVIDIA_FALLBACK_MODEL_ID", values)
+        self.assertNotIn("QUIZ_HELPER_MAX_ATTEMPTS", values)
         self.assertEqual(values["QUIZ_HELPER_MODEL_ID"], "gpt-5.4")
         self.assertEqual(values["QUIZ_QUALITY_ARBITER_MODEL_ID"], "gpt-6.1-terra")
 
@@ -59,7 +60,6 @@ class HelperEnvironmentTests(unittest.TestCase):
             self.assertEqual(settings.reasoning_effort, "low")
             self.assertEqual(settings.max_output_tokens, 240)
             self.assertEqual(settings.timeout_seconds, 8)
-            self.assertEqual(settings.max_attempts, 2)
             self.assertEqual([cautious_threshold(i) for i in (0, 2, 7)], [40, 50, 60])
 
     def test_custom_env_values_reach_the_production_responder(self):
@@ -68,7 +68,6 @@ class HelperEnvironmentTests(unittest.TestCase):
             "QUIZ_HELPER_REASONING_EFFORT": "medium",
             "QUIZ_HELPER_TIMEOUT_SECONDS": "17.5",
             "QUIZ_HELPER_MAX_OUTPUT_TOKENS": "500",
-            "QUIZ_HELPER_MAX_ATTEMPTS": "1",
             "QUIZ_HELPER_PLAUSIBILITY_LEVEL_0": "10",
             "QUIZ_HELPER_PLAUSIBILITY_LEVELS_1_3": "20",
             "QUIZ_HELPER_PLAUSIBILITY_LEVELS_4_15": "30",
@@ -101,7 +100,6 @@ class HelperEnvironmentTests(unittest.TestCase):
             {"QUIZ_HELPER_REASONING_EFFORT": "whatever"},
             {"QUIZ_HELPER_MAX_OUTPUT_TOKENS": "NaN"},
             {"QUIZ_HELPER_TIMEOUT_SECONDS": "0"},
-            {"QUIZ_HELPER_MAX_ATTEMPTS": "0"},
             {"QUIZ_HELPER_PLAUSIBILITY_LEVEL_0": "90",
              "QUIZ_HELPER_PLAUSIBILITY_LEVELS_1_3": "50"},
         ):
