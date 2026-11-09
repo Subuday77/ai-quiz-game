@@ -163,34 +163,34 @@ class SpeechFrameTests(unittest.TestCase):
             "SPEECH: Тут, пожалуй, пас.", unsure
         ), "Тут, пожалуй, пас.")
 
-    def test_em_dash_rejected_on_first_draft_then_retried_with_same_frame(self):
+    def test_em_dash_rejected_then_single_fallback_with_same_frame(self):
         d = scenario(answer="Словения", presentation_style="DIRECT")
         client = FakeClient([
             "KEY: B\nSPEECH: Словения — мой выбор.",
             "KEY: B\nSPEECH: Я за «Словения».",
         ])
-        self.assertEqual(talk(d, client=client), "Я за «Словения».")
-        self.assertEqual(len(client.requests), 2)
-        for request in client.requests:
-            self.assertIn("Delivery approach: A direct", request["instructions"])
-            self.assertIn("Unicode em dash (U+2014)", request["instructions"])
-        self.assertIn("Do not use em dashes", client.requests[1]["instructions"])
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[0]
+            self.assertEqual(talk(d, client=client), "Я знаю, это «Словения».")
+        self.assertEqual(len(client.requests), 1)
+        self.assertIn("Delivery approach: A direct", client.requests[0]["instructions"])
+        self.assertIn("Unicode em dash (U+2014)", client.requests[0]["instructions"])
 
-    def test_retry_keeps_style_and_selected_name(self):
+    def test_fallback_keeps_style_and_selected_name(self):
         d = scenario(answer="Словения", presentation_style="CASUAL")
         client = FakeClient([
             "KEY: B\nSPEECH: Этот вариант мне ближе.",
             "KEY: B\nSPEECH: Ставлю на «Словения».",
         ])
-        with patch.dict("os.environ", {"QUIZ_HELPER_MAX_ATTEMPTS": "2"}):
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[1]
             result = talk(d, client=client)
-        self.assertEqual(result, "Ставлю на «Словения».")
-        self.assertEqual(len(client.requests), 2)
-        for request in client.requests:
-            self.assertIn("A short, relaxed, off-the-cuff opinion", request["instructions"])
-            self.assertIn("Selected option: B: Словения", request["input"])
-            self.assertNotIn("Афина", request["input"])
-        self.assertIn("NO factual justification", client.requests[1]["instructions"])
+        self.assertEqual(result, "Ну, здесь точно «Словения».")
+        self.assertEqual(len(client.requests), 1)
+        request = client.requests[0]
+        self.assertIn("A short, relaxed, off-the-cuff opinion", request["instructions"])
+        self.assertIn("Selected option: B: Словения", request["input"])
+        self.assertNotIn("Афина", request["input"])
 
     def test_casual_tentative_is_not_a_hedged_command_or_vocative(self):
         # The V6 30-case live test exposed awkward RU/AR tentative
@@ -209,25 +209,24 @@ class SpeechFrameTests(unittest.TestCase):
                     answer=answer, language="German", speech_language=ui,
                     confidence=confidence, presentation_style="CASUAL",
                 )
-                for strict in (False, True):
-                    wrong_instruction, wrong_payload = _prompt(data, strict=strict)
-                    right_instruction, right_payload = _prompt(
-                        {**data, "outcome": "KNOW"}, strict=strict
+                wrong_instruction, wrong_payload = _prompt(data)
+                right_instruction, right_payload = _prompt(
+                    {**data, "outcome": "KNOW"}
+                )
+                with self.subTest(ui=ui, confidence=confidence):
+                    self.assertEqual(wrong_instruction, right_instruction)
+                    self.assertEqual(wrong_payload, right_payload)
+                    self.assertIn(f"ONLY in {language}", wrong_instruction)
+                    self.assertIn("Avoid commands, imperatives", wrong_instruction)
+                    self.assertIn("second-person directives", wrong_instruction)
+                    self.assertIn("hedge the opinion itself", wrong_instruction)
+                    self.assertIn("equivalent vocative", wrong_instruction)
+                    self.assertNotIn("using natural second-person", wrong_instruction)
+                    self.assertIn(
+                        "Speak directly and confidently" if confidence == "CONFIDENT"
+                        else "Sound mildly uncertain", wrong_instruction
                     )
-                    with self.subTest(ui=ui, confidence=confidence, strict=strict):
-                        self.assertEqual(wrong_instruction, right_instruction)
-                        self.assertEqual(wrong_payload, right_payload)
-                        self.assertIn(f"ONLY in {language}", wrong_instruction)
-                        self.assertIn("Avoid commands, imperatives", wrong_instruction)
-                        self.assertIn("second-person directives", wrong_instruction)
-                        self.assertIn("hedge the opinion itself", wrong_instruction)
-                        self.assertIn("equivalent vocative", wrong_instruction)
-                        self.assertNotIn("using natural second-person", wrong_instruction)
-                        self.assertIn(
-                            "Speak directly and confidently" if confidence == "CONFIDENT"
-                            else "Sound mildly uncertain", wrong_instruction
-                        )
-                        self.assertIn(f"Selected option: B: {answer}", wrong_payload)
+                    self.assertIn(f"Selected option: B: {answer}", wrong_payload)
                 self.assertEqual(
                     _validate("KEY: B\nSPEECH: " + good_speech, data),
                     good_speech,
