@@ -122,7 +122,7 @@ class HelperResponderTests(unittest.TestCase):
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(sample(), client=client), "Я знаю, это «395».")
+            self.assertEqual(talk(sample(), client=client), "Я знаю: «395».")
         self.assertEqual(client.calls, 1)
 
     def test_network_timeout_uses_template_without_retry(self):
@@ -136,7 +136,7 @@ class HelperResponderTests(unittest.TestCase):
         client = FakeClient([("incomplete", ""), ("completed", "KEY: A\nSPEECH: 395.")])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(sample(), client=client), "Я знаю, это «395».")
+            self.assertEqual(talk(sample(), client=client), "Я знаю: «395».")
         self.assertEqual(client.calls, 1)
 
     def test_openai_initialization_error_uses_template(self):
@@ -145,7 +145,7 @@ class HelperResponderTests(unittest.TestCase):
             "platinum_helper.responder.random.SystemRandom"
         ) as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(sample()), "Я знаю, это «395».")
+            self.assertEqual(talk(sample()), "Я знаю: «395».")
         self.assertEqual(constructor.call_count, 1)
 
     def test_unsure_outage_never_mentions_any_choice(self):
