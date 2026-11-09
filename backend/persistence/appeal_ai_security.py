@@ -142,6 +142,38 @@ JUDGE_SYSTEM = (
 ) + _COMMON_SYSTEM
 
 
+def response_json_schema(role: str) -> dict[str, Any]:
+    """OpenAI Responses strict output contract, paired with Pydantic checks.
+
+    Strict Responses JSON Schema only supports a subset of full JSON Schema;
+    length/count constraints remain in the post-response Pydantic validators.
+    """
+    strings = {"type": "string"}
+    string_list = {"type": "array", "items": {"type": "string"}}
+    if role == "CADDY":
+        fields: dict[str, Any] = {
+            "summary_en": strings,
+            "claims_to_check": string_list,
+            "identified_issues": {"type": "array", "items": {
+                "type": "string", "enum": [
+                    "multiple_correct", "no_correct", "incorrect_key",
+                    "ambiguous", "answer_leak", "other"]}},
+            "needs_external_fact_check": {"type": "boolean"},
+        }
+    elif role == "JUDGE":
+        fields = {
+            "decision": {"type": "string", "enum": [
+                "upheld", "rejected", "inconclusive"]},
+            "explanation_en": strings,
+            "explanation_player_language": strings,
+            "rationale_facts": string_list,
+        }
+    else:
+        raise ValueError("Unknown appeal model role")
+    return {"type": "object", "properties": fields, "required": list(fields),
+            "additionalProperties": False}
+
+
 def _json_no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     obj: dict[str, Any] = {}
     for key, value in pairs:
