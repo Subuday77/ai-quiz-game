@@ -2318,3 +2318,8 @@ test('Q10 through Q16 use recovery timeout; retry UI stays inside the game', () 
   assert.match(markup, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"/);
   assert.match(markup, /\(click\)="showPendingResults\(\)"/);
 });
+
+test('appeal history only renders bonus wager on Q16, with unambiguous forfeiture copy', () => {
+  assert.equal(english['appeals.depositForfeited'], 'not refunded');
+  assert.match(source, /item\.question_number === 16[\s\S]*?'appeals\.wagerRefunded'/);
+});
