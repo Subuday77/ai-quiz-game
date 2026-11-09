@@ -170,11 +170,18 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 PlatinumHelperCall.question_attempt_id == attempt.id,
                 PlatinumHelperCall.status == "completed",
             ).limit(1)) is not None)
+        lost_attempt = (db.scalar(select(QuestionAttempt).where(
+            QuestionAttempt.run_id == run.id,
+            QuestionAttempt.is_correct.is_(False),
+            QuestionAttempt.answered_at.is_not(None),
+        ).order_by(QuestionAttempt.answered_at.desc()).limit(1))
+            if run.status == "lost" else None)
         snapshot = {
             "question_id": str(question.id), "number": attempt.number,
             "difficulty": attempt.requested_difficulty,
             "question": question.text, "answers": answers,
             "hidden_keys": hidden_keys, "language": run.language,
+            "shown_at": attempt.shown_at.isoformat() if attempt.shown_at else None,
         }
         appeal = QuestionAppeal(
             id=uuid4(), user_id=user_id, run_id=run_id,
@@ -191,6 +198,7 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 "helper_used_on_question": helper_call_on_question,
                 "bonus_wager_accepted": run.bonus_wager_accepted,
                 "run_status_at_submission": run.status,
+                "lost_question_id": str(lost_attempt.question_id) if lost_attempt else None,
             },
             before_answer=before, question_number=attempt.number,
             deposit_tier=deposit_tier, filing_fee_bronze=fee,
@@ -275,8 +283,8 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
     caused_loss = (not appeal.before_answer and
                    appeal.context.get("run_status_at_submission") == "lost"
                    and loss_compensation_allowed(
-                       lost_question_id=str(appeal.question_id),
-                       appealed_question_id=appeal.question_snapshot["question_id"]))
+                       lost_question_id=appeal.context.get("lost_question_id"),
+                       appealed_question_id=str(appeal.question_id)))
     if decision == "upheld":
         # Only verified per-attempt expenses, never guessed round-wide debits.
         expenses = appeal.context.get("expenses") or {}
@@ -329,7 +337,8 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                 action="appeal-compensation")
         appeal.compensated_at = now
         if bonus_wager_refund(question_number=appeal.question_number,
-                              upheld=True, caused_loss=caused_loss):
+                              upheld=True, caused_loss=caused_loss and
+                              bool(appeal.context.get("bonus_wager_accepted"))):
             _credit(db, appeal=appeal, tier="gold",
                     action="appeal-bonus-wager-refund")
             appeal.bonus_wager_refunded_at = now
