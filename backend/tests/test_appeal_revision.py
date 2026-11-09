@@ -28,6 +28,36 @@ class AppealRevisionTests(unittest.TestCase):
                 self.assertEqual(set(schema["required"]), expected)
                 self.assertEqual(set(schema["properties"]), expected)
 
+    def test_quote_exposes_remaining_free_cases_and_utc_reset(self):
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        from uuid import uuid4
+
+        from persistence.appeal_service import quote_appeal
+        db = MagicMock()
+        db.scalar.return_value = None  # No pre-existing complaint.
+        for moment, reset in (
+            (datetime(2026, 11, 9, 21, tzinfo=timezone.utc),
+             "2026-12-01T00:00:00+00:00"),
+            (datetime(2026, 12, 31, 23, tzinfo=timezone.utc),
+             "2027-01-01T00:00:00+00:00"),
+        ):
+            with self.subTest(moment=moment), (
+                patch("persistence.appeal_service.owned_game", return_value=object()),
+                patch("persistence.appeal_service._eligible_attempt",
+                      return_value=(SimpleNamespace(number=1), None, True)),
+                patch("persistence.appeal_service._filings_this_month",
+                      return_value=2),
+                patch("persistence.appeal_service._now", return_value=moment)
+            ):
+                quote = quote_appeal(
+                    db, run_id=uuid4(), user_id=uuid4(), question_id=uuid4()
+                )
+                self.assertEqual(quote["free_appeals_remaining"], 3)
+                self.assertEqual(quote["free_appeals_total"], 5)
+                self.assertEqual(quote["free_appeals_refresh_at"], reset)
+                self.assertEqual(quote["filing_fee_bronze"], 0)
+
     def test_api_exposes_private_monthly_allowance(self):
         paths = {route.path for route in router.routes}
         self.assertIn("/api/v2/appeals/allowance", paths)
