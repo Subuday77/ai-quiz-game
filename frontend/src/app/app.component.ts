@@ -768,11 +768,22 @@ export class AppComponent implements OnInit, OnDestroy {
         if (page.length < 100) break;
       }
       if (this.account?.id !== accountId) return;
+      this.refreshAppealAllowance();
       const safe = (value: unknown) => this.escapeAppealHtml(value);
       const html = records.length ? records.map(item => {
-        const answers = this.choices.map(key =>
-          '<li><strong>' + key + '</strong>: ' +
-          safe(item.question_snapshot.answers[key]) + '</li>').join('');
+        const answers = this.choices.map(key => {
+          const selected = item.selected_key === key;
+          const correct = item.answer_key === key;
+          const marker = [
+            selected ? this.locale.t('appeals.yourAnswer') : '',
+            correct ? this.locale.t('appeals.gameAnswer') : '',
+          ].filter(Boolean).join(' · ');
+          return '<li class="' + (selected ? 'appeal-option-player ' : '') +
+            (correct ? 'appeal-option-key' : '') + '"><strong>' + key +
+            '</strong>: ' + safe(item.question_snapshot.answers[key]) +
+            (marker ? ' <span class="appeal-answer-tag">(' + safe(marker) + ')</span>' : '') +
+            '</li>';
+        }).join('');
         const costs = item.expenses_refunded.map(v =>
           safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
         return '<details class="appeal-history-item"><summary>' +
@@ -782,6 +793,12 @@ export class AppComponent implements OnInit, OnDestroy {
           item.question_number + ' · ' + safe(this.locale.t('appeals.status.' + item.status)) +
           '</summary><p><strong>' + safe(item.question_snapshot.question) +
           '</strong></p><ol>' + answers + '</ol><p>' +
+          safe(item.selected_key
+            ? this.locale.t('appeals.yourAnswer') + ': ' + item.selected_key
+            : this.locale.t('appeals.notAnswered')) + '</p><p>' +
+          safe(item.answer_key
+            ? this.locale.t('appeals.gameAnswer') + ': ' + item.answer_key
+            : this.locale.t('appeals.keyHidden')) + '</p><p>' +
           safe(item.reasons.map(r => this.locale.t('appeals.reason.' + r)).join(', ')) +
           '</p><p>' + safe(item.comment) + '</p><p>' +
           safe(item.source_links.join(' | ')) + '</p><p>' +
@@ -1454,11 +1471,13 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
+    this.refreshAppealAllowance();
     this.restoreActiveGame();
   }
 
   private clearAccount(): void {
     this.statsVersion++;
+    this.appealAllowance = null;
     this.resetEnabled = false;
     this.restoreVersion++;
     this.restoringGame = false;
