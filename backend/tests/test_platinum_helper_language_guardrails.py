@@ -7,6 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from helper_fallback_fixtures import english_templates
 from platinum_helper.responder import _prompt, _validate, talk
 
 
@@ -123,7 +124,7 @@ class GuardrailTests(unittest.TestCase):
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(d, client=client), "I think it's Orchestra pit.")
+            self.assertEqual(talk(d, client=client, fallback_loader=english_templates), "I think it's Orchestra pit.")
         self.assertEqual(client.calls, 1)
         self.assertIn("ONLY in English", client.requests[0]["instructions"])
         self.assertIn("Selected option: B: Orchestra pit", client.requests[0]["input"])
