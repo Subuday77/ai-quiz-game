@@ -154,17 +154,16 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 and star_balance(db, user_id, deposit_tier) < 1):
             raise PerkUnavailable("Insufficient stars for the appeal")
 
-        # Only store the options the player actually saw after hints.
-        answers = dict(question.choices)
-        if attempt.hints_used:
-            from persistence.gameplay import hidden_choices
-            for option in hidden_choices(db, attempt, question):
-                answers.pop(option, None)
+        # Preserve ALL four original options, plus explicit hidden keys. The
+        # immutable snapshot lets the player review the exact hint state.
+        answers = {key: question.choices[key] for key in "ABCD"}
+        from persistence.gameplay import hidden_choices
+        hidden_keys = list(hidden_choices(db, attempt, question))
         snapshot = {
             "question_id": str(question.id), "number": attempt.number,
             "difficulty": attempt.requested_difficulty,
             "question": question.text, "answers": answers,
-            "language": run.language,
+            "hidden_keys": hidden_keys, "language": run.language,
         }
         appeal = QuestionAppeal(
             id=uuid4(), user_id=user_id, run_id=run_id,
@@ -176,6 +175,7 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 "selected_key": attempt.selected_key,
                 "correct_key": question.correct_key,  # private judge input
                 "hints_used": attempt.hints_used,
+                "expenses": dict(attempt.appeal_expenses or {}),
                 "bonus_wager_accepted": run.bonus_wager_accepted,
                 "run_status_at_submission": run.status,
             },
@@ -264,6 +264,17 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                    and loss_compensation_allowed(
                        lost_question_id=str(appeal.question_id),
                        appealed_question_id=appeal.question_snapshot["question_id"]))
+    if decision == "upheld":
+        # Only verified per-attempt expenses, never guessed round-wide debits.
+        expenses = appeal.context.get("expenses") or {}
+        hint_bronze = int(expenses.get("hint_bronze", 0))
+        if hint_bronze > 0:
+            _credit(db, appeal=appeal, tier="bronze",
+                    action="appeal-hint-refund", amount=hint_bronze)
+            result_data = dict(appeal.verdict_data or {})
+            result_data["expenses_refunded"] = [{"tier": "bronze", "amount": hint_bronze,
+                                                  "reason": "hints"}]
+            appeal.verdict_data = result_data
     if decision == "upheld" and caused_loss:
         _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
                 action="appeal-compensation")
