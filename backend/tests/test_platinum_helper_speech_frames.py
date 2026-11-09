@@ -171,7 +171,7 @@ class SpeechFrameTests(unittest.TestCase):
         ])
         with patch("platinum_helper.responder.random.SystemRandom") as rng:
             rng.return_value.choice.side_effect = lambda variants: variants[0]
-            self.assertEqual(talk(d, client=client), "Я знаю, это «Словения».")
+            self.assertEqual(talk(d, client=client), "Я знаю: «Словения».")
         self.assertEqual(len(client.requests), 1)
         self.assertIn("Delivery approach: A direct", client.requests[0]["instructions"])
         self.assertIn("Unicode em dash (U+2014)", client.requests[0]["instructions"])
