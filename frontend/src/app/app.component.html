@@ -30,6 +30,10 @@
             </button>
             <div *ngIf="profileMenuOpen" class="profile-menu">
               <button class="account-button" type="button"
+                      (click)="openAccountSettings()" [disabled]="authBusy || loading">
+                {{ locale.t('settings.title') }}
+              </button>
+              <button class="account-button" type="button"
                       (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
                 {{ locale.t('appeals.myComplaints') }}
               </button>
