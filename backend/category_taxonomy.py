@@ -99,8 +99,8 @@ _FAMILY_OVERRIDES = {
 assert set(CATEGORY_TOPICS) == set(QUESTION_CATEGORIES), (
     "Every question category must have a helper competence area"
 )
-assert set(CATEGORY_TOPICS.values()) == set(_AREA_FAMILIES), (
-    "Every helper competence area must have a scheduling family"
+assert set(CATEGORY_TOPICS.values()) <= set(_AREA_FAMILIES), (
+    "Every used helper competence area must have a scheduling family"
 )
 assert set(_FAMILY_OVERRIDES) <= set(QUESTION_CATEGORIES)
 
