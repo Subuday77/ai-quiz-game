@@ -21,6 +21,15 @@ class HelperUnavailable(RuntimeError):
     pass
 
 
+# English language names are used ONLY to instruct the speech model; the
+# fallback copy itself comes exclusively from the shared localization cache.
+_LANG = {
+    "ru": "russian", "en": "english", "de": "german", "fr": "french",
+    "es": "spanish", "it": "italian", "pt": "portuguese",
+    "he": "hebrew", "ar": "arabic", "ja": "japanese", "zh": "chinese",
+}
+
+
 def _speech_language(data: dict) -> str:
     """UI language controls speech; older offline scenarios retain question language."""
     raw = str(data.get("speech_language") or data["language"]).strip().casefold()
