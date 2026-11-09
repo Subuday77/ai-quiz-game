@@ -286,7 +286,11 @@ def offer_question(
             run_id=run.id, question_id=stored.id,
             number=next_number,
             requested_difficulty=expected_difficulty,
-            revision=old_attempt.revision + 1 if replacing else 0,
+            revision=(old_attempt.revision + 1 if replacing else
+                      int(db.scalar(select(func.coalesce(func.max(QuestionAttempt.revision), -1)).where(
+                          QuestionAttempt.run_id == run.id,
+                          QuestionAttempt.number == next_number,
+                      )) or 0) + 1),
             category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
             manual_category_used=old_attempt.manual_category_used + (1 if replace_manual else 0) if replacing else 0,
         )
