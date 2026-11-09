@@ -1,14 +1,13 @@
 """Human-sounding Platinum Helper replies with server-side anti-leak checks.
 
 The model is never told whether its selected key is correct, nor is it
-shown the KNOW/MISTAKEN label, other options, or distractor scores. Every valid response names the server-selected answer. When a response
-cannot pass basic checks, retry once with a stricter wording; never show the
-rejected draft to the player.
+shown the KNOW/MISTAKEN label, other options, or distractor scores. Every valid response names the server-selected answer. When the single model attempt fails or cannot pass the checks, render a
+preapproved localized template without any further model calls.
 """
 from __future__ import annotations
 
 import json
-import os
+import random
 import re
 import unicodedata
 
@@ -99,7 +98,7 @@ def _previous_speech_style(data: dict) -> str:
     )
 
 
-def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
+def _prompt(data: dict) -> tuple[str, str]:
     speech_language = _speech_language(data)
     persona = (
         f"You are {data['name']}, a human {data['profession']} talking briefly "
@@ -172,17 +171,6 @@ def _prompt(data: dict, *, strict: bool = False) -> tuple[str, str]:
         )
     else:
         raise ValueError("Unsupported helper delivery style")
-    if strict:
-        instructions += (
-            "Your earlier response did not meet the safety requirements. "
-            f"Use ONLY {speech_language}. "
-            "Write a single plain sentence: recommend the exact selected "
-            "answer with NO factual justification, extra claim, argument "
-            "or comparison. Use natural wording in the player's language "
-            "and quote the selected name unchanged if grammar requires it. "
-            "Do not use em dashes or hypothetical/conditional recommendation "
-            "phrases. Preserve your assigned confidence and delivery approach. "
-        )
     instructions += (
         "Output exactly two lines: KEY: X (the selected letter), then "
         "SPEECH: (your natural-language recommendation)."
@@ -384,20 +372,65 @@ def _validate(raw: str, data: dict) -> str | None:
     return speech
 
 
-# Safe, deterministic last-resort wording after at least one model reply was
-# received but could not pass validation. No second model or checker needed.
+# Preapproved templates: delivery confidence is independent of the frozen
+# KNOW/MISTAKEN outcome. The chosen letter never changes during fallback.
+# Two variants per confidence level and one for UNSURE, in all UI languages.
 _FALLBACK = {
-    "russian": ("Мой ответ: «{answer}».", "Пожалуй, «{answer}».", "Не уверен, не хочу тебя запутать."),
-    "english": ("Go with {answer}.", "I'd choose {answer}.", "I'm not sure enough to advise."),
-    "german": ("Nimm {answer}.", "Ich würde {answer} nehmen.", "Ich bin mir nicht sicher."),
-    "french": ("Choisis {answer}.", "Je choisirais {answer}.", "Je ne suis pas sûr de la réponse."),
-    "spanish": ("Elige {answer}.", "Yo elegiría {answer}.", "No estoy seguro de la respuesta."),
-    "italian": ("Scegli {answer}.", "Io sceglierei {answer}.", "Non sono sicuro della risposta."),
-    "portuguese": ("Escolhe {answer}.", "Eu escolheria {answer}.", "Não tenho certeza da resposta."),
-    "hebrew": ("לך על {answer}.", "נראה לי {answer}.", "אני לא בטוח בתשובה."),
-    "arabic": ("اختر {answer}.", "أظن أن الإجابة {answer}.", "لست متأكداً من الإجابة."),
-    "japanese": ("{answer}でいこう。", "{answer}だと思う。", "答えに自信がない。"),
-    "chinese": ("选{answer}。", "我觉得是{answer}。", "我不确定答案。"),
+    "russian": {
+        "CONFIDENT": ("Я знаю, это «{answer}».", "Ну, здесь точно «{answer}»."),
+        "TENTATIVE": ("Мне кажется, это «{answer}».", "Скорее «{answer}», но это не точно."),
+        "UNSURE": "Тут я помочь не могу.",
+    },
+    "english": {
+        "CONFIDENT": ("I know this one: {answer}.", "It's definitely {answer}."),
+        "TENTATIVE": ("I think it's {answer}.", "Probably {answer}, but I'm not certain."),
+        "UNSURE": "I can't help with this one.",
+    },
+    "german": {
+        "CONFIDENT": ("Das weiß ich: {answer}.", "Das ist ganz sicher {answer}."),
+        "TENTATIVE": ("Ich denke, es ist {answer}.", "Vielleicht {answer}, aber ganz sicher bin ich nicht."),
+        "UNSURE": "Da kann ich leider nicht helfen.",
+    },
+    "french": {
+        "CONFIDENT": ("Je sais, c'est {answer}.", "C'est forcément {answer}."),
+        "TENTATIVE": ("Je pense que c'est {answer}.", "Plutôt {answer}, mais sans certitude."),
+        "UNSURE": "Là, je ne peux pas aider.",
+    },
+    "spanish": {
+        "CONFIDENT": ("Esta la sé: {answer}.", "Seguro que es {answer}."),
+        "TENTATIVE": ("Creo que es {answer}.", "Quizá {answer}, pero no estoy seguro."),
+        "UNSURE": "Con esta no puedo ayudar.",
+    },
+    "italian": {
+        "CONFIDENT": ("Questa la so: {answer}.", "È sicuramente {answer}."),
+        "TENTATIVE": ("Credo sia {answer}.", "Forse {answer}, ma non ne ho la certezza."),
+        "UNSURE": "Qui non posso aiutare.",
+    },
+    "portuguese": {
+        "CONFIDENT": ("Esta eu sei: {answer}.", "É com certeza {answer}."),
+        "TENTATIVE": ("Acho que é {answer}.", "Talvez {answer}, mas não tenho certeza."),
+        "UNSURE": "Nesta não consigo ajudar.",
+    },
+    "hebrew": {
+        "CONFIDENT": ("את זה אני יודע: {answer}.", "זה בטוח {answer}."),
+        "TENTATIVE": ("נראה לי שזה {answer}.", "אולי {answer}, אבל לא בטוח."),
+        "UNSURE": "בזה אין לי איך לעזור.",
+    },
+    "arabic": {
+        "CONFIDENT": ("أعرف هذه: {answer}.", "بالتأكيد {answer}."),
+        "TENTATIVE": ("أظن أنها {answer}.", "ربما {answer}، لكن ليس بالتأكيد."),
+        "UNSURE": "لا أستطيع المساعدة هنا.",
+    },
+    "japanese": {
+        "CONFIDENT": ("これは分かるよ、{answer}。", "絶対に{answer}だよ。"),
+        "TENTATIVE": ("たぶん{answer}だと思う。", "{answer}かな、でも自信はない。"),
+        "UNSURE": "これは分からない、力になれないよ。",
+    },
+    "chinese": {
+        "CONFIDENT": ("这个我知道，是{answer}。", "肯定是{answer}。"),
+        "TENTATIVE": ("我觉得是{answer}。", "可能是{answer}，但不太确定。"),
+        "UNSURE": "这题我帮不上忙。",
+    },
 }
 _LANG = {"ru": "russian", "en": "english", "de": "german", "fr": "french",
          "es": "spanish", "it": "italian", "pt": "portuguese",
@@ -411,37 +444,36 @@ def _fallback(data: dict) -> str:
     if formats is None:
         raise HelperUnavailable("No safe fallback for language")
     if data["outcome"] == "UNSURE":
-        return formats[2]
-    answer = data["choices"][data["letter"]]
-    index = 0 if data["delivery_style"] == "CONFIDENT" else 1
-    return formats[index].format(answer=answer)
+        return formats["UNSURE"]
+    if data["outcome"] not in ("KNOW", "MISTAKEN"):
+        raise HelperUnavailable("Unsupported outcome")
+    style = data["delivery_style"]
+    if style not in ("CONFIDENT", "TENTATIVE"):
+        raise HelperUnavailable("Unsupported delivery style")
+    selected = data["choices"][data["letter"]]
+    # Randomness is only in the wording, NEVER the selected answer or outcome.
+    return random.SystemRandom().choice(formats[style]).format(answer=selected)
 
 
 def talk(data: dict, *, client=None) -> str:
-    """One retry with frozen selected key; never charge for network failure."""
+    """Exactly one provider request; any failure produces a safe paid reply."""
     settings = HelperSettings.from_env()
-    got_rejected_reply = False
-    for attempt in range(settings.max_attempts):
-        instructions, prompt = _prompt(data, strict=attempt > 0)
-        try:
-            sdk = client or OpenAI()
-            response = sdk.with_options(
-                timeout=settings.timeout_seconds, max_retries=0
-            ).responses.create(
-                model=settings.model, instructions=instructions, input=prompt,
-                reasoning={"effort": settings.reasoning_effort},
-                max_output_tokens=settings.max_output_tokens,
-            )
-            if response.status != "completed":
-                continue
-            got_rejected_reply = True
+    instructions, prompt = _prompt(data)
+    try:
+        sdk = client or OpenAI()
+        response = sdk.with_options(
+            timeout=settings.timeout_seconds, max_retries=0
+        ).responses.create(
+            model=settings.model, instructions=instructions, input=prompt,
+            reasoning={"effort": settings.reasoning_effort},
+            max_output_tokens=settings.max_output_tokens,
+        )
+        if response.status == "completed":
             speech = _validate(response.output_text or "", data)
             if speech:
                 return speech
-        except Exception:
-            continue
-    # A rejected draft can be replaced safely; an API outage never silently
-    # consumes a paid consultation.
-    if got_rejected_reply:
-        return _fallback(data)
-    raise HelperUnavailable("Helper is temporarily unavailable")
+    except Exception:
+        # Includes SDK setup, provider timeout, or malformed model response.
+        pass
+    # No retry, no second model, no re-selection of the answer.
+    return _fallback(data)
