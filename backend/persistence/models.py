@@ -199,6 +199,8 @@ class QuestionAttempt(Base):
     selected_key: Mapped[str | None] = mapped_column(String(1))
     is_correct: Mapped[bool | None] = mapped_column(Boolean)
     hints_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    # Actual paid hint receipts scoped to this question attempt, not the entire run.
+    appeal_expenses: Mapped[dict] = mapped_column(JsonData, nullable=False, default=dict)
     revision: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     category_change_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
