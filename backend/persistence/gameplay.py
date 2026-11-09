@@ -286,7 +286,11 @@ def offer_question(
             run_id=run.id, question_id=stored.id,
             number=next_number,
             requested_difficulty=expected_difficulty,
-            revision=old_attempt.revision + 1 if replacing else 0,
+            revision=(old_attempt.revision + 1 if replacing else
+                      int(db.scalar(select(func.coalesce(func.max(QuestionAttempt.revision), -1)).where(
+                          QuestionAttempt.run_id == run.id,
+                          QuestionAttempt.number == next_number,
+                      ))) + 1),
             category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
             manual_category_used=old_attempt.manual_category_used + (1 if replace_manual else 0) if replacing else 0,
         )
@@ -323,8 +327,8 @@ def record_answer(
         if cached is None:
             raise GameConflict("No matching unanswered question")
         attempt, question = cached
-        if question.id != question_id:
-            raise GameConflict("No matching unanswered question")
+        if question.id != question_id or question.status != "approved":
+            raise GameConflict("No matching approved unanswered question")
 
         now = _now()
         state = game_state(run, db)
@@ -494,6 +498,9 @@ def hide_wrong_options(
         spend_star(db, user_id=user_id, run_id=run_id, tier="bronze",
                    amount=price, action=f"hide-{count}",
                    operation_key=operation_key)
+        previous_expenses = dict(attempt.appeal_expenses or {})
+        previous_expenses["hint_bronze"] = int(previous_expenses.get("hint_bronze", 0)) + price
+        attempt.appeal_expenses = previous_expenses
         attempt.hints_used += count
         run.hints_used += 1  # One action, whether it hides one or two.
         db.commit()

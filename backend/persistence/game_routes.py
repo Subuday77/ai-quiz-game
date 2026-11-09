@@ -519,6 +519,19 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         raise HTTPException(status_code=409, detail="Game has ended")
 
     cached = pending_question(db, run_id=run.id)
+    if cached is not None and cached[1].status != "approved":
+        # Another player's report quarantined a previously-issued question.
+        # Do not re-serve it on F5; retract without advancing this round.
+        # Lock game -> attempt and re-check under the transaction.
+        locked_run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        cached = pending_question(db, run_id=locked_run.id)
+        if cached is not None and cached[1].status != "approved":
+            old = db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.id == cached[0].id).with_for_update())
+            if old is not None and old.answered_at is None and old.superseded_at is None:
+                old.superseded_at = datetime.now(timezone.utc)
+                db.commit()
+            cached = None
     if cached is not None:
         event("question_cache", hit=True)
         return _public(*cached, phase=run.status, db=db)
