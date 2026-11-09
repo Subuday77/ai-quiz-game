@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -147,11 +147,14 @@ def submit_appeal(run_id: UUID, payload: AppealInput, request: Request,
 
 
 @router.get("/appeals")
-def my_appeals(user: User = Depends(authenticated_user),
+def my_appeals(offset: int = Query(default=0, ge=0),
+               limit: int = Query(default=100, ge=1, le=100),
+               user: User = Depends(authenticated_user),
                db: Session = Depends(get_db)):
     items = db.scalars(select(QuestionAppeal).where(
         QuestionAppeal.user_id == user.id,
-    ).order_by(QuestionAppeal.submitted_at.desc()).limit(100)).all()
+    ).order_by(QuestionAppeal.submitted_at.desc(),
+               QuestionAppeal.id.desc()).offset(offset).limit(limit)).all()
     return [_public(item) for item in items]
 
 
