@@ -104,6 +104,8 @@ interface AppealQuote {
   deposit_amount: number;
   filing_fee_bronze: number;
   free_appeals_remaining: number;
+  free_appeals_total: number;
+  free_appeals_refresh_at: string;
   hint_refund_bronze_if_upheld: number;
   loss_compensation_tier_if_upheld: StarTier | null;
   bonus_wager_refund_if_upheld: boolean;
@@ -587,9 +589,16 @@ export class AppComponent implements OnInit, OnDestroy {
         '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
         safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>'
       ).join('');
-      const feeText = quote.free_appeals_remaining > 0
-        ? this.locale.format('appeals.freeCount', { count: quote.free_appeals_remaining })
-        : this.locale.t('appeals.filingPrice') + ': ' + star('bronze', quote.filing_fee_bronze);
+      const feeText = this.locale.t('appeals.filingPrice') + ': ' +
+        star('bronze', quote.filing_fee_bronze);
+      // UTC calendar months: never shift the quota reset into the prior local day.
+      const refreshDate = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'UTC', day: '2-digit', month: '2-digit', year: '2-digit',
+      }).format(new Date(quote.free_appeals_refresh_at));
+      const quotaText = this.locale.format('appeals.freeQuota', {
+        remaining: quote.free_appeals_remaining,
+        total: quote.free_appeals_total,
+      }) + ' (' + this.locale.format('appeals.freeReset', { date: refreshDate }) + ')';
       const deposit = star(quote.deposit_tier, quote.deposit_amount);
       const totalNow = quote.deposit_tier === 'bronze'
         ? star('bronze', quote.deposit_amount + quote.filing_fee_bronze)
@@ -628,7 +637,8 @@ export class AppComponent implements OnInit, OnDestroy {
           titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
           confirmButtonText: this.locale.t('appeals.submit'),
           cancelButtonText: this.locale.t('helper.close'),
-          html: '<div class="appeal-scroll-wrap"><div class="appeal-form">' +
+          html: '<p class="appeal-quota-header">' + safe(quotaText) + '</p>' +
+            '<div class="appeal-scroll-wrap"><div class="appeal-form">' +
             '<p><strong>' + safe(snapshot.question) + '</strong></p>' +
             '<ol class="appeal-options">' + options + '</ol>' +
             '<div class="appeal-reasons">' + reasonsHtml + '</div>' +
