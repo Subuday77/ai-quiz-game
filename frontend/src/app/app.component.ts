@@ -91,6 +91,30 @@ interface HelperCard {
   price: number;
 }
 interface HelperReply { text: string; helper: HelperCard; }
+
+interface AppealQuote {
+  before_answer: boolean;
+  deposit_tier: StarTier;
+  deposit_amount: number;
+  filing_fee_bronze: number;
+  free_appeals_remaining: number;
+  question_snapshot: {
+    question_id: string; question: string;
+    answers: Record<Choice, string>; hidden_keys: Choice[];
+    number: number; difficulty: number; language: string;
+  };
+}
+interface AppealRecord {
+  id: string; question_id: string; question_number: number; language: string;
+  status: string; submitted_at: string; closed_at: string | null;
+  question_snapshot: AppealQuote['question_snapshot'];
+  reasons: string[]; comment: string; source_links: string[];
+  verdict: string | null; deposit: { tier: StarTier; amount: number; refunded: boolean };
+  filing_fee_bronze: number; compensation: { tier: StarTier; amount: number };
+  bonus_wager_refunded: boolean;
+  expenses_refunded: { tier: StarTier; amount: number; reason: string }[];
+}
+
 interface AnswerFeedback {
   correct: boolean;
   correct_answer: Choice;
@@ -154,6 +178,15 @@ export class AppComponent implements OnInit, OnDestroy {
   helperCallKey = '';
   private helperCallQuestionId = '';
   bonusDecisionAvailable = false;
+
+
+  profileMenuOpen = false;
+  appealBusy = false;
+  appealMessage = '';
+  appealedQuestionIds = new Set<string>();
+  readonly appealReasons = [
+    'multiple_correct', 'no_correct', 'incorrect_key', 'ambiguous', 'answer_leak'
+  ];
 
   account: Account | null = null;
   authLoading = true;
@@ -490,6 +523,187 @@ export class AppComponent implements OnInit, OnDestroy {
   get feedbackButtonLabelKey(): string {
     if (this.gameEnded) return 'game.seeResults';
     return this.loading ? 'game.loading' : 'game.nextQuestion';
+  }
+
+
+  private escapeAppealHtml(value: unknown): string {
+    return String(value ?? '').replace(/[&<>"']/g, char =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[char]);
+  }
+
+  private restoreLostQuestionForAppeal(runId: string): void {
+    if (!this.account || !runId) return;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.get<PublicQuestion>(
+      GAME_API + '/' + runId + '/appeals/lost-question'
+    ).pipe(timeout(10000)).subscribe({
+      next: question => {
+        if (this.account?.id === accountId && this.gameId === runId &&
+            this.finishedPhase === 'lost' && this.screen === 'done') this.current = question;
+      },
+      error: () => { /* Already appealed or not eligible; keep the result unchanged. */ },
+    }));
+  }
+
+  async openAppealForm(): Promise<void> {
+    if (!this.account || !this.gameId || !this.current || this.appealBusy ||
+        this.loading || this.perksBusy ||
+        !(this.screen === 'question' ||
+          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct) ||
+          (this.screen === 'done' && this.finishedPhase === 'lost')) ||
+        this.appealedQuestionIds.has(this.current.question_id)) return;
+    this.appealBusy = true;
+    const question = this.current;
+    const runId = this.gameId;
+    const accountId = this.account.id;
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const quote = await firstValueFrom(this.http.get<AppealQuote>(
+        GAME_API + '/' + runId + '/appeals/' + question.question_id + '/quote'
+      ).pipe(timeout(12000)));
+      if (this.gameId !== runId || this.account?.id !== accountId) return;
+      const safe = (value: unknown) => this.escapeAppealHtml(value);
+      const snapshot = quote.question_snapshot;
+      const options = this.choices.map(key =>
+        '<li><strong>' + key + '.</strong> ' + safe(snapshot.answers[key]) + '</li>'
+      ).join('');
+      const reasonInputs = this.appealReasons.filter(r =>
+        r !== 'incorrect_key' || !quote.before_answer
+      ).map(r => '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
+        safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>').join('');
+      const feeWarning = quote.filing_fee_bronze > 0
+        ? '<p class="appeal-warning">' + safe(this.locale.t('appeals.feeNeverReturned')) +
+          '</p><label class="appeal-choice"><input type="checkbox" id="appeal-confirm-fee"> ' +
+          safe(this.locale.t('appeals.confirmFee')) + '</label>'
+        : '';
+      const wagerNotice = question.number === 16
+        ? '<p>' + safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '';
+      const hintNotice = question.hidden_count
+        ? '<p>' + safe(this.locale.t('appeals.hintsLater')) + '</p>' : '';
+      const result = await Swal.fire({
+        titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
+        confirmButtonText: this.locale.t('appeals.submit'),
+        cancelButtonText: this.locale.t('helper.close'),
+        html: '<div class="appeal-form"><p><strong>' + safe(snapshot.question) +
+          '</strong></p><ol class="appeal-options">' + options +
+          '</ol><div class="appeal-reasons">' + reasonInputs +
+          '</div><label for="appeal-comment">' + safe(this.locale.t('appeals.comment')) +
+          '</label><textarea id="appeal-comment" maxlength="1000" rows="4"></textarea>' +
+          '<label for="appeal-sources">' + safe(this.locale.t('appeals.sources')) +
+          '</label><textarea id="appeal-sources" rows="2"></textarea>' +
+          '<p>' + safe(this.locale.t('appeals.deposit')) + ': 1 ' +
+          safe(this.locale.t('stars.' + quote.deposit_tier)) + '</p>' +
+          '<p>' + safe(this.locale.t('appeals.fee')) + ': ' +
+          quote.filing_fee_bronze + ' ' + safe(this.locale.t('stars.bronze')) +
+          '</p>' + wagerNotice + hintNotice + feeWarning + '</div>',
+        preConfirm: () => {
+          const popup = Swal.getPopup();
+          if (!popup) return false;
+          const reasons = Array.from(popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked'))
+            .map(input => input.value);
+          const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
+          const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
+            .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+          const confirmFee = !!popup.querySelector<HTMLInputElement>('#appeal-confirm-fee')?.checked;
+          if ((!reasons.length && !comment) || links.length > 5 || links.some(l =>
+            l.length > 500 || !/^https?:\/\//i.test(l)) ||
+            (quote.filing_fee_bronze > 0 && !confirmFee)) {
+            Swal.showValidationMessage(this.locale.t('appeals.invalid'));
+            return false;
+          }
+          return { reasons, comment, source_links: links, confirm_nonrefundable_fee: confirmFee,
+            expected_fee_bronze: quote.filing_fee_bronze };
+        }
+      });
+      if (!result.isConfirmed || !result.value) return;
+      if (this.gameId !== runId || this.account?.id !== accountId) return;
+      const storageKey = 'ai-quiz-game:appeal-request:' + accountId + ':' +
+        runId + ':' + question.question_id;
+      let requestId = '';
+      try { requestId = sessionStorage.getItem(storageKey) || ''; } catch { /* private mode */ }
+      if (!requestId) {
+        requestId = crypto.randomUUID();
+        try { sessionStorage.setItem(storageKey, requestId); } catch { /* private mode */ }
+      }
+      await firstValueFrom(this.http.post<AppealRecord>(
+        GAME_API + '/' + runId + '/appeals',
+        { ...result.value, question_id: question.question_id, request_id: requestId }
+      ).pipe(timeout(15000)));
+      try { sessionStorage.removeItem(storageKey); } catch { /* private mode */ }
+      this.appealedQuestionIds.add(question.question_id);
+      this.appealMessage = this.locale.t('appeals.received');
+      this.refreshSpendableStars();
+      if (quote.before_answer && this.gameId === runId) {
+        this.current = null;
+        this.feedback = null;
+        this.generatingNextQuestion = true;
+        this.loadQuestion();
+      }
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else this.appealMessage = this.locale.t('appeals.failed');
+    } finally {
+      this.appealBusy = false;
+    }
+  }
+
+  async openAppealHistory(): Promise<void> {
+    if (!this.account || this.appealBusy) return;
+    this.profileMenuOpen = false;
+    this.appealBusy = true;
+    const accountId = this.account.id;
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const records: AppealRecord[] = [];
+      for (let offset = 0; ; offset += 100) {
+        const page = await firstValueFrom(this.http.get<AppealRecord[]>(
+          '/api/v2/appeals?offset=' + offset + '&limit=100').pipe(timeout(15000)));
+        records.push(...page);
+        if (page.length < 100) break;
+      }
+      if (this.account?.id !== accountId) return;
+      const safe = (value: unknown) => this.escapeAppealHtml(value);
+      const html = records.length ? records.map(item => {
+        const answers = this.choices.map(key =>
+          '<li><strong>' + key + '</strong>: ' +
+          safe(item.question_snapshot.answers[key]) + '</li>').join('');
+        const costs = item.expenses_refunded.map(v =>
+          safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
+        return '<details class="appeal-history-item"><summary>' +
+          safe(new Date(item.submitted_at).toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit' })) + ' · Q' +
+          item.question_number + ' · ' + safe(this.locale.t('appeals.status.' + item.status)) +
+          '</summary><p><strong>' + safe(item.question_snapshot.question) +
+          '</strong></p><ol>' + answers + '</ol><p>' +
+          safe(item.reasons.map(r => this.locale.t('appeals.reason.' + r)).join(', ')) +
+          '</p><p>' + safe(item.comment) + '</p><p>' +
+          safe(item.source_links.join(' | ')) + '</p><p>' +
+          safe(item.verdict || this.locale.t('appeals.notDecided')) + '</p><p>' +
+          safe(this.locale.t('appeals.closed')) + ': ' +
+          safe(item.closed_at ? new Date(item.closed_at).toLocaleDateString() : '—') +
+          '</p><p>' + safe(this.locale.t('appeals.deposit')) + ': ' +
+          safe(item.deposit.amount + ' ' + this.locale.t('stars.' + item.deposit.tier)) +
+          (' (' + safe(this.locale.t(item.deposit.refunded ? 'appeals.refunded' :
+            item.status === 'rejected' ? 'appeals.depositForfeited' : 'appeals.depositPending')) + ')') +
+          '</p><p>' + safe(this.locale.t('appeals.fee')) + ': ' + item.filing_fee_bronze +
+          ' ' + safe(this.locale.t('stars.bronze')) +
+          '</p><p>' + safe(this.locale.t('appeals.compensation')) + ': ' +
+          item.compensation.amount + ' ' + safe(this.locale.t('stars.' + item.compensation.tier)) +
+          '</p><p>' + safe(this.locale.t('appeals.wagerRefunded')) + ': ' +
+          safe(item.bonus_wager_refunded ? this.locale.t('appeals.yes') : this.locale.t('appeals.no')) +
+          '</p><p>' + safe(this.locale.t('appeals.hintRefunds')) + ': ' +
+          (costs || '0') + '</p></details>';
+      }).join('') : '<p>' + safe(this.locale.t('appeals.none')) + '</p>';
+      await Swal.fire({ titleText: this.locale.t('appeals.myComplaints'),
+        width: '850px', html: '<div class="appeal-history">' + html + '</div>',
+        confirmButtonText: this.locale.t('helper.close') });
+    } catch (error) {
+      if (this.isUnauthorized(error)) this.sessionExpired();
+      else this.appealMessage = this.locale.t('appeals.historyFailed');
+    } finally {
+      this.appealBusy = false;
+    }
   }
 
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
@@ -882,7 +1096,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   answer(choice: Choice): void {
-    if (this.loading || this.perksBusy || !this.current || this.screen !== 'question' || !this.account) return;
+    if (this.loading || this.perksBusy || this.appealBusy || !this.current || this.screen !== 'question' || !this.account) return;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
@@ -1042,6 +1256,7 @@ export class AppComponent implements OnInit, OnDestroy {
   consultHelper(): void {
     if (!this.account || !this.gameId || !this.current || this.current.bonus ||
         this.screen !== 'question' || !this.helperCard || this.helperBusy || this.loading ||
+        this.helperCard.refunded ||
         (this.helperCard.consultations_remaining <= 0 && !this.helperCallKey) ||
         !!this.helperReply) return;
     if (this.helperCallQuestionId !== this.current.question_id || !this.helperCallKey) {
@@ -1621,6 +1836,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.appealMessage = '';
+    this.profileMenuOpen = false;
+    this.appealedQuestionIds.clear();
     this.helperCard = null;
     this.showAbandonConfirm = false;
     this.helperReply = '';
@@ -1705,7 +1923,9 @@ export class AppComponent implements OnInit, OnDestroy {
       .map(t => t.key);
     this.helperCard = run.helper ?? null;
     this.screen = 'done';
-    this.clearPendingResults();
+    if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    // Preserve the bookmark so an F5 does not erase the losing-card appeal path.
+    if (run.phase !== 'lost') this.clearPendingResults();
   }
 
   private rememberActiveGame(id: string): void {
