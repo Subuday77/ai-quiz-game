@@ -321,26 +321,42 @@
 
     <div *ngIf="screen === 'question' && current as question" class="question"
          [attr.dir]="questionRtl ? 'rtl' : 'ltr'">
-      <div class="question-label">
-        {{ locale.format('game.number', { number: question.number }) }}
-        <span *ngIf="question.bonus" class="bonus">{{ locale.t('game.bonusBadge') }}</span>
+      <div class="question-heading-row">
+        <div class="question-label">
+          {{ locale.format('game.number', { number: question.number }) }}
+          <span *ngIf="question.bonus" class="bonus">{{ locale.t('game.bonusBadge') }}</span>
+        </div>
+        <!-- Private provisional ballot, placed in the same row as question number. -->
+        <div class="question-votes" role="group" [attr.aria-label]="locale.t('questionFeedback.title')">
+          <button type="button" class="question-vote" (click)="voteQuestion(1)"
+                  [class.selected]="currentVote === 1"
+                  [attr.aria-pressed]="currentVote === 1"
+                  [attr.aria-label]="locale.t('questionFeedback.like')"
+                  [title]="locale.t('questionFeedback.like')"
+                  [disabled]="loading || appealBusy || perksBusy">
+            <svg class="vote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 10v12"/>
+              <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12.5 3a3.13 3.13 0 0 1 1 0 2 2 0 0 1 1.5 2.88Z"/>
+            </svg>
+          </button>
+          <button type="button" class="question-vote" (click)="voteQuestion(-1)"
+                  [class.selected]="currentVote === -1"
+                  [attr.aria-pressed]="currentVote === -1"
+                  [attr.aria-label]="locale.t('questionFeedback.dislike')"
+                  [title]="locale.t('questionFeedback.dislike')"
+                  [disabled]="loading || appealBusy || perksBusy">
+            <svg class="vote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <g transform="rotate(180 12 12)">
+                <path d="M7 10v12"/>
+                <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12.5 3a3.13 3.13 0 0 1 1 0 2 2 0 0 1 1.5 2.88Z"/>
+              </g>
+            </svg>
+          </button>
+        </div>
       </div>
       <h2>{{ question.question }}</h2>
-      <!-- One private ballot per player/question; never reveal totals. -->
-      <div class="question-votes" role="group" [attr.aria-label]="locale.t('questionFeedback.title')">
-        <button type="button" class="question-vote" (click)="voteQuestion(1)"
-                [class.selected]="currentVote === 1"
-                [attr.aria-pressed]="currentVote === 1"
-                [attr.aria-label]="locale.t('questionFeedback.like')"
-                [title]="locale.t('questionFeedback.like')"
-                [disabled]="loading || appealBusy || perksBusy">👍</button>
-        <button type="button" class="question-vote" (click)="voteQuestion(-1)"
-                [class.selected]="currentVote === -1"
-                [attr.aria-pressed]="currentVote === -1"
-                [attr.aria-label]="locale.t('questionFeedback.dislike')"
-                [title]="locale.t('questionFeedback.dislike')"
-                [disabled]="loading || appealBusy || perksBusy">👎</button>
-      </div>
       <div class="answers">
         <ng-container *ngFor="let choice of choices">
           <button *ngIf="question.answers[choice] as answerText"
