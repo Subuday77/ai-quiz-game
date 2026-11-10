@@ -83,6 +83,115 @@ one-time manual recovery only (not normal startup), use
 Frontend is still Angular and runs separately in VS Code:
 `cd frontend; npm install; npm start`.
 
+## QA only: additional free complaint filings for a test account
+
+The normal policy remains **5 free filings per calendar month (UTC)**, plus
+a star deposit for every filing. If more live Judge tests are needed,
+use account-scoped, non-transferable **extra free filing credits**, with
+an explicit local-only environment opt-in. This does not delete existing
+appeals, reset adjudication history, refund old deposits or touch the wallet.
+The additional credits waive only the *non-refundable filing fee*.
+
+After pulling the branch, from the PyCharm terminal in `backend` apply the
+new migration and set one opt-in variable in the root `.env`:
+
+```powershell
+python -m alembic upgrade head
+```
+
+```dotenv
+QUIZ_QA_APPEAL_CREDITS_ENABLED=true
+```
+
+Dry-run a grant of 10 additional free filings for the account:
+
+```powershell
+python -m scripts.grant_test_appeals --username AI_Tester_1 --count 10
+```
+
+If the username, current UTC month, and new quota are correct, apply once:
+
+```powershell
+python -m scripts.grant_test_appeals --username AI_Tester_1 --count 10 --apply --confirm AI_Tester_1
+```
+
+The script prints the before/after amount and remaining free count. The
+profile and complaint form immediately use the updated total (e.g. `13/15`
+rather than `3/5`), while the deposit is still paid normally. Run the
+script only once if you want +10: applying twice grants +20. Entries only
+apply to the calendar month in which they were granted; they do not carry
+over automatically.
+
+**Disable** `QUIZ_QA_APPEAL_CREDITS_ENABLED` outside local testing, and
+**never enable it in production**. The flag is disabled by default. With
+the flag off, stored QA credits are ignored and the standard 5/month
+policy is restored without deleting audit records.
+
+## Two-level diagnostics and manual retry
+
+Add `QUIZ_COMPLAINT_LOG_LEVEL=INFO` to the shared root `.env`. Set
+`QUIZ_COMPLAINT_LOG_LEVEL=DEBUG` temporarily while reproducing failures.
+
+- INFO: `appeal_submitted`, Caddy/Judge start and finish, model name, response
+  status, elapsed milliseconds and token counts; verdicts, settlement/refunds,
+  retry scheduling, security validation failures and HTTP/API exceptions.
+- DEBUG: only sanitized validation field paths and error types, wallet
+  idempotency decisions and retry classification. Correct keys, player text,
+  source URLs, raw model responses and API secrets are **never** logged.
+- Both models use strict Responses API `text.format.type=json_schema`; actual
+  input/output must still pass Pydantic validation. The separate stage name
+  identifies whether the failure occurred at evidence, Caddy, Judge or settlement.
+
+A deferred appeal can be requested **immediately** from a PyCharm terminal
+in the `backend` directory, with no restart and no additional process:
+
+```powershell
+python -m persistence.appeal_worker --retry-now ed220a73-41df-474e-8a3b-1d9d23297dce --retry-now ada6d5fd-0b3d-4e2a-8631-0bb091c6b856
+```
+
+This operator-only command bypasses a next-day defer, **not** an active
+short-lived processing lease. It does not call `file_appeal`: no new filing,
+deposit or filing fee. Normal idempotent settlement remains in effect. Use
+this after updating code and migrations; OpenAI requests may incur token costs.
+
+## Test-data cleanup (do not run during active QA)
+
+Keep FastAPI **stopped** while applying cleanup, after reviewing a dry-run.
+The script requires an explicit username and specific appeal UUIDs. It
+can reverse both unresolved and already adjudicated test complaints, including
+gold wager returns and platinum compensation, by writing exact inverse
+entries for the appeal's own ledger transactions. It then clears only the
+specified appeal/moderation records and restores their questions to approved.
+
+It refuses a question with other players' appeals, unexplained moderation or
+ledger entries, helper-linked credits (which need separate audit), or a user
+balance insufficient to reverse awarded test compensation. No wildcard
+cleanup or deletion of wallet transactions is allowed.
+
+```powershell
+python -m scripts.cleanup_test_appeals --username AI_Tester_1 --appeal-id ed220a73-41df-474e-8a3b-1d9d23297dce --appeal-id ada6d5fd-0b3d-4e2a-8631-0bb091c6b856
+```
+
+To apply, **after** reviewing the dry run and stopping FastAPI, append
+`--apply --confirm RESET-TEST-APPEALS`. If it refuses a complex case, investigate
+manually rather than forcing a blanket database reset.
+
+## User interface behavior
+
+In the spendable-star stats line, a live PostgreSQL-backed monthly free-case
+counter appears next to the player statistics. Its help icon opens a full
+SweetAlert explainer. The report button appears top-right on the active
+question card, and on the losing feedback card, but not on completed results.
+The report form displays deposit, remaining free cases or next filing fee,
+then opens a second explicit confirmation showing the exact debit, deposit
+refund and any applicable Q16 wager, per-question hint and loss compensation.
+No POST is made until the second confirmation. A fading down-arrow signals
+more content below the fold.
+
+Private complaint history labels the player's chosen option and the game's
+stored key. An answer key from a pre-answer complaint remains hidden while
+the original game is still active.
+
 ## Regression verification
 
 The `Appeals security and policy` GitHub Actions workflow covers:
@@ -135,3 +244,61 @@ and cannot certify real-model accuracy or deployed-model authorization.
 No automatic complaint-result alerts, no retroactive edits to finished games,
 no player-accessible settlement endpoint, and no changes on `master`.
 Do not claim production E2E validation from CI alone.
+
+
+## Isolated live worker payout QA (Q10 + Q16)
+
+**Do not run** `scripts.appeal_postgres_regression` against an existing database: it is CI-only.
+Instead, to exercise the actual Keddy / Judge worker against PostgreSQL while leaving
+all real accounts and questions untouched, use `scripts.qa_appeal_worker`.
+
+1. Apply migrations and **stop FastAPI** in PyCharm so its built-in appeal scheduler
+   cannot race the manual call.
+2. In the **backend** PyCharm PowerShell terminal:
+
+```powershell
+$env:QUIZ_QA_APPEAL_WORKER_TEST_ENABLED="true"
+python -m scripts.qa_appeal_worker prepare --scenario q10 --confirm QA-WORKER-TEST
+```
+
+The command creates one new, non-login QA-only user and run, copies the quarantined
+Turing/COBOL source question `b15206ac-7523-4203-9c26-43fe52c4a6fc`,
+seeds QA-only stars, records a losing attempt, and calls real `file_appeal`.
+The copy is quarantined in **the same transaction** in which it is created
+and filed, never exposed to the general approved pool. It prints `appeal_id`.
+**The original question remains quarantined** and is never edited.
+
+3. Invoke the real worker for **that ID only** (calls paid live models):
+
+```powershell
+python -m scripts.qa_appeal_worker run --appeal-id UUID_FROM_PREPARE --confirm QA-WORKER-TEST
+python -m scripts.qa_appeal_worker verify --appeal-id UUID_FROM_PREPARE
+```
+
+`run` directly calls `process_appeal(UUID)` — it does not scan other players'
+pending complaints. On a completed verdict it calls the same worker a second
+time to validate that the wallet ledger did not change. `verify` is read-only
+and can be repeated later. No API key or model call is required to *verify*.
+
+For the Q16 scenario, repeat the `prepare` → `run` → `verify` commands,
+replacing `--scenario q10` with `--scenario q16`.
+
+The expected `upheld` settlements are:
+
+| Scenario | Before filing | After filing | After upheld |
+| --- | --- | --- | --- |
+| Q10 (lost; 1 hint costing 2 bronze) | 4 bronze / 4 silver | 4 bronze / 3 silver | **6 bronze / 5 silver** |
+| Q16 (lost; 1 gold wager) | 3 gold / 0 platinum | 2 gold / 0 platinum | **4 gold / 1 platinum** |
+
+Both cases must end with the QA copy `rejected`, moderation
+`upheld_count=1` and `permanently_blocked=true`, with precisely one
+transaction per purpose. Model decisions are never forged: a real `rejected`
+or `retry_pending` is reported as a **failed / incomplete QA run** and is
+retained for inspection.
+
+**Controls**: both write operations require the opt-in environment variable
+and the exact `--confirm` phrase. `run` checks the QA-only username,
+topic, generator marker, question number, game state and appeal metadata
+before calling the worker. No cleanup happens automatically; fixture rows
+and their independent wallet ledger remain for audit. No real player's
+stars, appeals, active rounds, or the quarantined source are modified.

@@ -38,7 +38,7 @@ const componentSource = source
   .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
-const { AppComponent } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -89,6 +89,10 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       }
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+      }
+      if (url === '/api/v2/appeals/allowance') {
+        return of({ free_remaining: 5, free_total: 5, filed_this_month: 0,
+                    next_filing_fee_bronze: 0 });
       }
       if (url === '/api/v2/games/active') {
         activeLookupCount++;
@@ -2313,4 +2317,231 @@ test('Q10 through Q16 use recovery timeout; retry UI stays inside the game', () 
   const markup = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(markup, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"/);
   assert.match(markup, /\(click\)="showPendingResults\(\)"/);
+});
+
+test('appeal history only renders bonus wager on Q16, with unambiguous forfeiture copy', () => {
+  assert.equal(english['appeals.depositForfeited'], 'not refunded');
+  assert.match(source, /item\.question_number === 16[\s\S]*?'appeals\.wagerRefunded'/);
+});
+
+test('complaint form separates monthly allowance, filing fee and total debit', () => {
+  assert.equal(english['appeals.costTitle'], 'Total complaint cost');
+  assert.equal(english['appeals.filingPrice'], 'Complaint fee');
+  assert.equal(english['appeals.freeQuota'], 'Free complaints: {{remaining}}/{{total}}');
+  assert.equal(english['appeals.freeReset'], 'Refresh {{date}}');
+  assert.match(source, /quote\.free_appeals_refresh_at/);
+  assert.match(source, /timeZone:\s*'UTC'/);
+  assert.match(source, /'appeals\.freeQuota'/);
+  assert.match(source, /'appeals\.freeReset'/);
+  assert.match(source, /'appeals\.filingPrice'\) \+ ': ' \+/);
+  assert.match(source, /appeal-quota-header/);
+  assert.match(source, /<section class="appeal-cost">/);
+});
+
+test('appeal popup uses dark theme, soft blur fade and animated double chevron', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.match(source, /customClass:\s*\{ popup: 'quiz-appeal-popup' \}/);
+  assert.match(source, /quiz-appeal-confirm-popup/);
+  assert.match(source, /<span class="appeal-scroll-chevron"><\/span>/);
+  assert.doesNotMatch(source, /aria-hidden="true">⌄<\/div>/);
+  assert.match(styles, /\.swal2-popup\.quiz-appeal-popup/);
+  assert.match(styles, /backdrop-filter:\s*blur\(3px\)/);
+  assert.match(styles, /@keyframes appeal-chevron-drift/);
+  assert.match(styles, /prefers-reduced-motion:\s*reduce/);
+  assert.match(source, /hint\.hidden = scroll\.scrollTop/);
+});
+
+
+test('complaint receipt remains during preparation and disappears only after next question is issued', () => {
+  const { app, requests } = setup();
+  app.appealMessage = 'Complaint submitted for review';
+  app.screen = 'feedback';
+  app.loading = false;
+  app.loadQuestion();
+  assert.equal(app.appealMessage, 'Complaint submitted for review');
+  assert.equal(app.current, null);
+  const load = requests.find(v => v.url === '/api/v2/games/existing-game/question');
+  assert.ok(load);
+  succeed(load, { ...question, question_id: 'next-question', number: 6 });
+  assert.equal(app.appealMessage, '');
+  assert.equal(app.current.question_id, 'next-question');
+  assert.equal(app.screen, 'question');
+});
+
+test('failed next-question generation leaves complaint receipt visible during retry', () => {
+  const { app, requests } = setup();
+  app.appealMessage = 'Complaint submitted for review';
+  app.loading = false;
+  app.loadQuestion();
+  const load = requests.find(v => v.url === '/api/v2/games/existing-game/question');
+  load.subject.error(new HttpErrorResponse({ status: 503 }));
+  assert.equal(app.appealMessage, 'Complaint submitted for review');
+  assert.equal(app.current, null);
+});
+
+test('profile settings are above complaint history and have two independently saved actions', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const menu = html.slice(html.indexOf('class="profile-menu"'),
+    html.indexOf('</div>', html.indexOf('class="profile-menu"')));
+  assert.ok(menu.indexOf('openAccountSettings()') >= 0);
+  assert.ok(menu.indexOf('openAccountSettings()') < menu.indexOf('openAppealHistory()'));
+  assert.equal(english['settings.title'], 'Settings');
+  assert.equal(english['settings.currentPassword'], 'Current password');
+  assert.equal(english['settings.newPassword'], 'New password');
+  assert.equal(english['settings.repeatPassword'], 'Repeat new password');
+  assert.match(source, /this\.http\.patch<Account>\([\s\S]*?'\/api\/auth\/username'/);
+  assert.match(source, /this\.http\.patch<void>\([\s\S]*?'\/api\/auth\/password'/);
+  assert.match(source, /new_password !== confirm_password/);
+  assert.match(source, /new_password === current_password/);
+  assert.match(source, /this\.account = result\.value as Account/);
+  assert.doesNotMatch(source.slice(source.indexOf('private async changeAccountUsername()'),
+    source.indexOf('private async changeAccountPassword()')), /resetGameView\(\)/);
+});
+
+
+test('complaint history previews exactly four words while preserving full question for hover', () => {
+  assert.equal(appealQuestionExcerpt('  Какой учёный получил Премию Тьюринга 1972 года?'),
+    'Какой учёный получил Премию…');
+  assert.equal(appealQuestionExcerpt('Short question?'), 'Short question?');
+  assert.equal(appealQuestionExcerpt('  '), '—');
+  assert.equal(appealQuestionExcerpt('אילו עובדות נבדקו בתשובה הנכונה'),
+    'אילו עובדות נבדקו בתשובה…');
+  assert.match(source, /'<summary title="' \+ safe\(question\)/);
+  assert.match(source, /class="appeal-history-question-preview" dir="auto"/);
+  assert.match(source, /safe\(summary\)/);
+  assert.match(source, /safe\(question\)/);
+});
+
+test('complaint history searches full question text and composes date/status filters', () => {
+  const at = (year, month, day, hour) =>
+    new Date(year, month - 1, day, hour).toISOString();
+  const records = [
+    { id: 'old', status: 'upheld', submitted_at: at(2026, 11, 7, 14),
+      question_snapshot: { question: 'Какой учёный получил Премию Тьюринга 1972 года?' } },
+    { id: 'new', status: 'rejected', submitted_at: at(2026, 11, 9, 12),
+      question_snapshot: { question: 'В каком году состоялось открытие?' } },
+    { id: 'pending', status: 'pending', submitted_at: at(2026, 11, 8, 16),
+      question_snapshot: { question: 'Какие доказательства подтверждают событие?' } },
+    { id: 'retry', status: 'retry_pending', submitted_at: at(2026, 11, 8, 8),
+      question_snapshot: { question: 'Что известно о Тьюринге?' } },
+    { id: 'technical', status: 'technical_unresolved', submitted_at: at(2026, 11, 6, 15),
+      question_snapshot: { question: 'История развития COBOL' } },
+  ];
+  const filters = {
+    status: 'all', search: '', from: '', to: '', sort: 'newest',
+  };
+  const ids = changes => filterAppealHistory(records, { ...filters, ...changes }).map(r => r.id);
+  assert.deepEqual(ids({}), ['new', 'pending', 'retry', 'old', 'technical']);
+  assert.deepEqual(ids({ sort: 'oldest' }), ['technical', 'old', 'retry', 'pending', 'new']);
+  assert.deepEqual(ids({ search: 'ТЬЮРИНГА' }), ['old']);
+  assert.deepEqual(ids({ search: 'тЬюРиНгЕ' }), ['retry']);
+  assert.deepEqual(ids({ search: '1972' }), ['old'],
+    'search must look beyond the four-word preview');
+  assert.deepEqual(ids({ status: 'upheld' }), ['old']);
+  assert.deepEqual(ids({ status: 'rejected' }), ['new']);
+  assert.deepEqual(ids({ status: 'in_review' }), ['pending', 'retry']);
+  assert.deepEqual(ids({ status: 'technical_unresolved' }), ['technical']);
+  assert.deepEqual(ids({ from: '2026-11-08', to: '2026-11-08' }), ['pending', 'retry'],
+    'date filters are inclusive local-calendar days');
+  assert.deepEqual(ids({ status: 'in_review', search: 'доказательства',
+    from: '2026-11-08', to: '2026-11-09' }), ['pending']);
+  assert.deepEqual(ids({ status: 'upheld', from: '2026-11-09' }), []);
+  assert.deepEqual(ids({ search: 'nonexistent' }), []);
+  assert.deepEqual(records.map(x => x.id), ['old', 'new', 'pending', 'retry', 'technical'],
+    'sorting must not mutate original API data');
+});
+
+test('complaint history filter toolbar and premium cards provide accessible controls', () => {
+  const css = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  for (const key of ['historySearch', 'historyStatus', 'historyAll',
+    'historyInReview', 'historyFrom', 'historyTo', 'historySort',
+    'historyNewest', 'historyOldest', 'historyNoMatches', 'historyCount']) {
+    assert.ok(english['appeals.' + key], key);
+  }
+  for (const field of ['appeal-history-search', 'appeal-history-status',
+    'appeal-history-from', 'appeal-history-to', 'appeal-history-sort']) {
+    assert.ok(source.includes('id="' + field + '"'), field);
+    assert.ok(source.includes('for="' + field + '"'), field + ' accessible label');
+  }
+  assert.match(source, /customClass: \{ popup: 'quiz-appeal-popup quiz-appeal-history-popup' \}/);
+  assert.match(source, /search\.addEventListener\('input', update\)/);
+  assert.match(source, /input\.addEventListener\('change', update\)/);
+  assert.match(source, /filterAppealHistory\(records, filters\)/);
+  assert.match(source, /list\.appendChild\(node\)/);
+  assert.match(source, /node\.hidden = !ids\.has\(id\)/);
+  assert.match(source, /role="status" aria-live="polite"/);
+  assert.match(css, /\.quiz-appeal-history-popup \.appeal-history-toolbar/);
+  assert.match(css, /\.appeal-history-item\[hidden\]\s*\{\s*display:\s*none !important/);
+  assert.match(css, /\.appeal-history-status-upheld/);
+  assert.match(css, /\.appeal-history-status-rejected/);
+  assert.match(css, /@media \(max-width: 590px\)/);
+});
+
+test('complaint history clear button resets search, dates, status and ordering together', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.equal(english['appeals.historyReset'], 'Clear filters');
+  assert.match(source, /<button id="appeal-history-reset" class="appeal-history-reset" type="button">/);
+  assert.match(source, /const reset = popup.querySelector<HTMLButtonElement>\('#appeal-history-reset'\)/);
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /reset\.addEventListener\('click', \(\) => \{\s*search\.value = '';\s*status\.value = 'all';\s*from\.value = '';\s*to\.value = '';\s*sort\.value = 'newest';\s*update\(\);\s*\}\)/);
+  assert.match(history, /reset\.disabled = !filters\.search && filters\.status === 'all' &&\s*!filters\.from && !filters\.to && filters\.sort === 'newest'/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-reset:focus-visible/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-meta/);
+});
+
+test('complaint history shows judge outcome pill in the decision card heading', () => {
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /'<div class="appeal-history-verdict">' \+\s*'<div class="appeal-history-verdict-header"><strong>' \+/);
+  assert.match(history, /localized\(decision\.headingKey\) \+ '<\/strong>' \+/);
+  assert.match(history, /'<span class="appeal-history-status appeal-history-status-' \+ allowedStatus \+ '\">' \+/);
+  assert.match(history, /localized\('appeals\.status\.' \+ item\.status\) \+ '<\/span>' \+/);
+  assert.match(history, /safe\(decision\.message\)/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-verdict-header/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-upheld/);
+  assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-rejected/);
+});
+
+test('history status heading is not mistaken for a judge verdict before adjudication', () => {
+  assert.equal(english['appeals.historyComplaintStatus'], 'Complaint status');
+  const t = key => english[key];
+  const presentation = (status, verdict = null) =>
+    appealHistoryDecisionPresentation(status, verdict, t);
+  assert.deepEqual(presentation('pending', 'STALE INVALID VERDICT'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A decision has not been made yet.',
+  });
+  assert.deepEqual(presentation('retry_pending'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A decision has not been made yet.',
+  });
+  assert.deepEqual(presentation('technical_unresolved', 'A technical problem prevented review.'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A technical problem prevented review.',
+  });
+  assert.deepEqual(presentation('upheld', 'Question was flawed'), {
+    headingKey: 'appeals.historyVerdict',
+    message: 'Question was flawed',
+  });
+  assert.deepEqual(presentation('rejected', 'Question is valid'), {
+    headingKey: 'appeals.historyVerdict',
+    message: 'Question is valid',
+  });
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /appealHistoryDecisionPresentation\(/);
+  assert.match(history, /localized\(decision\.headingKey\)/);
+  assert.match(history, /safe\(decision\.message\)/);
+});
+
+test('intro explicitly exempts pregame category exclusions and helper consultations from Q16 hints', () => {
+  const intro = english['hero.intro'];
+  assert.match(intro, /secret 16th question/);
+  assert.match(intro, /all 15 correctly/);
+  assert.match(intro, /without using in-game hints/);
+  assert.match(intro, /Excluding categories before the game/);
+  assert.match(intro, /consulting your helper during the game/);
+  assert.match(intro, /do not count as hints/);
 });

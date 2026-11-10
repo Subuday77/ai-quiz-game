@@ -137,6 +137,9 @@ def run():
         assert ledger_count(db, appeal.id, "appeal-bonus-wager-refund") == 1
         assert ledger_count(db, appeal.id, "appeal-deposit-refund") == 1
         assert db.get(GameRun, run_id).status == "lost"
+        resolved_appeal_id = appeal.id
+        resolved_question_id = qid
+        resolved_username = db.get(User, uid).username
 
         uid, run_id, qid, _ = fixture(db, number=7)
         appeal = file_appeal(
@@ -150,7 +153,42 @@ def run():
         assert ledger_count(db, appeal.id, "appeal-deposit-refund") == 1
         assert ledger_count(db, appeal.id, "appeal-compensation") == 0
         assert db.get(GameRun, run_id).status == "main"
-    print("PostgreSQL appeals regression: pre-answer, idempotence, Q16 and technical refund OK")
+    # Scope-limited test-data reset keeps the wallet ledger auditable.
+    from scripts.cleanup_test_appeals import cleanup
+    with Session(engine()) as db:
+        uid, run_id, qid, _ = fixture(db, number=2)
+        username = db.get(User, uid).username
+        appeal = file_appeal(
+            db, user_id=uid, run_id=run_id, question_id=qid,
+            request_id=uuid4(), reasons=["ambiguous"],
+            comment="test cleanup", source_links=[],
+            confirm_nonrefundable_fee=False, expected_fee_bronze=0)
+        aid = appeal.id
+        assert db.get(Question, qid).status == "quarantined"
+    dry = cleanup(username=username, ids=[aid])
+    assert len(dry) == 1 and dry[0]["status"] == "pending"
+    with Session(engine()) as db:
+        assert db.get(QuestionAppeal, aid) is not None
+    applied = cleanup(username=username, ids=[aid], apply=True)
+    assert len(applied) == 1
+    with Session(engine()) as db:
+        assert db.get(QuestionAppeal, aid) is None
+        assert db.get(Question, qid).status == "approved"
+        assert ledger_count(db, aid, "appeal-test-cleanup") == 1
+    # A completed Q16 appeal includes platinum compensation and a separate
+    # gold wager refund. Test cleanup must reverse BOTH without altering the
+    # originally lost game or removing ledger history.
+    done = cleanup(username=resolved_username, ids=[resolved_appeal_id])
+    assert done[0]["reverse_star_movements"]["platinum"] == -1
+    assert done[0]["reverse_star_movements"]["gold"] == -1
+    cleanup(username=resolved_username, ids=[resolved_appeal_id], apply=True)
+    with Session(engine()) as db:
+        assert db.get(QuestionAppeal, resolved_appeal_id) is None
+        assert db.get(Question, resolved_question_id).status == "approved"
+        assert db.scalar(select(WalletTransaction.id).where(
+            WalletTransaction.idempotency_key ==
+            f"appeal:{resolved_appeal_id}:test-cleanup-platinum")) is not None
+    print("PostgreSQL appeals regression: filing, settlement, resolved/queued cleanup & refunds OK")
 
 
 if __name__ == "__main__":

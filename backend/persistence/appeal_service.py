@@ -23,6 +23,8 @@ from persistence.models import (
     PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
+from persistence.appeal_logging import emit
+from persistence.appeal_qa_quota import allowance
 from star_perks import PerkUnavailable
 
 
@@ -68,15 +70,16 @@ def quote_appeal(db: Session, *, run_id: UUID, user_id: UUID,
     ))
     if old is not None:
         raise GameConflict("Question already appealed")
-    count = _filings_this_month(db, user_id=user_id, now=_now())
+    now = _now()
+    count = _filings_this_month(db, user_id=user_id, now=now)
+    quota = allowance(db, user_id=user_id, now=now, submitted=count)
     return {
         "question_id": str(question_id),
         "number": attempt.number,
         "before_answer": before,
         "deposit_tier": appeal_deposit_tier(attempt.number),
         "deposit_amount": 1,
-        "filing_fee_bronze": appeal_fee_bronze(count),
-        "free_appeals_remaining": max(0, 5 - count),
+        **quota,
         "filing_fee_never_refunded": True,
     }
 
@@ -87,6 +90,9 @@ def _credit(db: Session, *, appeal: QuestionAppeal,
     key = f"appeal:{appeal.id}:{action}"
     existing = db.scalar(select(WalletTransaction.id).where(
         WalletTransaction.idempotency_key == key))
+    emit("DEBUG", "appeal_wallet_credit_checked", appeal_id=str(appeal.id),
+         stage=action, deposit_tier=tier, deposit_amount=amount,
+         already_applied=existing is not None)
     if existing is None:
         db.add(WalletTransaction(
             user_id=appeal.user_id, run_id=appeal.run_id,
@@ -144,8 +150,9 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             Question.id == question_id).with_for_update())
         moderation = _moderation(db, question_id=question_id)
         now = _now()
-        fee = appeal_fee_bronze(_filings_this_month(
-            db, user_id=user_id, now=now))
+        count = _filings_this_month(db, user_id=user_id, now=now)
+        fee = allowance(db, user_id=user_id, now=now,
+                        submitted=count)["filing_fee_bronze"]
         deposit_tier = appeal_deposit_tier(attempt.number)
         if expected_fee_bronze is not None and fee != expected_fee_bronze:
             raise GameConflict("Filing fee changed; review the latest quote")
@@ -249,6 +256,10 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                           verdict_localized="Appeal upheld automatically.",
                           verdict_data={"automated": True})
         db.commit()
+        if appeal.status == "upheld":
+            emit("INFO", "appeal_settled", appeal_id=str(appeal.id),
+                 question_id=str(appeal.question_id), decision=appeal.status,
+                 refund_deposit=appeal.deposit_refunded_at is not None)
         return appeal
     except Exception:
         db.rollback()

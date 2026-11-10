@@ -92,12 +92,23 @@ interface HelperCard {
 }
 interface HelperReply { text: string; helper: HelperCard; }
 
+interface AppealAllowance {
+  free_remaining: number;
+  free_total: number;
+  filed_this_month: number;
+  next_filing_fee_bronze: number;
+}
 interface AppealQuote {
   before_answer: boolean;
   deposit_tier: StarTier;
   deposit_amount: number;
   filing_fee_bronze: number;
   free_appeals_remaining: number;
+  free_appeals_total: number;
+  free_appeals_refresh_at: string;
+  hint_refund_bronze_if_upheld: number;
+  loss_compensation_tier_if_upheld: StarTier | null;
+  bonus_wager_refund_if_upheld: boolean;
   question_snapshot: {
     question_id: string; question: string;
     answers: Record<Choice, string>; hidden_keys: Choice[];
@@ -111,8 +122,73 @@ interface AppealRecord {
   reasons: string[]; comment: string; source_links: string[];
   verdict: string | null; deposit: { tier: StarTier; amount: number; refunded: boolean };
   filing_fee_bronze: number; compensation: { tier: StarTier; amount: number };
+  selected_key: Choice | null; answer_key: Choice | null;
   bonus_wager_refunded: boolean;
   expenses_refunded: { tier: StarTier; amount: number; reason: string }[];
+}
+
+type AppealHistoryStatus = 'all' | 'upheld' | 'rejected' | 'in_review' | 'technical_unresolved';
+type AppealHistorySort = 'newest' | 'oldest';
+
+interface AppealHistoryFilters {
+  status: AppealHistoryStatus;
+  search: string;
+  from: string;
+  to: string;
+  sort: AppealHistorySort;
+}
+
+/** Dates in this browser's local timezone; both date endpoints are inclusive. */
+function appealLocalDate(value: string): string {
+  const time = new Date(value);
+  if (!Number.isFinite(time.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return time.getFullYear() + '-' + pad(time.getMonth() + 1) + '-' + pad(time.getDate());
+}
+
+/** Four-word preview; full text is still present in the expanded card and tooltip. */
+export function appealQuestionExcerpt(value: string): string {
+  const words = String(value ?? '').trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+  if (!words.length) return '—';
+  return words.slice(0, 4).join(' ') + (words.length > 4 ? '…' : '');
+}
+
+/** Only finalized merits rulings are Judge decisions; other states are statuses. */
+export function appealHistoryDecisionPresentation(
+  status: string, verdict: string | null, translate: (key: string) => string,
+): { headingKey: string; message: string } {
+  const decided = status === 'upheld' || status === 'rejected';
+  const awaiting = status === 'pending' || status === 'retry_pending';
+  return {
+    headingKey: decided ? 'appeals.historyVerdict' : 'appeals.historyComplaintStatus',
+    message: awaiting ? translate('appeals.notDecided') :
+      verdict || translate('appeals.notDecided'),
+  };
+}
+
+/** Pure function shared by UI and regression tests: no network or state mutation. */
+export function filterAppealHistory(
+  records: AppealRecord[], filters: AppealHistoryFilters,
+): AppealRecord[] {
+  const query = filters.search.trim().toLocaleLowerCase();
+  return records.filter(item => {
+    const statusMatches = filters.status === 'all' ||
+      (filters.status === 'in_review'
+        ? item.status === 'pending' || item.status === 'retry_pending'
+        : item.status === filters.status);
+    if (!statusMatches) return false;
+    if (query && !String(item.question_snapshot?.question ?? '')
+      .toLocaleLowerCase().includes(query)) return false;
+    const date = appealLocalDate(item.submitted_at);
+    if (filters.from && (!date || date < filters.from)) return false;
+    if (filters.to && (!date || date > filters.to)) return false;
+    return true;
+  }).sort((a, b) => {
+    const difference = new Date(a.submitted_at).getTime() -
+      new Date(b.submitted_at).getTime();
+    return (filters.sort === 'oldest' ? difference : -difference) ||
+      a.id.localeCompare(b.id);
+  });
 }
 
 interface AnswerFeedback {
@@ -181,6 +257,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
 
   profileMenuOpen = false;
+  appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
   appealMessage = '';
   appealedQuestionIds = new Set<string>();
@@ -549,9 +626,9 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct) ||
-          (this.screen === 'done' && this.finishedPhase === 'lost')) ||
+          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
+
     this.appealBusy = true;
     const question = this.current;
     const runId = this.gameId;
@@ -563,59 +640,145 @@ export class AppComponent implements OnInit, OnDestroy {
       ).pipe(timeout(12000)));
       if (this.gameId !== runId || this.account?.id !== accountId) return;
       const safe = (value: unknown) => this.escapeAppealHtml(value);
+      const star = (tier: StarTier, count: number) =>
+        count + ' ' + this.locale.t('stars.' + tier) + ' ★';
       const snapshot = quote.question_snapshot;
       const options = this.choices.map(key =>
         '<li><strong>' + key + '.</strong> ' + safe(snapshot.answers[key]) + '</li>'
       ).join('');
-      const reasonInputs = this.appealReasons.filter(r =>
+      const reasons = this.appealReasons.filter(r =>
         r !== 'incorrect_key' || !quote.before_answer
-      ).map(r => '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
-        safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>').join('');
-      const feeWarning = quote.filing_fee_bronze > 0
-        ? '<p class="appeal-warning">' + safe(this.locale.t('appeals.feeNeverReturned')) +
-          '</p><label class="appeal-choice"><input type="checkbox" id="appeal-confirm-fee"> ' +
-          safe(this.locale.t('appeals.confirmFee')) + '</label>'
-        : '';
+      );
+      const reasonsHtml = reasons.map(r =>
+        '<label class="appeal-choice"><input type="checkbox" name="appeal-reason" value="' +
+        safe(r) + '"> ' + safe(this.locale.t('appeals.reason.' + r)) + '</label>'
+      ).join('');
+      const feeText = this.locale.t('appeals.filingPrice') + ': ' +
+        star('bronze', quote.filing_fee_bronze);
+      // UTC calendar months: never shift the quota reset into the prior local day.
+      const refreshDate = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'UTC', day: '2-digit', month: '2-digit', year: '2-digit',
+      }).format(new Date(quote.free_appeals_refresh_at));
+      const quotaText = this.locale.format('appeals.freeQuota', {
+        remaining: quote.free_appeals_remaining,
+        total: quote.free_appeals_total,
+      }) + ' (' + this.locale.format('appeals.freeReset', { date: refreshDate }) + ')';
+      const deposit = star(quote.deposit_tier, quote.deposit_amount);
+      const totalNow = quote.deposit_tier === 'bronze'
+        ? star('bronze', quote.deposit_amount + quote.filing_fee_bronze)
+        : deposit + (quote.filing_fee_bronze
+            ? ' + ' + star('bronze', quote.filing_fee_bronze) : '');
+      const successExtras = [
+        quote.hint_refund_bronze_if_upheld > 0
+          ? this.locale.t('appeals.hintRefunds') + ': ' +
+            star('bronze', quote.hint_refund_bronze_if_upheld) : '',
+        quote.loss_compensation_tier_if_upheld
+          ? this.locale.t('appeals.compensation') + ': ' +
+            star(quote.loss_compensation_tier_if_upheld, 1) : '',
+        quote.bonus_wager_refund_if_upheld
+          ? this.locale.t('appeals.wagerRefunded') + ': ' + star('gold', 1) : '',
+      ].filter(Boolean).map(row => '<p>' + safe(row) + '</p>').join('');
+      const costHtml =
+        '<section class="appeal-cost"><h3>' + safe(this.locale.t('appeals.costTitle')) +
+        '</h3><p><strong>' + safe(this.locale.t('appeals.deposit')) + ':</strong> ' +
+        safe(deposit) + '</p><p><strong>' + safe(feeText) + '</strong></p><p><strong>' +
+        safe(this.locale.t('appeals.nowDebit')) + ':</strong> ' +
+        safe(totalNow) + '</p><p class="appeal-warning">' +
+        safe(this.locale.t('appeals.depositRule')) + '</p>' +
+        (quote.filing_fee_bronze ? '<p class="appeal-warning">' +
+         safe(this.locale.t('appeals.feeNeverReturned')) + '</p>' : '') +
+        '</section>';
       const wagerNotice = question.number === 16
         ? '<p>' + safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '';
       const hintNotice = question.hidden_count
         ? '<p>' + safe(this.locale.t('appeals.hintsLater')) + '</p>' : '';
-      const result = await Swal.fire({
-        titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
-        confirmButtonText: this.locale.t('appeals.submit'),
-        cancelButtonText: this.locale.t('helper.close'),
-        html: '<div class="appeal-form"><p><strong>' + safe(snapshot.question) +
-          '</strong></p><ol class="appeal-options">' + options +
-          '</ol><div class="appeal-reasons">' + reasonInputs +
-          '</div><label for="appeal-comment">' + safe(this.locale.t('appeals.comment')) +
-          '</label><textarea id="appeal-comment" maxlength="1000" rows="4"></textarea>' +
-          '<label for="appeal-sources">' + safe(this.locale.t('appeals.sources')) +
-          '</label><textarea id="appeal-sources" rows="2"></textarea>' +
-          '<p>' + safe(this.locale.t('appeals.deposit')) + ': 1 ' +
-          safe(this.locale.t('stars.' + quote.deposit_tier)) + '</p>' +
-          '<p>' + safe(this.locale.t('appeals.fee')) + ': ' +
-          quote.filing_fee_bronze + ' ' + safe(this.locale.t('stars.bronze')) +
-          '</p>' + wagerNotice + hintNotice + feeWarning + '</div>',
-        preConfirm: () => {
-          const popup = Swal.getPopup();
-          if (!popup) return false;
-          const reasons = Array.from(popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked'))
-            .map(input => input.value);
-          const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
-          const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
-            .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
-          const confirmFee = !!popup.querySelector<HTMLInputElement>('#appeal-confirm-fee')?.checked;
-          if ((!reasons.length && !comment) || links.length > 5 || links.some(l =>
-            l.length > 500 || !/^https?:\/\//i.test(l)) ||
-            (quote.filing_fee_bronze > 0 && !confirmFee)) {
-            Swal.showValidationMessage(this.locale.t('appeals.invalid'));
-            return false;
-          }
-          return { reasons, comment, source_links: links, confirm_nonrefundable_fee: confirmFee,
-            expected_fee_bronze: quote.filing_fee_bronze };
-        }
-      });
-      if (!result.isConfirmed || !result.value) return;
+      let draft: { reasons: string[]; comment: string; source_links: string[] } = {
+        reasons: [], comment: '', source_links: [],
+      };
+      let confirmed = false;
+      while (!confirmed) {
+        const result = await Swal.fire({
+          titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
+          customClass: { popup: 'quiz-appeal-popup' },
+          confirmButtonText: this.locale.t('appeals.submit'),
+          cancelButtonText: this.locale.t('helper.close'),
+          html: '<p class="appeal-quota-header">' + safe(quotaText) + '</p>' +
+            '<div class="appeal-scroll-wrap"><div class="appeal-form">' +
+            '<p><strong>' + safe(snapshot.question) + '</strong></p>' +
+            '<ol class="appeal-options">' + options + '</ol>' +
+            '<div class="appeal-reasons">' + reasonsHtml + '</div>' +
+            '<label for="appeal-comment">' + safe(this.locale.t('appeals.comment')) +
+            '</label><textarea id="appeal-comment" maxlength="1000" rows="4"></textarea>' +
+            '<label for="appeal-sources">' + safe(this.locale.t('appeals.sources')) +
+            '</label><textarea id="appeal-sources" rows="2"></textarea>' +
+            costHtml + wagerNotice + hintNotice + '</div>' +
+            '<div class="appeal-scroll-hint" aria-hidden="true">' +
+            '<span class="appeal-scroll-chevron"></span>' +
+            '<span class="appeal-scroll-chevron"></span></div></div>',
+          didOpen: popup => {
+            popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]')
+              .forEach(input => { input.checked = draft.reasons.includes(input.value); });
+            const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment');
+            if (comment) comment.value = draft.comment;
+            const sources = popup.querySelector<HTMLTextAreaElement>('#appeal-sources');
+            if (sources) sources.value = draft.source_links.join('\n');
+            const scroll = popup.querySelector<HTMLElement>('.appeal-form');
+            const hint = popup.querySelector<HTMLElement>('.appeal-scroll-hint');
+            if (!scroll || !hint) return;
+            const update = () => {
+              hint.hidden = scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 8;
+            };
+            scroll.addEventListener('scroll', update, { passive: true });
+            update();
+          },
+          preConfirm: () => {
+            const popup = Swal.getPopup();
+            if (!popup) return false;
+            const selectedReasons = Array.from(
+              popup.querySelectorAll<HTMLInputElement>('input[name="appeal-reason"]:checked')
+            ).map(input => input.value);
+            const comment = popup.querySelector<HTMLTextAreaElement>('#appeal-comment')?.value.trim() || '';
+            const links = (popup.querySelector<HTMLTextAreaElement>('#appeal-sources')?.value || '')
+              .split(/\r?\n/).map(v => v.trim()).filter(Boolean);
+            if ((!selectedReasons.length && !comment) || links.length > 5 ||
+                links.some(l => l.length > 500 || !/^https?:\/\//i.test(l))) {
+              Swal.showValidationMessage(this.locale.t('appeals.invalid'));
+              return false;
+            }
+            return { reasons: selectedReasons, comment, source_links: links };
+          },
+        });
+        if (!result.isConfirmed || !result.value) return;
+        draft = result.value;
+        if (this.gameId !== runId || this.account?.id !== accountId) return;
+        const confirmedResult = await Swal.fire({
+          titleText: this.locale.t('appeals.confirmTitle'),
+          width: '650px', showCancelButton: true, reverseButtons: true,
+          customClass: { popup: 'quiz-appeal-popup quiz-appeal-confirm-popup' },
+          confirmButtonText: this.locale.t('appeals.confirmAndSend'),
+          cancelButtonText: this.locale.t('appeals.back'),
+          html: '<div class="appeal-confirm-cost"><p>' +
+            safe(this.locale.t('appeals.confirmIntro')) + '</p><p>' +
+            safe(this.locale.t('appeals.deposit')) + ': <strong>' + safe(deposit) +
+            '</strong></p><p>' + safe(this.locale.t('appeals.fee')) +
+            ': <strong>' + safe(star('bronze', quote.filing_fee_bronze)) +
+            '</strong></p><p class="appeal-confirm-total">' +
+            safe(this.locale.t('appeals.nowDebit')) + ': <strong>' +
+            safe(totalNow) + '</strong></p><p class="appeal-confirm-total">' +
+            safe(this.locale.t('appeals.ifUpheldRefund')) + ': <strong>' +
+            safe(deposit) + '</strong></p>' + successExtras +
+            '<p>' + safe(this.locale.t('appeals.hintRefundRule')) + '</p>' +
+            '<p class="appeal-warning">' +
+            safe(this.locale.t('appeals.rejectedRule')) + '</p>' +
+            (quote.filing_fee_bronze > 0 ? '<p class="appeal-warning">' +
+             safe(this.locale.t('appeals.feeNeverReturned')) + '</p>' : '') +
+            (question.number === 16 ? '<p>' +
+             safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '') +
+            '</div>',
+        });
+        if (confirmedResult.isConfirmed) confirmed = true;
+        else if (confirmedResult.dismiss !== Swal.DismissReason.cancel) return;
+      }
       if (this.gameId !== runId || this.account?.id !== accountId) return;
       const storageKey = 'ai-quiz-game:appeal-request:' + accountId + ':' +
         runId + ':' + question.question_id;
@@ -626,13 +789,17 @@ export class AppComponent implements OnInit, OnDestroy {
         try { sessionStorage.setItem(storageKey, requestId); } catch { /* private mode */ }
       }
       await firstValueFrom(this.http.post<AppealRecord>(
-        GAME_API + '/' + runId + '/appeals',
-        { ...result.value, question_id: question.question_id, request_id: requestId }
+        GAME_API + '/' + runId + '/appeals', {
+          ...draft, question_id: question.question_id, request_id: requestId,
+          expected_fee_bronze: quote.filing_fee_bronze,
+          confirm_nonrefundable_fee: true,
+        }
       ).pipe(timeout(15000)));
       try { sessionStorage.removeItem(storageKey); } catch { /* private mode */ }
       this.appealedQuestionIds.add(question.question_id);
       this.appealMessage = this.locale.t('appeals.received');
       this.refreshSpendableStars();
+      this.refreshAppealAllowance();
       if (quote.before_answer && this.gameId === runId) {
         this.current = null;
         this.feedback = null;
@@ -645,6 +812,36 @@ export class AppComponent implements OnInit, OnDestroy {
     } finally {
       this.appealBusy = false;
     }
+  }
+
+  async openAppealRules(): Promise<void> {
+    const { default: Swal } = await import('sweetalert2');
+    const safe = (value: unknown) => this.escapeAppealHtml(value);
+    const blocks = [
+      'appeals.rulesWhen', 'appeals.rulesFree', 'appeals.rulesDeposits',
+      'appeals.rulesJudge', 'appeals.rulesUpheld', 'appeals.rulesRejected',
+      'appeals.rulesTechnical', 'appeals.rulesHistory'
+    ].map(key => '<p>' + safe(this.locale.t(key)) + '</p>').join('');
+    await Swal.fire({
+      titleText: this.locale.t('appeals.rulesTitle'), width: '720px',
+      html: '<div class="appeal-history appeal-rules">' + blocks + '</div>',
+      confirmButtonText: this.locale.t('helper.close'),
+    });
+  }
+
+  private refreshAppealAllowance(): void {
+    const accountId = this.account?.id;
+    if (!accountId) { this.appealAllowance = null; return; }
+    this.subscriptions.add(this.http.get<AppealAllowance>(
+      '/api/v2/appeals/allowance'
+    ).pipe(timeout(10000)).subscribe({
+      next: data => {
+        if (this.account?.id === accountId) this.appealAllowance = data;
+      },
+      error: () => {
+        if (this.account?.id === accountId) this.appealAllowance = null;
+      },
+    }));
   }
 
   async openAppealHistory(): Promise<void> {
@@ -662,48 +859,390 @@ export class AppComponent implements OnInit, OnDestroy {
         if (page.length < 100) break;
       }
       if (this.account?.id !== accountId) return;
+      this.refreshAppealAllowance();
       const safe = (value: unknown) => this.escapeAppealHtml(value);
-      const html = records.length ? records.map(item => {
-        const answers = this.choices.map(key =>
-          '<li><strong>' + key + '</strong>: ' +
-          safe(item.question_snapshot.answers[key]) + '</li>').join('');
+      const localized = (key: string) => safe(this.locale.t(key));
+      const formattedDate = (value: string) => {
+        const date = new Date(value);
+        return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit',
+        }) : '—';
+      };
+      const statuses: { value: AppealHistoryStatus; label: string }[] = [
+        { value: 'all', label: 'appeals.historyAll' },
+        { value: 'upheld', label: 'appeals.status.upheld' },
+        { value: 'rejected', label: 'appeals.status.rejected' },
+        { value: 'in_review', label: 'appeals.historyInReview' },
+        { value: 'technical_unresolved', label: 'appeals.status.technical_unresolved' },
+      ];
+      const filterHtml =
+        '<div class="appeal-history-toolbar" role="search">' +
+          '<div class="appeal-history-filter appeal-history-search">' +
+            '<label for="appeal-history-search">' + localized('appeals.historySearch') + '</label>' +
+            '<input id="appeal-history-search" type="search" autocomplete="off" ' +
+              'placeholder="' + localized('appeals.historySearchPlaceholder') + '">' +
+          '</div>' +
+          '<div class="appeal-history-filter">' +
+            '<label for="appeal-history-status">' + localized('appeals.historyStatus') + '</label>' +
+            '<select id="appeal-history-status">' +
+              statuses.map(item => '<option value="' + item.value + '">' +
+                localized(item.label) + '</option>').join('') +
+            '</select>' +
+          '</div>' +
+          '<div class="appeal-history-filter">' +
+            '<label for="appeal-history-from">' + localized('appeals.historyFrom') + '</label>' +
+            '<input id="appeal-history-from" type="date">' +
+          '</div>' +
+          '<div class="appeal-history-filter">' +
+            '<label for="appeal-history-to">' + localized('appeals.historyTo') + '</label>' +
+            '<input id="appeal-history-to" type="date">' +
+          '</div>' +
+          '<div class="appeal-history-filter">' +
+            '<label for="appeal-history-sort">' + localized('appeals.historySort') + '</label>' +
+            '<select id="appeal-history-sort">' +
+              '<option value="newest">' + localized('appeals.historyNewest') + '</option>' +
+              '<option value="oldest">' + localized('appeals.historyOldest') + '</option>' +
+            '</select>' +
+          '</div>' +
+        '</div>';
+      const itemsHtml = records.map((item, index) => {
+        const question = String(item.question_snapshot?.question ?? '');
+        const summary = appealQuestionExcerpt(question);
+        const answers = this.choices.map(key => {
+          const selected = item.selected_key === key;
+          const correct = item.answer_key === key;
+          const marker = [
+            selected ? this.locale.t('appeals.yourAnswer') : '',
+            correct ? this.locale.t('appeals.gameAnswer') : '',
+          ].filter(Boolean).join(' · ');
+          return '<li class="' + (selected ? 'appeal-option-player ' : '') +
+            (correct ? 'appeal-option-key' : '') + '"><strong>' + key +
+            '</strong>: ' + safe(item.question_snapshot?.answers?.[key]) +
+            (marker ? ' <span class="appeal-answer-tag">(' + safe(marker) + ')</span>' : '') +
+            '</li>';
+        }).join('');
         const costs = item.expenses_refunded.map(v =>
           safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
-        return '<details class="appeal-history-item"><summary>' +
-          safe(new Date(item.submitted_at).toLocaleString(undefined, {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit' })) + ' · Q' +
-          item.question_number + ' · ' + safe(this.locale.t('appeals.status.' + item.status)) +
-          '</summary><p><strong>' + safe(item.question_snapshot.question) +
-          '</strong></p><ol>' + answers + '</ol><p>' +
-          safe(item.reasons.map(r => this.locale.t('appeals.reason.' + r)).join(', ')) +
-          '</p><p>' + safe(item.comment) + '</p><p>' +
-          safe(item.source_links.join(' | ')) + '</p><p>' +
-          safe(item.verdict || this.locale.t('appeals.notDecided')) + '</p><p>' +
-          safe(this.locale.t('appeals.closed')) + ': ' +
-          safe(item.closed_at ? new Date(item.closed_at).toLocaleDateString() : '—') +
-          '</p><p>' + safe(this.locale.t('appeals.deposit')) + ': ' +
-          safe(item.deposit.amount + ' ' + this.locale.t('stars.' + item.deposit.tier)) +
-          (' (' + safe(this.locale.t(item.deposit.refunded ? 'appeals.refunded' :
-            item.status === 'rejected' ? 'appeals.depositForfeited' : 'appeals.depositPending')) + ')') +
-          '</p><p>' + safe(this.locale.t('appeals.fee')) + ': ' + item.filing_fee_bronze +
-          ' ' + safe(this.locale.t('stars.bronze')) +
-          '</p><p>' + safe(this.locale.t('appeals.compensation')) + ': ' +
-          item.compensation.amount + ' ' + safe(this.locale.t('stars.' + item.compensation.tier)) +
-          '</p><p>' + safe(this.locale.t('appeals.wagerRefunded')) + ': ' +
-          safe(item.bonus_wager_refunded ? this.locale.t('appeals.yes') : this.locale.t('appeals.no')) +
-          '</p><p>' + safe(this.locale.t('appeals.hintRefunds')) + ': ' +
-          (costs || '0') + '</p></details>';
-      }).join('') : '<p>' + safe(this.locale.t('appeals.none')) + '</p>';
-      await Swal.fire({ titleText: this.locale.t('appeals.myComplaints'),
-        width: '850px', html: '<div class="appeal-history">' + html + '</div>',
-        confirmButtonText: this.locale.t('helper.close') });
+        const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
+          'technical_unresolved'].includes(item.status) ? item.status : 'unknown';
+        const decision = appealHistoryDecisionPresentation(
+          item.status, item.verdict, key => this.locale.t(key));
+        const field = (labelKey: string, value: string) =>
+          '<p class="appeal-history-field"><span class="appeal-history-field-name">' +
+          localized(labelKey) + ':</span> ' + value + '</p>';
+        return '<details class="appeal-history-item" data-history-index="' + index + '">' +
+          '<summary title="' + safe(question) + '">' +
+            '<span class="appeal-history-heading">' +
+              '<span class="appeal-history-question-preview" dir="auto">' + safe(summary) + '</span>' +
+              '<span class="appeal-history-date">' + safe(formattedDate(item.submitted_at)) + '</span>' +
+            '</span>' +
+            '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
+              localized('appeals.status.' + item.status) + '</span>' +
+            '<span class="appeal-history-chevron" aria-hidden="true"></span>' +
+          '</summary>' +
+          '<div class="appeal-history-detail">' +
+            '<p class="appeal-history-full-question" dir="auto">' + safe(question) + '</p>' +
+            '<ol class="appeal-options">' + answers + '</ol>' +
+            '<div class="appeal-history-info-grid">' +
+              field('appeals.yourAnswer', safe(item.selected_key || this.locale.t('appeals.notAnswered'))) +
+              field('appeals.gameAnswer', safe(item.answer_key || this.locale.t('appeals.keyHidden'))) +
+              field('appeals.historyReasons', safe(item.reasons.map(r =>
+                this.locale.t('appeals.reason.' + r)).join(', ') || '—')) +
+              field('appeals.closed', safe(item.closed_at ? formattedDate(item.closed_at) : '—')) +
+            '</div>' +
+            (item.comment ? '<div class="appeal-history-note"><strong>' +
+              localized('appeals.historyComment') + '</strong><p dir="auto">' +
+              safe(item.comment) + '</p></div>' : '') +
+            (item.source_links.length ? '<div class="appeal-history-note"><strong>' +
+              localized('appeals.historySources') + '</strong><p>' +
+              safe(item.source_links.join(' | ')) + '</p></div>' : '') +
+            '<div class="appeal-history-verdict">' +
+              '<div class="appeal-history-verdict-header"><strong>' +
+                localized(decision.headingKey) + '</strong>' +
+                '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
+                  localized('appeals.status.' + item.status) + '</span>' +
+              '</div><p dir="auto">' +
+              safe(decision.message) + '</p></div>' +
+            '<div class="appeal-history-economy">' +
+              field('appeals.deposit',
+                safe(item.deposit.amount + ' ' + this.locale.t('stars.' + item.deposit.tier)) +
+                ' (' + safe(this.locale.t(item.deposit.refunded ? 'appeals.refunded' :
+                  item.status === 'rejected' ? 'appeals.depositForfeited' :
+                  'appeals.depositPending')) + ')') +
+              field('appeals.fee',
+                safe(item.filing_fee_bronze + ' ' + this.locale.t('stars.bronze'))) +
+              field('appeals.compensation',
+                safe(item.compensation.amount + ' ' +
+                  this.locale.t('stars.' + item.compensation.tier))) +
+              (item.question_number === 16
+                ? field('appeals.wagerRefunded',
+                  safe(this.locale.t(item.bonus_wager_refunded ? 'appeals.yes' : 'appeals.no')))
+                : '') +
+              field('appeals.hintRefunds', costs || '0') +
+            '</div>' +
+          '</div></details>';
+      }).join('');
+      const body = filterHtml +
+        '<div class="appeal-history-meta">' +
+          '<p class="appeal-history-count" id="appeal-history-count" role="status" aria-live="polite"></p>' +
+          '<button id="appeal-history-reset" class="appeal-history-reset" type="button">' +
+            localized('appeals.historyReset') + '</button>' +
+        '</div>' +
+        '<div class="appeal-scroll-wrap appeal-history-scroll-wrap">' +
+          '<div class="appeal-history" id="appeal-history-list">' + itemsHtml + '</div>' +
+          '<p class="appeal-history-empty" id="appeal-history-empty" hidden></p>' +
+          '<div class="appeal-scroll-hint" aria-hidden="true" hidden>' +
+            '<span class="appeal-scroll-chevron"></span>' +
+            '<span class="appeal-scroll-chevron"></span>' +
+          '</div>' +
+        '</div>';
+
+      await Swal.fire({
+        titleText: this.locale.t('appeals.myComplaints'),
+        width: '940px', html: body,
+        customClass: { popup: 'quiz-appeal-popup quiz-appeal-history-popup' },
+        confirmButtonText: this.locale.t('helper.close'),
+        didOpen: popup => {
+          const list = popup.querySelector<HTMLElement>('#appeal-history-list');
+          const search = popup.querySelector<HTMLInputElement>('#appeal-history-search');
+          const status = popup.querySelector<HTMLSelectElement>('#appeal-history-status');
+          const from = popup.querySelector<HTMLInputElement>('#appeal-history-from');
+          const to = popup.querySelector<HTMLInputElement>('#appeal-history-to');
+          const sort = popup.querySelector<HTMLSelectElement>('#appeal-history-sort');
+          const count = popup.querySelector<HTMLElement>('#appeal-history-count');
+          const reset = popup.querySelector<HTMLButtonElement>('#appeal-history-reset');
+          const empty = popup.querySelector<HTMLElement>('#appeal-history-empty');
+          const hint = popup.querySelector<HTMLElement>('.appeal-scroll-hint');
+          if (!list || !search || !status || !from || !to || !sort || !count || !reset || !empty || !hint) return;
+          const nodes = new Map(records.map((item, index) => [
+            item.id, list.querySelector<HTMLElement>('[data-history-index="' + index + '"]'),
+          ]));
+          const updateScroll = () => {
+            const scrollable = list.scrollHeight > list.clientHeight + 4;
+            hint.hidden = !scrollable ||
+              list.scrollTop + list.clientHeight >= list.scrollHeight - 8;
+          };
+          const update = () => {
+            const filters: AppealHistoryFilters = {
+              status: status.value as AppealHistoryStatus,
+              search: search.value, from: from.value, to: to.value,
+              sort: sort.value as AppealHistorySort,
+            };
+            reset.disabled = !filters.search && filters.status === 'all' &&
+              !filters.from && !filters.to && filters.sort === 'newest';
+            const matches = filterAppealHistory(records, filters);
+            const ids = new Set(matches.map(item => item.id));
+            for (const [id, node] of nodes) {
+              if (node) node.hidden = !ids.has(id);
+            }
+            for (const item of matches) {
+              const node = nodes.get(item.id);
+              if (node) list.appendChild(node); // preserves expanded <details>.
+            }
+            count.textContent = this.locale.format('appeals.historyCount', {
+              shown: matches.length, total: records.length,
+            });
+            empty.hidden = matches.length !== 0;
+            empty.textContent = this.locale.t(
+              records.length ? 'appeals.historyNoMatches' : 'appeals.none');
+            list.scrollTop = 0;
+            updateScroll();
+          };
+          reset.addEventListener('click', () => {
+            search.value = '';
+            status.value = 'all';
+            from.value = '';
+            to.value = '';
+            sort.value = 'newest';
+            update();
+          });
+          search.addEventListener('input', update);
+          for (const input of [status, from, to, sort]) {
+            input.addEventListener('change', update);
+          }
+          list.addEventListener('scroll', updateScroll, { passive: true });
+          list.addEventListener('toggle', updateScroll, true);
+          update();
+        },
+      });
     } catch (error) {
       if (this.isUnauthorized(error)) this.sessionExpired();
       else this.appealMessage = this.locale.t('appeals.historyFailed');
     } finally {
       this.appealBusy = false;
     }
+  }
+
+  async openAccountSettings(): Promise<void> {
+    if (!this.account || this.authBusy || this.authLoading || this.loading) return;
+    const accountId = this.account.id;
+    this.authBusy = true;
+    this.profileMenuOpen = false;
+    try {
+      const { default: Swal } = await import('sweetalert2');
+      const selection = await Swal.fire({
+        titleText: this.locale.t('settings.title'),
+        text: this.locale.t('settings.description'),
+        customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+        background: '#1b1e3e', color: '#f1f3ff',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: this.locale.t('settings.changeUsername'),
+        denyButtonText: this.locale.t('settings.changePassword'),
+        cancelButtonText: this.locale.t('auth.cancel'),
+        confirmButtonColor: '#8170d8', denyButtonColor: '#626ba1',
+      });
+      if (this.account?.id !== accountId) return;
+      if (selection.isConfirmed) await this.changeAccountUsername();
+      else if (selection.isDenied) await this.changeAccountPassword();
+    } catch {
+      this.error = 'settings.openFailed';
+    } finally {
+      this.authBusy = false;
+    }
+  }
+
+  private async changeAccountUsername(): Promise<void> {
+    if (!this.account) return;
+    const { default: Swal } = await import('sweetalert2');
+    const accountId = this.account.id;
+    const result = await Swal.fire({
+      titleText: this.locale.t('settings.changeUsername'),
+      html: '<div class="quiz-auth-fields">' +
+        '<label id="settings-username-label" for="settings-username-input"></label>' +
+        '<input id="settings-username-input" class="swal2-input" type="text" ' +
+        'autocomplete="username" maxlength="30"></div>',
+      didOpen: () => {
+        const popup = Swal.getPopup();
+        const label = popup?.querySelector<HTMLElement>('#settings-username-label');
+        if (label) label.textContent = this.locale.t('auth.username');
+        const input = popup?.querySelector<HTMLInputElement>('#settings-username-input');
+        if (input) input.value = this.account?.username || '';
+      },
+      customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+      confirmButtonText: this.locale.t('settings.saveUsername'),
+      cancelButtonText: this.locale.t('auth.cancel'), showCancelButton: true,
+      focusConfirm: false, showLoaderOnConfirm: true,
+      allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async () => {
+        const username = (Swal.getPopup()?.querySelector<HTMLInputElement>(
+          '#settings-username-input')?.value || '').trim();
+        if (!USERNAME_PATTERN.test(username)) {
+          Swal.showValidationMessage(this.locale.t('auth.usernameInvalid'));
+          return false;
+        }
+        try {
+          return await firstValueFrom(this.http.patch<Account>(
+            '/api/auth/username', { username },
+          ).pipe(timeout(15000)));
+        } catch (error: unknown) {
+          if (this.isUnauthorized(error)) {
+            this.sessionExpired();
+            return false;
+          }
+          const key = error instanceof HttpErrorResponse && error.status === 409
+            ? 'auth.usernameTaken' : 'settings.updateFailed';
+          Swal.showValidationMessage(this.locale.t(key));
+          return false;
+        }
+      },
+    });
+    if (!result.isConfirmed || !result.value || this.account?.id !== accountId) return;
+    // Keep the same user id, active round, awards and local storage bookmarks.
+    this.account = result.value as Account;
+    await Swal.fire({
+      titleText: this.locale.t('settings.usernameChanged'),
+      icon: 'success', background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonText: this.locale.t('settings.done'),
+      confirmButtonColor: '#8170d8',
+    });
+  }
+
+  private async changeAccountPassword(): Promise<void> {
+    if (!this.account) return;
+    const { default: Swal } = await import('sweetalert2');
+    const accountId = this.account.id;
+    const fields: { id: string; label: string; autocomplete: string }[] = [
+      { id: 'settings-old-password', label: 'settings.currentPassword', autocomplete: 'current-password' },
+      { id: 'settings-new-password', label: 'settings.newPassword', autocomplete: 'new-password' },
+      { id: 'settings-repeat-password', label: 'settings.repeatPassword', autocomplete: 'new-password' },
+    ];
+    const html = '<div class="quiz-auth-fields">' + fields.map(field =>
+      '<label id="' + field.id + '-label" for="' + field.id + '"></label>' +
+      '<input id="' + field.id + '" class="swal2-input" type="password" ' +
+      'autocomplete="' + field.autocomplete + '" maxlength="256">'
+    ).join('') + '</div>';
+    const result = await Swal.fire({
+      titleText: this.locale.t('settings.changePassword'),
+      html,
+      didOpen: () => {
+        const popup = Swal.getPopup();
+        for (const field of fields) {
+          const label = popup?.querySelector<HTMLElement>('#' + field.id + '-label');
+          if (label) label.textContent = this.locale.t(field.label);
+        }
+      },
+      customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
+      background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonColor: '#8170d8',
+      confirmButtonText: this.locale.t('settings.savePassword'),
+      cancelButtonText: this.locale.t('auth.cancel'), showCancelButton: true,
+      focusConfirm: false, showLoaderOnConfirm: true,
+      allowOutsideClick: () => !Swal.isLoading(),
+      preConfirm: async () => {
+        const value = (id: string) =>
+          Swal.getPopup()?.querySelector<HTMLInputElement>('#' + id)?.value || '';
+        const current_password = value('settings-old-password');
+        const new_password = value('settings-new-password');
+        const confirm_password = value('settings-repeat-password');
+        if (!current_password) {
+          Swal.showValidationMessage(this.locale.t('settings.currentRequired'));
+          return false;
+        }
+        if (new_password.length < 8 || new_password.length > 256) {
+          Swal.showValidationMessage(this.locale.t('auth.passwordInvalid'));
+          return false;
+        }
+        if (new_password !== confirm_password) {
+          Swal.showValidationMessage(this.locale.t('auth.passwordMismatch'));
+          return false;
+        }
+        if (new_password === current_password) {
+          Swal.showValidationMessage(this.locale.t('settings.passwordSame'));
+          return false;
+        }
+        try {
+          await firstValueFrom(this.http.patch<void>(
+            '/api/auth/password', { current_password, new_password, confirm_password },
+          ).pipe(timeout(15000)));
+          return true;
+        } catch (error: unknown) {
+          const detail = error instanceof HttpErrorResponse ? error.error?.detail : null;
+          if (this.isUnauthorized(error) && detail !== 'Current password is incorrect') {
+            this.sessionExpired();
+            return false;
+          }
+          let key = 'settings.updateFailed';
+          if (detail === 'Current password is incorrect') key = 'settings.wrongPassword';
+          else if (detail === 'Password login not configured') key = 'settings.passwordUnavailable';
+          else if (error instanceof HttpErrorResponse && error.status === 429)
+            key = 'auth.rateLimited';
+          Swal.showValidationMessage(this.locale.t(key));
+          return false;
+        }
+      },
+    });
+    if (!result.isConfirmed || !result.value || this.account?.id !== accountId) return;
+    await Swal.fire({
+      titleText: this.locale.t('settings.passwordChanged'),
+      text: this.locale.t('settings.otherSessionsRevoked'),
+      icon: 'success', background: '#1b1e3e', color: '#f1f3ff',
+      confirmButtonText: this.locale.t('settings.done'),
+      confirmButtonColor: '#8170d8',
+    });
   }
 
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
@@ -1035,6 +1574,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
         this.gameQuestionIssued = true;
         this.helperReply = '';
         this.helperError = '';
@@ -1348,11 +1888,13 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedLanguage = account.preferred_language;
     }
     this.refreshStats();
+    this.refreshAppealAllowance();
     this.restoreActiveGame();
   }
 
   private clearAccount(): void {
     this.statsVersion++;
+    this.appealAllowance = null;
     this.resetEnabled = false;
     this.restoreVersion++;
     this.restoringGame = false;
