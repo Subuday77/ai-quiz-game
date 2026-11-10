@@ -44,6 +44,10 @@ _KNOWN_ITEMS = [
     ("thimphu_unsupported_river",
      "Столица какого государства расположена на берегах реки Чуруйунгбо и известна как одна из самых высокогорных столиц мира?",
      "Бутан"),
+    # Confirmed player appeal 2026-11-10: Ural delta is north of Volga,
+    # not south. The spatial guard below generalizes beyond this one case.
+    ("ural_volga_false_south_relation",
+     "Какая река впадает в Каспийское море южнее Волги?", "Урал"),
 ]
 _INDEX = {(_fold(stem), _fold(answer)): code
           for code, stem, answer in _KNOWN_ITEMS}
