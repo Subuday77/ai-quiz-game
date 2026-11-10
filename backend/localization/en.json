@@ -23,7 +23,7 @@
   "hero.incorrect": "Not quite.",
   "hero.lost": "Game over",
   "hero.completed": "Round complete!",
-  "hero.intro": "15 questions. Four choices. One shot at the secret 16th question if you finish without hints.",
+  "hero.intro": "15 questions. Four choices. Reach the secret 16th question by answering all 15 correctly without using in-game hints. Excluding categories before the game and consulting your helper during the game do not count as hints.",
   "hero.signIn": "Sign in or create an account to save your games and earn stars.",
   "hero.restoring": "Checking for an unfinished game…",
   "hero.resumed": "A saved round is available. You can continue it or start a new game.",
