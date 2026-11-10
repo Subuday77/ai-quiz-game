@@ -114,6 +114,8 @@ class Question(Base):
     schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
     # Reviewed knowledge domain for Platinum Helper; NULL for old questions.
     competence_area: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Internal score only; the public API must never expose aggregate votes.
+    vote_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     generation_request_id: Mapped[str | None] = mapped_column(String(100))
     created_at = datetime_column()
     __table_args__ = (
@@ -123,7 +125,50 @@ class Question(Base):
         UniqueConstraint("language", "fingerprint", name="uq_question_language_fingerprint"),
         Index("ix_questions_topic_difficulty", "topic_id", "requested_difficulty"),
         Index("ix_questions_approved", "status", "language"),
+        Index("ix_questions_pool_voted", "status", "language", "topic_id",
+              "requested_difficulty", "vote_score"),
     )
+
+
+class QuestionVote(Base):
+    """One mutable thumbs-up/down vote per account/question."""
+    __tablename__ = "question_votes"
+    __table_args__ = (
+        CheckConstraint("value IN (-1, 1)", name="ck_question_vote_value"),
+        Index("ix_question_votes_user", "user_id"),
+    )
+    question_id = mapped_column(Uuid(as_uuid=True),
+                                ForeignKey("questions.id", ondelete="CASCADE"),
+                                primary_key=True)
+    user_id = mapped_column(Uuid(as_uuid=True),
+                            ForeignKey("users.id", ondelete="CASCADE"),
+                            primary_key=True)
+    value: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at = datetime_column()
+    updated_at = datetime_column()
+
+
+class QuestionVoteReview(Base):
+    """Durable once-per-question low-score review; never charges players."""
+    __tablename__ = "question_vote_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending','retry_pending','upheld','rejected',"
+            "'inconclusive','technical_unresolved')",
+            name="ck_question_vote_review_status"),
+        CheckConstraint("attempts >= 0", name="ck_question_vote_review_attempts"),
+        Index("ix_question_vote_review_due", "status", "next_retry_at"),
+    )
+    question_id = mapped_column(Uuid(as_uuid=True),
+                                ForeignKey("questions.id", ondelete="CASCADE"),
+                                primary_key=True)
+    score_at_trigger: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verdict: Mapped[str | None] = mapped_column(Text)
+    queued_at = datetime_column()
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class QuestionTag(Base):
