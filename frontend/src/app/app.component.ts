@@ -118,7 +118,7 @@ interface AppealQuote {
 }
 interface AppealRecord {
   id: string; question_id: string; question_number: number; language: string;
-  status: string; submitted_at: string; closed_at: string | null;
+  status: string; display_status?: string; submitted_at: string; closed_at: string | null;
   question_snapshot: AppealQuote['question_snapshot'];
   reasons: string[]; comment: string; source_links: string[];
   verdict: string | null; deposit: { tier: StarTier; amount: number; refunded: boolean };
@@ -790,7 +790,7 @@ export class AppComponent implements OnInit, OnDestroy {
         requestId = crypto.randomUUID();
         try { sessionStorage.setItem(storageKey, requestId); } catch { /* private mode */ }
       }
-      await firstValueFrom(this.http.post<AppealRecord>(
+      const submittedAppeal = await firstValueFrom(this.http.post<AppealRecord>(
         GAME_API + '/' + runId + '/appeals', {
           ...draft, question_id: question.question_id, request_id: requestId,
           expected_fee_bronze: quote.filing_fee_bronze,
@@ -802,6 +802,9 @@ export class AppComponent implements OnInit, OnDestroy {
       this.appealMessage = this.locale.t('appeals.received');
       this.refreshSpendableStars();
       this.refreshAppealAllowance();
+      if (submittedAppeal.status === 'pending' || submittedAppeal.status === 'retry_pending') {
+        this.watchAppealSettlement(submittedAppeal.id, accountId, runId);
+      }
       if (quote.before_answer && this.gameId === runId) {
         this.current = null;
         this.feedback = null;
@@ -829,6 +832,42 @@ export class AppComponent implements OnInit, OnDestroy {
       html: '<div class="appeal-history appeal-rules">' + blocks + '</div>',
       confirmButtonText: this.locale.t('helper.close'),
     });
+  }
+
+  /** Bounded background check: reflect Judge's eventual wallet changes without F5.
+   *  No repeated paid model request: this only reads this player's appeal status.
+   */
+  private watchAppealSettlement(appealId: string, accountId: string, runId: string): void {
+    let polls = 0;
+    let inFlight = false;
+    const watch = timer(2500, 4000).subscribe(() => {
+      if (this.account?.id !== accountId || ++polls > 24) {
+        watch.unsubscribe();
+        return;
+      }
+      if (inFlight) return;
+      inFlight = true;
+      const request = this.http.get<AppealRecord>(
+        '/api/v2/appeals/' + encodeURIComponent(appealId),
+      ).pipe(timeout(10000), finalize(() => { inFlight = false; })).subscribe({
+        next: item => {
+          if (this.account?.id !== accountId) { watch.unsubscribe(); return; }
+          if (!['upheld', 'rejected', 'technical_unresolved'].includes(item.status)) return;
+          watch.unsubscribe();
+          this.refreshSpendableStars();
+          this.refreshAppealAllowance();
+          if (this.gameId === runId &&
+              this.appealMessage === this.locale.t('appeals.received')) {
+            this.appealMessage = this.locale.t('appeals.status.' + item.status);
+          }
+        },
+        error: err => {
+          if (this.isUnauthorized(err)) watch.unsubscribe();
+        },
+      });
+      this.subscriptions.add(request);
+    });
+    this.subscriptions.add(watch);
   }
 
   private refreshAppealAllowance(): void {
@@ -862,6 +901,9 @@ export class AppComponent implements OnInit, OnDestroy {
       }
       if (this.account?.id !== accountId) return;
       this.refreshAppealAllowance();
+      // History may already show an asynchronously settled appeal, while
+      // the top-of-page wallet still reflects the earlier deposit debit.
+      this.refreshSpendableStars();
       const safe = (value: unknown) => this.escapeAppealHtml(value);
       const localized = (key: string) => safe(this.locale.t(key));
       const formattedDate = (value: string) => {
@@ -926,8 +968,9 @@ export class AppComponent implements OnInit, OnDestroy {
         }).join('');
         const costs = item.expenses_refunded.map(v =>
           safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
+        const displayedStatus = item.display_status || item.status;
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
-          'technical_unresolved'].includes(item.status) ? item.status : 'unknown';
+          'technical_unresolved'].includes(displayedStatus) ? displayedStatus : 'unknown';
         const decision = appealHistoryDecisionPresentation(
           item.status, item.verdict, key => this.locale.t(key));
         const field = (labelKey: string, value: string) =>
@@ -940,7 +983,7 @@ export class AppComponent implements OnInit, OnDestroy {
               '<span class="appeal-history-date">' + safe(formattedDate(item.submitted_at)) + '</span>' +
             '</span>' +
             '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
-              localized('appeals.status.' + item.status) + '</span>' +
+              localized('appeals.status.' + allowedStatus) + '</span>' +
             '<span class="appeal-history-chevron" aria-hidden="true"></span>' +
           '</summary>' +
           '<div class="appeal-history-detail">' +
@@ -963,7 +1006,7 @@ export class AppComponent implements OnInit, OnDestroy {
               '<div class="appeal-history-verdict-header"><strong>' +
                 localized(decision.headingKey) + '</strong>' +
                 '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
-                  localized('appeals.status.' + item.status) + '</span>' +
+                  localized('appeals.status.' + allowedStatus) + '</span>' +
               '</div><p dir="auto">' +
               safe(decision.message) + '</p></div>' +
             '<div class="appeal-history-economy">' +
