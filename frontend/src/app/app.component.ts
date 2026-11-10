@@ -18,6 +18,7 @@ const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
+const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
@@ -60,7 +61,6 @@ interface PublicQuestion {
   answers: Partial<Record<Choice, string>>;
   bonus: boolean;
   hidden_count: number;
-  my_vote?: -1 | 0 | 1;
 }
 interface CategoryInfo {
   allowed: string[];
@@ -291,8 +291,7 @@ export class AppComponent implements OnInit, OnDestroy {
   resumeCandidate: GameInfo | null = null;
   private resumeRunLanguage = '';
   current: PublicQuestion | null = null;
-  voteBusy = false;
-  voteError = false;
+  currentVote: -1 | 0 | 1 = 0;
   feedback: AnswerFeedback | null = null;
   loading = false;
   error = '';
@@ -1549,7 +1548,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.screen = 'question';
     this.current = null;
     this.feedback = null;
-    this.voteError = false;
+    this.currentVote = 0;
     this.showCategoryExclusions = false;
     this.resumeAvailable = false;
     this.loading = true;
@@ -1578,6 +1577,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
         this.gameQuestionIssued = true;
         this.helperReply = '';
@@ -1639,43 +1639,54 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
   }
 
+  private draftVoteKey(questionId: string): string {
+    return DRAFT_VOTE_KEY + this.account?.id + ':' + this.gameId + ':' + questionId;
+  }
+
+  private restoreDraftVote(questionId: string): -1 | 0 | 1 {
+    try {
+      const raw = localStorage.getItem(this.draftVoteKey(questionId));
+      return raw === '-1' ? -1 : raw === '1' ? 1 : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private clearDraftVote(questionId: string): void {
+    try { localStorage.removeItem(this.draftVoteKey(questionId)); }
+    catch { /* local storage is optional */ }
+  }
+
   voteQuestion(value: -1 | 1): void {
+    // A choice on an unanswered card is provisional. No HTTP call, no
+    // reputation change, no Judge referral until answer succeeds.
     if (!this.current || !this.gameId || !this.account ||
-        this.voteBusy || this.loading || this.appealBusy ||
-        this.perksBusy || this.screen !== 'question') return;
-    const questionId = this.current.question_id;
-    const nextValue: -1 | 0 | 1 = this.current.my_vote === value ? 0 : value;
-    this.voteBusy = true;
-    this.voteError = false;
-    this.subscriptions.add(this.http.put<{ my_vote: -1 | 0 | 1 }>(
-      GAME_API + '/' + this.gameId + '/questions/' + questionId + '/vote',
-      { value: nextValue },
-    ).pipe(
-      timeout(this.requestTimeoutMs),
-      finalize(() => { this.voteBusy = false; }),
-    ).subscribe({
-      next: result => {
-        if (this.current?.question_id === questionId && this.screen === 'question')
-          this.current = { ...this.current, my_vote: result.my_vote };
-      },
-      error: (err: unknown) => {
-        if (this.isUnauthorized(err)) this.sessionExpired();
-        else if (this.current?.question_id === questionId) this.voteError = true;
-      },
-    }));
+        this.loading || this.appealBusy || this.perksBusy ||
+        this.screen !== 'question') return;
+    this.currentVote = this.currentVote === value ? 0 : value;
+    try {
+      const key = this.draftVoteKey(this.current.question_id);
+      if (this.currentVote === 0) localStorage.removeItem(key);
+      else localStorage.setItem(key, String(this.currentVote));
+    } catch { /* refresh may forget local choice, never creates a DB vote */ }
   }
 
   answer(choice: Choice): void {
-    if (this.loading || this.perksBusy || this.appealBusy || this.voteBusy || !this.current || this.screen !== 'question' || !this.account) return;
+    if (this.loading || this.perksBusy || this.appealBusy || !this.current || this.screen !== 'question' || !this.account) return;
+    const submittedQuestionId = this.current.question_id;
+    const submittedVote = this.currentVote;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
       GAME_API + '/' + this.gameId + '/answer', {
-        question_id: this.current.question_id,
+        question_id: submittedQuestionId,
         answer: choice,
+        vote: submittedVote,
       },
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
+        this.clearDraftVote(submittedQuestionId);
+        this.currentVote = 0;
         this.feedback = result;
         this.bonusDecisionAvailable = result.phase === 'bonus';
         if (this.current?.bonus && !result.correct) {
@@ -2396,8 +2407,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private resetGameView(): void {
-    this.voteError = false;
-    this.voteBusy = false;
+    this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.longWait = false;
