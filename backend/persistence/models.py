@@ -114,24 +114,28 @@ class Question(Base):
     schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
     # Reviewed knowledge domain for Platinum Helper; NULL for old questions.
     competence_area: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    # Internal score only; the public API must never expose aggregate votes.
+    # Historical net never resets. Working net resets after acquittals.
+    # Both are internal; only the user's uncommitted local choice is visible.
     vote_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    working_vote_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    community_referrals: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     generation_request_id: Mapped[str | None] = mapped_column(String(100))
     created_at = datetime_column()
     __table_args__ = (
         CheckConstraint("requested_difficulty BETWEEN 0 AND 15", name="ck_question_difficulty"),
         CheckConstraint("correct_key IN ('A','B','C','D')", name="ck_question_correct_key"),
         CheckConstraint("status IN ('pending','approved','rejected','quarantined')", name="ck_question_status"),
+        CheckConstraint("community_referrals BETWEEN 0 AND 3", name="ck_community_referrals"),
         UniqueConstraint("language", "fingerprint", name="uq_question_language_fingerprint"),
         Index("ix_questions_topic_difficulty", "topic_id", "requested_difficulty"),
         Index("ix_questions_approved", "status", "language"),
         Index("ix_questions_pool_voted", "status", "language", "topic_id",
-              "requested_difficulty", "vote_score"),
+              "requested_difficulty", "working_vote_score"),
     )
 
 
 class QuestionVote(Base):
-    """One mutable thumbs-up/down vote per account/question."""
+    """One immutable, answer-committed ballot per account/question forever."""
     __tablename__ = "question_votes"
     __table_args__ = (
         CheckConstraint("value IN (-1, 1)", name="ck_question_vote_value"),
@@ -143,30 +147,36 @@ class QuestionVote(Base):
     user_id = mapped_column(Uuid(as_uuid=True),
                             ForeignKey("users.id", ondelete="CASCADE"),
                             primary_key=True)
+    run_id = mapped_column(Uuid(as_uuid=True),
+                           ForeignKey("game_runs.id", ondelete="RESTRICT"), nullable=False)
     value: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     created_at = datetime_column()
-    updated_at = datetime_column()
 
 
 class QuestionVoteReview(Base):
-    """Durable once-per-question low-score review; never charges players."""
+    """Durable history of threshold crossings, reviews and automatic bans."""
     __tablename__ = "question_vote_reviews"
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending','retry_pending','upheld','rejected',"
-            "'inconclusive','technical_unresolved')",
+            "'inconclusive','technical_unresolved','auto_banned')",
             name="ck_question_vote_review_status"),
+        CheckConstraint("referral_number BETWEEN 1 AND 3", name="ck_vote_referral_number"),
         CheckConstraint("attempts >= 0", name="ck_question_vote_review_attempts"),
         Index("ix_question_vote_review_due", "status", "next_retry_at"),
     )
     question_id = mapped_column(Uuid(as_uuid=True),
                                 ForeignKey("questions.id", ondelete="CASCADE"),
                                 primary_key=True)
+    referral_number: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    trigger_user_id = mapped_column(Uuid(as_uuid=True),
+                                   ForeignKey("users.id", ondelete="SET NULL"))
     score_at_trigger: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     verdict: Mapped[str | None] = mapped_column(Text)
+    judge_model: Mapped[str | None] = mapped_column(String(130))
     queued_at = datetime_column()
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
