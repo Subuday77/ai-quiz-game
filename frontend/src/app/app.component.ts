@@ -153,6 +153,19 @@ export function appealQuestionExcerpt(value: string): string {
   return words.slice(0, 4).join(' ') + (words.length > 4 ? '…' : '');
 }
 
+/** Only finalized merits rulings are Judge decisions; other states are statuses. */
+export function appealHistoryDecisionPresentation(
+  status: string, verdict: string | null, translate: (key: string) => string,
+): { headingKey: string; message: string } {
+  const decided = status === 'upheld' || status === 'rejected';
+  const awaiting = status === 'pending' || status === 'retry_pending';
+  return {
+    headingKey: decided ? 'appeals.historyVerdict' : 'appeals.historyComplaintStatus',
+    message: awaiting ? translate('appeals.notDecided') :
+      verdict || translate('appeals.notDecided'),
+  };
+}
+
 /** Pure function shared by UI and regression tests: no network or state mutation. */
 export function filterAppealHistory(
   records: AppealRecord[], filters: AppealHistoryFilters,
@@ -913,6 +926,8 @@ export class AppComponent implements OnInit, OnDestroy {
           safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
           'technical_unresolved'].includes(item.status) ? item.status : 'unknown';
+        const decision = appealHistoryDecisionPresentation(
+          item.status, item.verdict, key => this.locale.t(key));
         const field = (labelKey: string, value: string) =>
           '<p class="appeal-history-field"><span class="appeal-history-field-name">' +
           localized(labelKey) + ':</span> ' + value + '</p>';
@@ -944,11 +959,11 @@ export class AppComponent implements OnInit, OnDestroy {
               safe(item.source_links.join(' | ')) + '</p></div>' : '') +
             '<div class="appeal-history-verdict">' +
               '<div class="appeal-history-verdict-header"><strong>' +
-                localized('appeals.historyVerdict') + '</strong>' +
+                localized(decision.headingKey) + '</strong>' +
                 '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
                   localized('appeals.status.' + item.status) + '</span>' +
               '</div><p dir="auto">' +
-              safe(item.verdict || this.locale.t('appeals.notDecided')) + '</p></div>' +
+              safe(decision.message) + '</p></div>' +
             '<div class="appeal-history-economy">' +
               field('appeals.deposit',
                 safe(item.deposit.amount + ' ' + this.locale.t('stars.' + item.deposit.tier)) +
