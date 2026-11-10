@@ -372,7 +372,9 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertEqual(result.correct_answer, "C")
         self.assertEqual(gen.call_count, 2)
         self.assertEqual(review.call_count, 2)
-        sleep.assert_not_called()
+        # A normal quality rejection uses the existing bounded retry
+        # backoff; only true arbiter outages terminate without sleeping.
+        sleep.assert_called_once()
 
     def test_savarin_rome_river_origin_and_calvados_signals(self):
         scenarios = [
