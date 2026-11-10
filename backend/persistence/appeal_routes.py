@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -31,6 +31,26 @@ class AppealInput(BaseModel):
     expected_fee_bronze: int = Field(ge=0)
 
 
+def _appeal_display_status(appeal: QuestionAppeal, *, now: datetime | None = None) -> str:
+    """Keep internal retry_pending lease separate from a scheduled retry.
+
+    Worker marks an actively processing appeal retry_pending and gives it
+    a 30-minute crash-recovery lease. A genuine deferred retry is scheduled
+    for a day later. Do not tell players a technical retry is pending merely
+    because the first Judge call is underway.
+    """
+    if appeal.status != "retry_pending":
+        return appeal.status
+    if appeal.next_retry_at is None:
+        return "pending"
+    now = now or datetime.now(timezone.utc)
+    when = appeal.next_retry_at
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return ("retry_pending" if when - now > timedelta(minutes=30)
+            else "pending")
+
+
 def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
     """Allowlist: hide the private answer key until the game is finished."""
     reveal_key = not appeal.before_answer
@@ -44,7 +64,9 @@ def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
         "language": appeal.language, "reasons": appeal.reasons,
         "comment": appeal.comment, "source_links": appeal.source_links,
         "before_answer": appeal.before_answer, "question_number": appeal.question_number,
-        "status": appeal.status, "submitted_at": appeal.submitted_at,
+        "status": appeal.status,
+        "display_status": _appeal_display_status(appeal),
+        "submitted_at": appeal.submitted_at,
         "closed_at": appeal.closed_at, "verdict": appeal.verdict_localized,
         "deposit": {"tier": appeal.deposit_tier, "amount": 1,
                     "refunded": appeal.deposit_refunded_at is not None},
