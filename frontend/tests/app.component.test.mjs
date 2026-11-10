@@ -2512,7 +2512,7 @@ test('an active appeal lease displays In review, not a technical retry, and wall
   assert.match(history, /this\.refreshSpendableStars\(\)/,
     'history fetch must refresh the post-settlement wallet');
 
-  const submit = source.slice(source.indexOf('async submitQuestionAppeal('),
+  const submit = source.slice(source.indexOf('async openAppealForm('),
     source.indexOf('async openAppealRules('));
   assert.match(submit, /this\.watchAppealSettlement\(submittedAppeal\.id, accountId, runId\)/);
   const watcher = source.slice(source.indexOf('private watchAppealSettlement('),
