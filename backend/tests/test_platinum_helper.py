@@ -4,7 +4,8 @@ from uuid import UUID
 
 from platinum_helper.core import (
     MAX_CONSULTATIONS, TOPICS, HelperService, generate_profile, CATEGORY_TOPICS,
-    choose_delivery_style, choose_presentation_style,
+    choose_delivery_style, choose_presentation_style, outcome_weights,
+    PROFESSIONAL_RELATED_SKILLS, PROFESSIONAL_SKILLS, choose_outcome,
 )
 
 
@@ -52,6 +53,52 @@ class PlatinumHelperTests(unittest.TestCase):
         self.assertLessEqual(len(card["weak_topics"]), 3)
         self.assertEqual(card, self.profile.public_card(3))
 
+    def test_related_skills_never_roll_low_and_keep_extra_high_budget(self):
+        for profession, related in PROFESSIONAL_RELATED_SKILLS.items():
+            for seed in range(30):
+                profile = generate_profile(profession, rng=Random(seed))
+                self.assertTrue(all(profile.skills[t] == "HIGH"
+                                    for t in PROFESSIONAL_SKILLS[profession]))
+                self.assertTrue(all(profile.skills[t] in ("MEDIUM", "HIGH")
+                                    for t in related), (profession, seed))
+                extra = sum(level == "HIGH" for topic, level in profile.skills.items()
+                            if topic not in PROFESSIONAL_SKILLS[profession])
+                lo, hi = ((0, 1) if profile.erudition <= 20 else
+                          (2, 3) if profile.erudition <= 40 else
+                          (4, 6) if profile.erudition <= 60 else
+                          (7, 9) if profile.erudition <= 80 else (10, 12))
+                self.assertTrue(lo <= extra <= hi)
+
+    def test_historian_understands_related_mythology_and_culture(self):
+        for seed in range(100):
+            profile = generate_profile("Historian", rng=Random(seed))
+            self.assertEqual(profile.skills["History"], "HIGH")
+            for area in ("Mythology", "Culture"):
+                self.assertNotEqual(profile.skills[area], "LOW")
+
+    def test_outcome_probability_schedule(self):
+        for skill, decay in (("HIGH", 0.5), ("MEDIUM", 2.5), ("LOW", 5.0)):
+            for number in (1, 5, 10, 15):
+                know, mistaken, unsure = outcome_weights(skill, number)
+                self.assertAlmostEqual(know, 100 - number * decay)
+                self.assertAlmostEqual(mistaken, (100 - know) / 3)
+                self.assertAlmostEqual(unsure, (100 - know) * 2 / 3)
+                self.assertAlmostEqual(know + mistaken + unsure, 100)
+        self.assertEqual(outcome_weights("LOW", 15), (25, 25, 50))
+        for n in (0, 16):
+            with self.assertRaises(ValueError):
+                outcome_weights("HIGH", n)
+
+    def test_outcome_draw_respects_dynamic_cutoffs(self):
+        class FixedRandom:
+            def __init__(self, value):
+                self.value = value
+            def random(self):
+                return self.value
+        self.assertEqual(choose_outcome("LOW", FixedRandom(0.24), 15), "KNOW")
+        self.assertEqual(choose_outcome("LOW", FixedRandom(0.30), 15), "MISTAKEN")
+        self.assertEqual(choose_outcome("LOW", FixedRandom(0.75), 15), "UNSURE")
+
     def test_retry_keeps_choice_and_does_not_charge_twice(self):
         first = self.service.start("call-1", "q-1", "History", self.options, "C", rng=Random(4))
         again = self.service.start("call-1", "q-1", "History", self.options, "C", rng=Random(987))
@@ -91,7 +138,10 @@ class PlatinumHelperTests(unittest.TestCase):
 
     def test_every_competence_is_playable_and_fire_safety_is_not_hidden(self):
         self.assertNotIn("Fire Safety", TOPICS)
-        self.assertEqual(set(TOPICS), set(CATEGORY_TOPICS.values()))
+        self.assertTrue(set(CATEGORY_TOPICS.values()) <= set(TOPICS))
+        # Some profession areas are useful as reviewed question-level skills
+        # even if no broad category falls back to them (e.g. Agriculture).
+        self.assertIn("Agriculture", TOPICS)
 
     def test_new_character_has_stable_localizable_tagline_fields(self):
         p = generate_profile("Historian", name="Jean Dupont",

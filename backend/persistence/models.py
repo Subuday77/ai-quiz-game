@@ -199,6 +199,8 @@ class QuestionAttempt(Base):
     selected_key: Mapped[str | None] = mapped_column(String(1))
     is_correct: Mapped[bool | None] = mapped_column(Boolean)
     hints_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    # Actual paid hint receipts scoped to this question attempt, not the entire run.
+    appeal_expenses: Mapped[dict] = mapped_column(JsonData, nullable=False, default=dict)
     revision: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     category_change_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
@@ -355,3 +357,88 @@ class PlatinumHelperCall(Base):
         CheckConstraint("selected_key IS NULL OR selected_key IN ('A','B','C','D')", name="ck_helper_selected_key"),
     )
 
+
+class QuestionAppeal(Base):
+    """Immutable complaint evidence plus independently adjudicated result.
+
+    The bonus gold wager is NOT the appeal deposit and is not stored here as a
+    second deposit; its original debit remains in the wallet ledger.
+    """
+    __tablename__ = "question_appeals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "question_id", name="uq_appeal_user_question"),
+        CheckConstraint("question_number BETWEEN 1 AND 16", name="ck_appeal_number"),
+        CheckConstraint("filing_fee_bronze >= 0", name="ck_appeal_fee"),
+        CheckConstraint("deposit_tier IN ('bronze','silver','gold')", name="ck_appeal_deposit"),
+        CheckConstraint(
+            "status IN ('pending','retry_pending','upheld','rejected','technical_unresolved')",
+            name="ck_appeal_status"),
+        Index("ix_appeals_question", "question_id"),
+        Index("ix_appeals_user_submitted", "user_id", "submitted_at"),
+        Index("ix_appeals_pending", "status", "next_retry_at"),
+    )
+
+    id = id_column()
+    question_id = mapped_column(Uuid(as_uuid=True),
+                                ForeignKey("questions.id", ondelete="RESTRICT"), nullable=False)
+    attempt_id = mapped_column(Uuid(as_uuid=True),
+                               ForeignKey("question_attempts.id", ondelete="SET NULL"))
+    run_id = mapped_column(Uuid(as_uuid=True),
+                           ForeignKey("game_runs.id", ondelete="SET NULL"))
+    user_id = mapped_column(Uuid(as_uuid=True),
+                            ForeignKey("users.id", ondelete="SET NULL"))
+    idempotency_key: Mapped[str] = mapped_column(String(110), unique=True, nullable=False)
+    question_snapshot: Mapped[dict] = mapped_column(JsonData, nullable=False)
+    language: Mapped[str] = mapped_column(String(25), nullable=False)
+    reasons: Mapped[list] = mapped_column(JsonData, nullable=False)
+    comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source_links: Mapped[list] = mapped_column(JsonData, nullable=False, default=list)
+    context: Mapped[dict] = mapped_column(JsonData, nullable=False, default=dict)
+    before_answer: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    question_number: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    deposit_tier: Mapped[str] = mapped_column(String(15), nullable=False)
+    filing_fee_bronze: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(25), nullable=False, default="pending")
+    verdict_en: Mapped[str | None] = mapped_column(Text)
+    verdict_localized: Mapped[str | None] = mapped_column(Text)
+    verdict_data: Mapped[dict | None] = mapped_column(JsonData)
+    judge_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submitted_at = datetime_column()
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deposit_refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    compensated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bonus_wager_refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AppealQaFreeQuota(Base):
+    """Extra free filings for explicitly enabled local QA, never for production.
+
+    Month start is UTC. This table does not alter appeals, their verdicts,
+    monthly submission counts or wallet transactions.
+    """
+    __tablename__ = "appeal_qa_free_quota"
+    __table_args__ = (CheckConstraint("extra_free >= 0 AND extra_free <= 1000",
+                                     name="ck_appeal_qa_free_limit"),)
+
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+                            primary_key=True)
+    month_start = mapped_column(DateTime(timezone=True), primary_key=True)
+    extra_free: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at = datetime_column()
+
+
+class QuestionModeration(Base):
+    """Counters remain independent from any single player's verdict."""
+    __tablename__ = "question_moderation"
+    __table_args__ = (CheckConstraint(
+        "distinct_complainants >= 0 AND upheld_count >= 0 AND rejected_count >= 0",
+        name="ck_moderation_counters"),)
+
+    question_id = mapped_column(Uuid(as_uuid=True),
+                                ForeignKey("questions.id", ondelete="RESTRICT"), primary_key=True)
+    distinct_complainants: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    upheld_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    permanently_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    block_reason: Mapped[str | None] = mapped_column(String(40))

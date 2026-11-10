@@ -8,6 +8,7 @@ from unittest.mock import patch
 from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
 
+from helper_fallback_fixtures import english_templates, russian_templates
 from scripts import helper_live_regression as qa
 
 
@@ -82,7 +83,7 @@ class HelperLiveQATests(unittest.TestCase):
         abstain = qa.scenario(sample_question(300, False), "ABSTAIN", 1, 123)
         self.assertEqual(abstain["effective_outcome"], "UNSURE")
 
-    def test_guardrail_retry_and_trace_are_real_responder_calls(self):
+    def test_guardrail_single_attempt_and_fallback_are_traced(self):
         s = qa.scenario(sample_question(500, True), "MISTAKEN", 0, 123)
         with tempfile.TemporaryDirectory() as temp:
             attempts = Path(temp) / "attempts.jsonl"
@@ -90,25 +91,27 @@ class HelperLiveQATests(unittest.TestCase):
                 "KEY: B\nSPEECH: Но правильный ответ 476.",
                 "KEY: B\nSPEECH: Я бы выбрал 395.",
             ])
-            result = qa.evaluate(s, sdk, attempts, 2.5, 15.0)
-            self.assertEqual(result["status"], "completed")
+            result = qa.evaluate(s, sdk, attempts, 2.5, 15.0, fallback_loader=russian_templates)
+            self.assertEqual(result["status"], "completed", result)
             self.assertEqual(result["guard_rejections"], 1)
-            self.assertEqual(result["api_requests"], 2)
-            self.assertFalse(result["is_fallback"])
-            self.assertEqual(result["speech"], "Я бы выбрал 395.")
-            self.assertEqual(len(qa.read_jsonl(attempts)), 2)
+            self.assertEqual(result["api_requests"], 1)
+            self.assertTrue(result["is_fallback"])
+            self.assertIn("395", result["speech"])
+            self.assertEqual(len(qa.read_jsonl(attempts)), 1)
             self.assertGreater(result["estimated_usd"], 0)
 
-    def test_invalid_twice_uses_same_production_fallback(self):
+    def test_invalid_draft_immediately_uses_production_fallback(self):
         s = qa.scenario(sample_question(600, True), "MISTAKEN", 0, 123)
         with tempfile.TemporaryDirectory() as temp:
             result = qa.evaluate(s, FakeSDK([
                 "KEY: B\nSPEECH: Правильный ответ 476.",
                 "KEY: B\nSPEECH: Ответ 476.",
-            ]), Path(temp) / "attempts.jsonl", 2.5, 15.0)
-            self.assertEqual(result["status"], "completed")
+            ]), Path(temp) / "attempts.jsonl", 2.5, 15.0,
+            fallback_loader=english_templates)
+            self.assertEqual(result["status"], "completed", result)
             self.assertTrue(result["is_fallback"])
-            self.assertEqual(result["guard_rejections"], 2)
+            self.assertEqual(result["guard_rejections"], 1)
+            self.assertEqual(result["api_requests"], 1)
             self.assertFalse(result["literal_correct_leak"])
 
     def test_script_loads_the_existing_root_env(self):

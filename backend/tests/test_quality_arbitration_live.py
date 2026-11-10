@@ -168,19 +168,21 @@ class ArbitrationPolicyTests(unittest.TestCase):
         ))
         llm.assert_not_called()
 
-    def test_strict_bonus_too_easy_rejected_below_score_threshold(self):
+    def test_bonus_too_easy_requires_terra_when_below_score_threshold(self):
+        """Q16 subjective too_easy goes to Terra; unavailable fails closed."""
         q = sample_question().model_copy(update={"difficulty": 15})
         review = sample_critic(difficulty="too_easy", distractors=0, knowledge=1)
         with patch.dict(os.environ, {
-            "QUIZ_QUALITY_ARBITER_MODE": "off",
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
         }), patch("tagging.review.LLMClient") as reviewer, patch(
-            "tagging.quality_skill.arbiter.arbitrate"
+            "tagging.quality_skill.arbiter.arbitrate",
+            return_value=(False, None, "unavailable"),
         ) as terra:
             reviewer.return_value.responses.create.return_value = ProviderResult(
                 json.dumps(review.model_dump(mode="json")), Completion.COMPLETE,
                 "completed"
             )
-            with self.assertRaises(QualityRegenerationError):
+            with self.assertRaises(QualityArbitrationUnavailable):
                 check_tagged_quality(
                     q, language="Russian", requested_difficulty=15,
                     category="Geography", neighbors=[],
@@ -188,9 +190,9 @@ class ArbitrationPolicyTests(unittest.TestCase):
                     deadline=perf_counter()+30, timeout_seconds=12,
                 )
         self.assertLess(q._review_report["details"]["assessment"]["total"], 3.25)
-        self.assertEqual(q._review_report["decision"], "reject")
+        self.assertEqual(q._review_report["decision"], "arbitration_unavailable")
         self.assertFalse(is_strict_too_easy_reserve(q))
-        terra.assert_not_called()
+        terra.assert_called_once()
 
     def test_primary_accepted_bonus_arbiter_can_veto(self):
         q = sample_question().model_copy(update={"difficulty": 15})

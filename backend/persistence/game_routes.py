@@ -28,7 +28,7 @@ from persistence.categories import (
     allowed_categories, available_categories, category_snapshot,
     exclude_pregame_categories,
 )
-from persistence.models import GameRun, Question, QuestionAttempt, Topic, User, WalletTransaction
+from persistence.models import GameRun, Question, QuestionAttempt, StarAward, Topic, User, WalletTransaction
 from persistence.seed_topics import category_slug
 from persistence.star_economy import lock_user_stars
 from persistence.bonus_wager import accept_bonus, decline_bonus
@@ -142,6 +142,7 @@ class GameInfo(BaseModel):
     language: str
     phase: str
     correct_main_answers: int
+    round_stars: dict[str, int]
     main_question_index: int = 0
     skipped_questions: int = 0
     question_issued: bool = False
@@ -180,9 +181,23 @@ def _game_info(db: Session, run) -> GameInfo:
         QuestionAttempt.selected_key.is_(None),
         QuestionAttempt.is_correct.is_(None),
     )) or 0
+    # Use the immutable awards for THIS run, not the account's lifetime
+    # balance or a guessed reward based on the score. F5 must reconstruct Q16.
+    round_stars = {tier: 0 for tier in ("bronze", "silver", "gold", "platinum")}
+    for tier, count in db.execute(
+        select(StarAward.tier, func.count(StarAward.id))
+        .where(StarAward.run_id == run.id, StarAward.user_id == run.user_id)
+        .group_by(StarAward.tier)
+    ):
+        round_stars[tier] = int(count)
+    # A lost Q16 wager consumes this round's gold for the results display,
+    # though the historical StarAward stays immutable.
+    if run.bonus_wager_accepted and run.bonus_correct is False:
+        round_stars["gold"] = max(0, round_stars["gold"] - 1)
     return GameInfo(
         game_id=run.id, language=run.language, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        round_stars=round_stars,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
         question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
@@ -259,6 +274,23 @@ def _category_for_round(run_id: UUID, number: int,
     rotated = categories[base % len(categories):] + categories[:base % len(categories)]
     return next((category for category in rotated if category in unused),
                 rotated[0])
+
+
+
+def _alternate_main_category(db: Session, run: GameRun, number: int,
+                             primary: str) -> str | None:
+    """One deterministic, allowed, unconsumed backup for a late main slot.
+
+    Do not mutate the game or charge a paid category-change perk. A question
+    only consumes a topic after it is actually offered and answered.
+    """
+    allowed = list(allowed_categories(run))
+    available = set(available_categories(db, run, number))
+    order = random.Random(run.id.int).sample(allowed, k=len(allowed))
+    offset = (number - 1) % len(order)
+    rotated = order[offset:] + order[:offset]
+    return next((item for item in rotated
+                 if item != primary and item in available), None)
 
 
 def _advance_bonus_topic_after_failure(
@@ -481,6 +513,19 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         raise HTTPException(status_code=409, detail="Game has ended")
 
     cached = pending_question(db, run_id=run.id)
+    if cached is not None and cached[1].status != "approved":
+        # Another player's report quarantined a previously-issued question.
+        # Do not re-serve it on F5; retract without advancing this round.
+        # Lock game -> attempt and re-check under the transaction.
+        locked_run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        cached = pending_question(db, run_id=locked_run.id)
+        if cached is not None and cached[1].status != "approved":
+            old = db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.id == cached[0].id).with_for_update())
+            if old is not None and old.answered_at is None and old.superseded_at is None:
+                old.superseded_at = datetime.now(timezone.utc)
+                db.commit()
+            cached = None
     if cached is not None:
         event("question_cache", hit=True)
         return _public(*cached, phase=run.status, db=db)
@@ -509,12 +554,17 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     # SDKs and reuses the same retry/quality/leak policy as legacy games.
     from api import generate_valid_question
 
-    # Explicit opt-in: old question transport and all existing API tests
-    # stay unchanged until the history backfill is complete and verified.
+    # Keep the original v2 path for legacy clients; tagged games have
+    # strict quality gates, emergency pool reuse and late-game recovery.
+    question_number = 16 if run.status == "bonus" else game_progress.main_question_index + 1
     tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
         from tagging.repository import history_for_user
+        from tagging.review import is_strict_too_easy_reserve
+        from persistence.question_pool import (
+            enabled as fallback_enabled, offer_approved_pool_question, scan_limit,
+        )
         try:
             history = history_for_user(db, user.id)
         except HistoryNotTagged:
@@ -522,83 +572,156 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 status_code=503,
                 detail="Historical questions lack verified tags; run tagging.backfill",
             ) from None
-        exclusions = generator_context(history, category_slug(category))
-        db.rollback()  # No database connection held during slow AI calls.
-        # A rejected-but-factually-clean, too-easy-only question can be
-        # retained in memory. A globally approved pooled question always wins.
-        too_easy_reserve = []
-        try:
-            candidate = generate_valid_question(
-                difficulty, language, category,
-                tag_history=history, tag_context=exclusions,
-                too_easy_reserve=too_easy_reserve,
-            )
-        except HTTPException as generation_error:
-            recoverable = (generation_error.status_code in (502, 503)
-                           or (generation_error.status_code == 409
-                               and generation_error.detail == {"code": "duplicate_exhausted"}))
-            if not recoverable:
-                _advance_bonus_topic_after_failure(db, run_id=run_id, user_id=user.id, expected_topic_index=bonus_index, failure_status=generation_error.status_code)
-                raise
-            from persistence.question_pool import (
-                enabled as fallback_enabled, offer_approved_pool_question, scan_limit,
-            )
-            from tagging.review import is_strict_too_easy_reserve
+
+        # Q10–Q15 may try one other unused allowed category automatically.
+        # Q16 uses its existing *persisted* bonus rotation and the same cap.
+        categories_to_try = [category]
+        if 10 <= question_number <= 15:
+            alternate = _alternate_main_category(db, run, question_number, category)
+            if alternate is not None:
+                categories_to_try.append(alternate)
+        elif question_number == 16:
+            categories_to_try.append(None)  # Resolve after persisted rotation.
+        db.rollback()  # Never hold a DB connection while calling AI.
+
+        pool_settings = None
+        reserves = []
+        last_generation_error = None
+
+        def offer_pool(candidate_category: str):
+            if not pool_settings[0]:
+                return None
             try:
-                use_pool = fallback_enabled("QUIZ_QUESTION_POOL_FALLBACK_ENABLED")
-                use_reserve = (
-                    run.status != "bonus"
-                    and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
+                return offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id,
+                    category=candidate_category, max_candidates=pool_settings[2],
+                    expected_bonus_topic_index=bonus_index,
                 )
-                limit = scan_limit() if use_pool else 1
-            except ValueError:
-                event("question_fallback_configuration_failed")
-                raise HTTPException(
-                    status_code=503, detail="Invalid question fallback configuration"
-                ) from None
-            if use_pool:
-                try:
-                    pooled = offer_approved_pool_question(
-                        db, run_id=run_id, user_id=user.id,
-                        category=category, max_candidates=limit,
-                        expected_bonus_topic_index=bonus_index,
+            except Exception as exc:
+                # The optional pool must never bypass quality checks or
+                # mutate an already issued question when it fails.
+                event("question_pool_fallback_failed", error_type=type(exc).__name__)
+                db.rollback()
+                return None
+
+        for category_attempt, proposed_category in enumerate(categories_to_try):
+            if category_attempt and question_number == 16:
+                previous_index = bonus_index
+                _advance_bonus_topic_after_failure(
+                    db, run_id=run_id, user_id=user.id,
+                    expected_topic_index=previous_index,
+                    failure_status=last_generation_error.status_code,
+                )
+                run = _lookup(db, run_id, user.id)
+                cached = pending_question(db, run_id=run.id)
+                if cached is not None:
+                    return _public(*cached, phase=run.status, db=db)
+                bonus_index = run.bonus_topic_index
+                if bonus_index == previous_index:
+                    raise last_generation_error
+                proposed_category = _category_for_round(
+                    run_id, question_number, bonus_index, db=db,
+                )
+                db.rollback()
+            selected_category = proposed_category
+            if category_attempt:
+                if selected_category == category:
+                    # No actual alternative was available; avoid a duplicate
+                    # paid provider call with the same topic.
+                    raise last_generation_error
+                event("question_category_retry_selected",
+                      number=question_number, category_attempt=category_attempt + 1,
+                      from_category=category, to_category=selected_category)
+                # Search the fully approved pool in the new category BEFORE
+                # making more paid model requests.
+                pooled = offer_pool(selected_category)
+                if pooled is not None:
+                    return _public(
+                        *pooled, phase="bonus" if pooled[0].number == 16 else "main",
+                        db=db,
                     )
-                except Exception as exc:
-                    # A broken optional fallback must not accidentally bypass
-                    # the normal quality gates or expose a private answer.
-                    event("question_pool_fallback_failed", error_type=type(exc).__name__)
-                    db.rollback()
-                else:
+            exclusions = generator_context(history, category_slug(selected_category))
+            db.rollback()
+            too_easy_reserve = []
+            try:
+                candidate = generate_valid_question(
+                    difficulty, language, selected_category,
+                    tag_history=history, tag_context=exclusions,
+                    too_easy_reserve=too_easy_reserve,
+                    question_number=question_number,
+                )
+            except HTTPException as generation_error:
+                recoverable = (generation_error.status_code in (502, 503)
+                               or (generation_error.status_code == 409
+                                   and generation_error.detail == {"code": "duplicate_exhausted"}))
+                if not recoverable:
+                    _advance_bonus_topic_after_failure(
+                        db, run_id=run_id, user_id=user.id,
+                        expected_topic_index=bonus_index,
+                        failure_status=generation_error.status_code,
+                    )
+                    raise
+                if pool_settings is None:
+                    try:
+                        use_pool = fallback_enabled("QUIZ_QUESTION_POOL_FALLBACK_ENABLED")
+                        use_reserve = (
+                            question_number != 16
+                            and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
+                        )
+                        limit = scan_limit() if use_pool else 1
+                        pool_settings = (use_pool, use_reserve, limit)
+                    except ValueError:
+                        event("question_fallback_configuration_failed")
+                        raise HTTPException(
+                            status_code=503, detail="Invalid question fallback configuration"
+                        ) from None
+                if category_attempt == 0:
+                    pooled = offer_pool(selected_category)
                     if pooled is not None:
                         return _public(
                             *pooled, phase="bonus" if pooled[0].number == 16 else "main",
                             db=db,
                         )
-            if not use_reserve or not too_easy_reserve:
-                _advance_bonus_topic_after_failure(db, run_id=run_id, user_id=user.id, expected_topic_index=bonus_index, failure_status=generation_error.status_code)
+                if pool_settings[1]:
+                    eligible = next((item for item in too_easy_reserve
+                                     if is_strict_too_easy_reserve(item)), None)
+                    if eligible is not None:
+                        reserves.append((selected_category, eligible, generation_error))
+                last_generation_error = generation_error
+                if category_attempt + 1 < len(categories_to_try):
+                    continue
+                if reserves:
+                    category, candidate, original_error = reserves[0]
+                    # Strict too-easy-only reserve stays the absolute LAST
+                    # fallback, after both categories and their approved pools.
+                    report = candidate._review_report
+                    report["details"]["fallback"] = {
+                        "reason": "too_easy_only",
+                        "original_decision": report["decision"],
+                        "generation_status": original_error.status_code,
+                    }
+                    report["decision"] = "fallback_too_easy"
+                    event("question_too_easy_fallback", outcome="selected",
+                          requested_difficulty=difficulty)
+                    break
+                # Q16 has already rotated once to its second category.
+                # Keep that index for the next GET retry, without charging
+                # any perk or losing the active round.
+                if question_number == 16 and category_attempt == 0:
+                    _advance_bonus_topic_after_failure(
+                        db, run_id=run_id, user_id=user.id,
+                        expected_topic_index=bonus_index,
+                        failure_status=generation_error.status_code,
+                    )
                 raise
-            candidate = next(
-                (item for item in too_easy_reserve
-                 if is_strict_too_easy_reserve(item)), None,
-            )
-            if candidate is None:
-                _advance_bonus_topic_after_failure(db, run_id=run_id, user_id=user.id, expected_topic_index=bonus_index, failure_status=generation_error.status_code)
-                raise
-            # Keep the original rejected verdict for audit. This emergency
-            # publication is NEVER eligible for the normal approved pool,
-            # which requires a prior critic decision='accept'.
-            report = candidate._review_report
-            report["details"]["fallback"] = {
-                "reason": "too_easy_only",
-                "original_decision": report["decision"],
-                "generation_status": generation_error.status_code,
-            }
-            report["decision"] = "fallback_too_easy"
-            event("question_too_easy_fallback", outcome="selected",
-                  requested_difficulty=difficulty)
+            else:
+                category = selected_category
+                break
     else:
         try:
-            candidate = generate_valid_question(difficulty, language, category)
+            candidate = generate_valid_question(
+                difficulty, language, category, question_number=question_number,
+            )
         except HTTPException as generation_error:
             _advance_bonus_topic_after_failure(
                 db, run_id=run_id, user_id=user.id,
@@ -774,9 +897,12 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
         context = generator_context(history, category_slug(chosen))
         db.rollback()
         candidate = generate_valid_question(
-            difficulty, language, chosen, tag_history=history, tag_context=context)
+            difficulty, language, chosen, tag_history=history, tag_context=context,
+            question_number=attempt.number)
     else:
-        candidate = generate_valid_question(difficulty, language, chosen)
+        candidate = generate_valid_question(
+            difficulty, language, chosen, question_number=attempt.number,
+        )
     provider, model = _generation_metadata()
     try:
         new_attempt, stored = offer_question(

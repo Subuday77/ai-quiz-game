@@ -10,7 +10,7 @@ import json
 import logging
 import os
 
-from platinum_helper.core import OUTCOME_WEIGHTS, TOPICS, choose_delivery_style
+from platinum_helper.core import TOPICS, choose_delivery_style, outcome_weights
 
 log = logging.getLogger("quiz.helper.debug")
 if not log.handlers:
@@ -89,12 +89,13 @@ def active_round(info) -> None:
 
 
 def reserved(purchase, call, question, category: str, run_id, *,
-             reused: bool, competence_source: str = "unknown") -> None:
+             reused: bool, competence_source: str = "unknown",
+             question_number: int = 1) -> None:
     if not enabled():
         return
     profile = purchase.profile
     skill = profile["skills"].get(call.topic, "MEDIUM")
-    weights = OUTCOME_WEIGHTS[skill]
+    weights = outcome_weights(skill, question_number)
     selected_correct = (
         call.selected_key == question.correct_key if call.selected_key is not None else None
     )
@@ -112,6 +113,7 @@ def reserved(purchase, call, question, category: str, run_id, *,
         competence_area=call.topic,
         competence_source=competence_source,
         competence_level=skill,
+        question_number=question_number,
         skills=skill_groups(profile),
         outcome_probabilities_percent=dict(zip(("KNOW", "MISTAKEN", "UNSURE"), weights)),
         outcome=call.outcome,
@@ -120,6 +122,24 @@ def reserved(purchase, call, question, category: str, run_id, *,
         correct_key=question.correct_key,
         selected_answer_correct=selected_correct,
         reused_outcome=reused,
+    )
+
+
+
+def response_source(*, call_id, source: str, model: str, reason: str | None = None) -> None:
+    """Server-only trace: which path prepared a speech, not its correctness.
+
+    Called before finish_call; use helper_consultation_finished to confirm
+    whether the prepared reply was actually persisted and charged.
+    """
+    if not enabled() or call_id is None:
+        return
+    _emit(
+        "helper_response_prepared",
+        call_id=str(call_id),
+        source=source,
+        model=model,
+        fallback_reason=reason if source != "model" else None,
     )
 
 

@@ -22,7 +22,23 @@
       <span class="account-loading" *ngIf="authLoading">{{ locale.t('account.checking') }}</span>
       <ng-container *ngIf="!authLoading">
         <ng-container *ngIf="account as player; else signedOut">
-          <span class="player-name" [title]="player.username">● {{ player.display_name || player.username }}</span>
+          <div class="profile-controls">
+            <button class="account-button player-name" type="button"
+                    [title]="player.username" [attr.aria-expanded]="profileMenuOpen"
+                    (click)="profileMenuOpen = !profileMenuOpen">
+              ● {{ player.display_name || player.username }} ▾
+            </button>
+            <div *ngIf="profileMenuOpen" class="profile-menu">
+              <button class="account-button" type="button"
+                      (click)="openAccountSettings()" [disabled]="authBusy || loading">
+                {{ locale.t('settings.title') }}
+              </button>
+              <button class="account-button" type="button"
+                      (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
+                {{ locale.t('appeals.myComplaints') }}
+              </button>
+            </div>
+          </div>
           <button class="account-button" type="button" (click)="logout()" [disabled]="loading || authBusy">
             {{ locale.t('account.signOut') }}
           </button>
@@ -107,6 +123,11 @@
       <div class="stats-caption" *ngIf="account">
         <span *ngIf="statsLoading">{{ locale.t('stats.loading') }}</span>
         <span *ngIf="!statsLoading && !statsError">{{ locale.format('stats.summary', { games: gamesPlayed, correct: correctAnswers }) }}</span>
+        <span class="appeal-allowance-inline" *ngIf="appealAllowance">
+          {{ locale.format('appeals.freeCount', { count: appealAllowance.free_remaining }) }}
+          <button type="button" class="appeal-info-icon" (click)="openAppealRules()"
+                  [attr.aria-label]="locale.t('appeals.rulesTitle')" [title]="locale.t('appeals.rulesTitle')">ⓘ</button>
+        </span>
         <span class="stats-warning" *ngIf="statsError" role="status">{{ locale.t(statsError) }}</span>
       </div>
     </div>
@@ -154,7 +175,15 @@
     </section>
   </div>
   <section class="card">
-    <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
+    <div class="card-topline">
+      <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
+      <button *ngIf="screen === 'question' && current && !questionLoading"
+              type="button" class="outline-button appeal-header-button"
+              (click)="openAppealForm()"
+              [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(current.question_id)">
+        {{ locale.t('appeals.reportQuestion') }}
+      </button>
+    </div>
     <h1 *ngIf="screen === 'setup'">{{ locale.t('hero.ready') }}</h1>
     <h1 *ngIf="screen === 'question' && questionLoading">{{ locale.t('game.loading') }}</h1>
     <h1 *ngIf="screen === 'question' && !questionLoading && (current || canRetryQuestion)">{{ locale.t(current?.bonus ? 'hero.bonus' : 'hero.question') }}</h1>
@@ -263,6 +292,10 @@
         {{ locale.t('game.retryRestore') }}
       </button>
       <div class="question-actions">
+        <button *ngIf="pendingResults && !resumeAvailable && !resumeCandidate" class="outline-button"
+                type="button" (click)="showPendingResults()" [disabled]="loading || restoringGame">
+          {{ locale.t('game.seeResults') }}
+        </button>
         <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
                 [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
           {{ locale.t(setupButtonLabelKey) }}
@@ -296,7 +329,7 @@
       <div class="answers">
         <ng-container *ngFor="let choice of choices">
           <button *ngIf="question.answers[choice] as answerText"
-                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy">
+                  type="button" (click)="answer(choice)" [disabled]="loading || perksBusy || appealBusy">
             <span class="letter">{{ choice }}</span><span>{{ answerText }}</span>
           </button>
           <!-- Keep the original A/B/C/D cell occupied; otherwise CSS grid
@@ -306,7 +339,7 @@
       </div>
       <div class="helper-call" *ngIf="helperCard && !question.bonus">
         <button *ngIf="!helperReply" class="outline-button" type="button" (click)="consultHelper()"
-                [disabled]="loading || perksBusy || helperBusy ||
+                [disabled]="loading || perksBusy || helperBusy || helperCard.refunded ||
                   (helperCard.consultations_remaining < 1 && !helperCallKey)">
           {{ locale.t(helperCallButtonKey) }}
         </button>
@@ -363,6 +396,11 @@
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
       <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
       <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
+      <button *ngIf="!result.correct && result.phase === 'lost' && current" type="button"
+              class="outline-button appeal-report-button" (click)="openAppealForm()"
+              [disabled]="loading || appealBusy || appealedQuestionIds.has(current.question_id)">
+        {{ locale.t('appeals.reportQuestion') }}
+      </button>
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
@@ -405,14 +443,19 @@
         </button>
       </div>
     </div>
-    <p class="error" role="alert" *ngIf="error && !duplicateExhausted">{{ locale.t(error) }}</p>
+    <div class="duplicate-recovery" *ngIf="canRetryQuestion && !duplicateExhausted && error" role="alert" aria-live="assertive">
+      <p>{{ locale.t(error) }}</p>
+      <div class="question-actions">
+        <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
+          {{ locale.t('game.duplicateRetry') }}
+        </button>
+      </div>
+    </div>
+    <p class="intro" role="status" *ngIf="appealMessage">{{ appealMessage }}</p>
+    <p class="error" role="alert" *ngIf="error && !duplicateExhausted && !canRetryQuestion">{{ locale.t(error) }}</p>
     <p class="error" role="alert" *ngIf="resetError">{{ resetError }}</p>
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
-    <div class="question-actions" *ngIf="canRetryQuestion && !duplicateExhausted">
-      <button class="primary" type="button" (click)="retryQuestion()" [disabled]="loading">
-        {{ locale.t('game.retry') }}
-      </button>
-    </div>
+
   </section>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>

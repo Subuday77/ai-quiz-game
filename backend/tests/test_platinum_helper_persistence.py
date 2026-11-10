@@ -489,14 +489,14 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
             reserved["competence_level"],
             get_purchase(self.db, self.run.id).profile["skills"]["History"],
         )
-        self.assertEqual(
-            reserved["outcome_probabilities_percent"],
-            {"KNOW": 90, "MISTAKEN": 8, "UNSURE": 2}
-            if reserved["competence_level"] == "HIGH"
-            else ({"KNOW": 45, "MISTAKEN": 30, "UNSURE": 25}
-                  if reserved["competence_level"] == "MEDIUM"
-                  else {"KNOW": 5, "MISTAKEN": 15, "UNSURE": 80}),
-        )
+        from platinum_helper.core import outcome_weights
+        skill = reserved["competence_level"]
+        know, mistaken, unsure = outcome_weights(skill, 1)
+        actual = reserved["outcome_probabilities_percent"]
+        self.assertAlmostEqual(actual["KNOW"], know)
+        self.assertAlmostEqual(actual["MISTAKEN"], mistaken)
+        self.assertAlmostEqual(actual["UNSURE"], unsure)
+        self.assertEqual(reserved["question_number"], 1)
         correct = (
             reserved["selected_key"] == question.correct_key
             if reserved["selected_key"] is not None else None

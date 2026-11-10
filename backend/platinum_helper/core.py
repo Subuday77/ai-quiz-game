@@ -34,6 +34,28 @@ PROFESSIONAL_SKILLS: dict[str, tuple[str, ...]] = {
     "Athlete": ("Sports",),
 }
 
+# A related area may improve to HIGH through erudition but never roll LOW.
+# Keep these guarantees within the same twenty canonical knowledge areas.
+PROFESSIONAL_RELATED_SKILLS: dict[str, tuple[str, ...]] = {
+    "Firefighter": ("Physics", "Medicine", "Meteorology"),
+    "Physicist": ("Astronomy", "Engineering", "Chemistry"),
+    "Mathematician": ("Physics", "Technology", "Astronomy"),
+    "Plumber": ("Physics", "Chemistry", "Technology"),
+    "Doctor": ("Chemistry", "Physics"),
+    "Historian": ("Mythology", "Culture", "Geography", "Literature"),
+    "Chef": ("Biology", "Culture", "Medicine"),
+    "Musician": ("Art", "Culture", "Mathematics"),
+    "Astronomer": ("Mathematics", "Geography", "Technology"),
+    "Engineer": ("Physics", "Mathematics", "Chemistry"),
+    "Librarian": ("History", "Culture", "Mythology"),
+    "Athlete": ("Biology", "Medicine"),
+}
+assert set(PROFESSIONAL_RELATED_SKILLS) == set(PROFESSIONAL_SKILLS)
+assert all(
+    set(related) <= set(TOPICS) and not (set(related) & set(PROFESSIONAL_SKILLS[profession]))
+    for profession, related in PROFESSIONAL_RELATED_SKILLS.items()
+)
+
 # The actual game uses about 50 fine-grained categories. Each maps to exactly
 # one of the twenty broad profile areas; never trust a client-supplied topic.
 CATEGORY_TOPICS = {
@@ -52,7 +74,7 @@ CATEGORY_TOPICS = {
     "Human anatomy": "Medicine",
     "Medicine and health": "Medicine",
     "Animals": "Biology",
-    "Plants and botany": "Agriculture",
+    "Plants and botany": "Biology",
     "Earth science and geology": "Geography",
     "Weather and climate": "Meteorology",
     "Mathematics": "Mathematics",
@@ -66,7 +88,7 @@ CATEGORY_TOPICS = {
     "Languages and linguistics": "Literature",
     "Mythology": "Mythology",
     "Religion and world beliefs": "Mythology",
-    "Philosophy": "Literature",
+    "Philosophy": "Culture",
     "Psychology": "Medicine",
     "Visual arts": "Art",
     "Architecture": "Engineering",
@@ -78,21 +100,28 @@ CATEGORY_TOPICS = {
     "Theater": "Art",
     "Comics and graphic novels": "Comics",
     "Video games": "Technology",
-    "Board games and puzzles": "Mathematics",
+    "Board games and puzzles": "Culture",
     "Sports": "Sports",
     "Olympic Games": "Sports",
-    "Food and cooking": "Chemistry",
-    "Drinks and culinary traditions": "Chemistry",
+    "Food and cooking": "Culture",
+    "Drinks and culinary traditions": "Culture",
     "Fashion and clothing": "Art",
     "Transportation": "Engineering",
-    "Everyday objects and household knowledge": "Engineering",
+    "Everyday objects and household knowledge": "Culture",
     "Traditions, customs, and world culture": "Culture",
 }
-OUTCOME_WEIGHTS = {
-    "HIGH": (90, 8, 2),
-    "MEDIUM": (45, 30, 25),
-    "LOW": (5, 15, 80),
-}
+KNOW_DECAY_PER_QUESTION = {"HIGH": 0.5, "MEDIUM": 2.5, "LOW": 5.0}
+
+
+def outcome_weights(skill: Skill, question_number: int) -> tuple[float, float, float]:
+    """KNOW, MISTAKEN, UNSURE percentages for main-round questions 1..15."""
+    if not 1 <= question_number <= 15:
+        raise ValueError("Platinum Helper is only available for questions 1..15")
+    know = 100.0 - KNOW_DECAY_PER_QUESTION[skill] * question_number
+    missing = 100.0 - know
+    mistaken = missing / 3.0
+    unsure = missing - mistaken
+    return know, mistaken, unsure
 MAX_CONSULTATIONS = 3
 
 PresentationStyle = Literal["DIRECT", "PERSONAL", "CASUAL"]
@@ -184,11 +213,12 @@ def generate_profile(
     high_topics_set = locked | set(rng.sample(
         candidates, min(extra_high_count, len(candidates))
     ))
+    related = set(PROFESSIONAL_RELATED_SKILLS[profession])
     # As erudition increases, the remaining non-HIGH skills shift LOW -> MEDIUM.
     medium_probability = 0.15 + 0.70 * (erudition / 100)
     skills: dict[str, Skill] = {
         topic: ("HIGH" if topic in high_topics_set else
-                "MEDIUM" if rng.random() < medium_probability else "LOW")
+                "MEDIUM" if topic in related or rng.random() < medium_probability else "LOW")
         for topic in TOPICS
     }
     high_topics = [topic for topic, level in skills.items() if level == "HIGH"]
@@ -206,9 +236,9 @@ def generate_profile(
     )
 
 
-def choose_outcome(skill: Skill, rng: Random) -> Outcome:
-    weights = OUTCOME_WEIGHTS[skill]
-    draw = rng.randrange(sum(weights))
+def choose_outcome(skill: Skill, rng: Random, question_number: int = 1) -> Outcome:
+    weights = outcome_weights(skill, question_number)
+    draw = rng.random() * 100.0
     if draw < weights[0]:
         return "KNOW"
     if draw < weights[0] + weights[1]:
@@ -236,7 +266,8 @@ class HelperService:
     consultations: dict[str, Consultation] = field(default_factory=dict)
 
     def start(self, request_id: str, question_id: str, topic: str,
-              options: tuple[str, ...], correct: str, *, rng: Random | None = None) -> Consultation:
+              options: tuple[str, ...], correct: str, *, rng: Random | None = None,
+              question_number: int = 1) -> Consultation:
         if not request_id or not question_id:
             raise ValueError("Missing idempotency or question ID")
         previous = self.consultations.get(request_id)
@@ -251,7 +282,7 @@ class HelperService:
         if len(options) != 4 or len(set(options)) != 4 or correct not in options:
             raise ValueError("Invalid question options")
         rng = rng or Random()
-        outcome = choose_outcome(self.profile.skills[topic], rng)
+        outcome = choose_outcome(self.profile.skills[topic], rng, question_number)
         wrong = rng.choice([option for option in options if option != correct]) if outcome == "MISTAKEN" else None
         consultation = Consultation(request_id, question_id, topic, outcome, wrong)
         self.consultations[request_id] = consultation

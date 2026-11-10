@@ -62,6 +62,41 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
                          len(english_dictionary()))
         self.assertEqual(first["dictionary"]["hero.ready"], "DE Ready to play?")
 
+    async def test_helper_templates_reuse_shared_localizer_cache(self):
+        from helper_fallback_fixtures import russian_templates
+        from platinum_helper.fallback_locale import (
+            HelperFallbackKey, MissingHelperTranslation,
+            cached_helper_templates,
+        )
+
+        expected = russian_templates()
+        async def translate(missing, code):
+            self.assertEqual(code, "ru")
+            return {key: expected.get(key, "RU " + value)
+                    for key, value in missing.items()}
+
+        with self.assertRaises(MissingHelperTranslation):
+            cached_helper_templates(self.db, "ru")
+
+        with patch("localization.service.translate_missing",
+                   new=AsyncMock(side_effect=translate)) as translator:
+            await dictionary_response(self.db, "ru")
+            self.assertEqual(translator.await_count, 1)
+
+        # Helper runtime does not invoke the Localizer, even with it offline.
+        with patch("localization.service.translate_missing",
+                   side_effect=AssertionError("No localizer during helper call")):
+            templates = cached_helper_templates(self.db, "ru")
+        self.assertEqual(templates, expected)
+        self.assertEqual(len(templates), len(HelperFallbackKey))
+
+        # After a source-language edit, stale cached translations are unusable.
+        row = self.db.get(UiTranslation, ("ru", HelperFallbackKey.CONFIDENT_1.value))
+        row.source_hash = "stale-source-version"
+        self.db.commit()
+        with self.assertRaises(MissingHelperTranslation):
+            cached_helper_templates(self.db, "ru")
+
     async def test_only_changed_and_added_strings_are_retranslated(self):
         source_v1 = {"a": "Hello", "b": "Bye"}
         source_v2 = {"a": "Hello", "b": "Goodbye", "c": "New"}

@@ -4,10 +4,16 @@ on:
     branches:
       - feature/platinum-helper-star-perks-integration
       - feature/platinum-helper-54-guardrails
+      - feature/platinum-helper-skill-calibration-20261108
+      - fix/qa-followups-20261108
   pull_request:
     branches:
+      - integration/quiz-helper-stable-20261108
       - feature/star-perks-shop
       - feature/platinum-helper-star-perks-integration
+      - feature/platinum-helper-54-guardrails
+      - fix/late-question-recovery-20261108
+      - feature/platinum-helper-skill-calibration-20261108
   workflow_dispatch:
 
 permissions:

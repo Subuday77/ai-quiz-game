@@ -227,7 +227,11 @@ class RetryTests(unittest.TestCase):
         with patch.dict("os.environ", {"QUIZ_LONG_WAIT_WARNING_SECONDS": "4",
                                        "QUIZ_HTTP_TIMEOUT_SECONDS": "20"}):
             result = self.client.get("/api/client-config")
-        self.assertEqual(result.json(), {"long_wait_warning_ms": 4000, "request_timeout_ms": 20000})
+        self.assertEqual(result.json(), {
+            "long_wait_warning_ms": 4000,
+            "request_timeout_ms": 20000,
+            "late_question_timeout_ms": 140000,
+        })
 
     def test_invalid_policy_fails_without_provider_or_state_mutation(self):
         categories = sessions[self.game_id].categories.copy()
@@ -299,7 +303,7 @@ class TaggedCriticBudgetTests(unittest.TestCase):
         self.assertEqual(sleep.call_count, 2)
         self.assertEqual(reserve, [])
 
-    def test_generator_timeout_reserves_critic_time_on_later_attempt(self):
+    def test_generator_skips_short_final_attempt_to_preserve_critic_time(self):
         from api import generate_valid_question
         from fastapi import HTTPException
         from quality_errors import QualityRegenerationError, QualityReviewFailure
@@ -328,7 +332,9 @@ class TaggedCriticBudgetTests(unittest.TestCase):
                 generate_valid_question(0, "English", "History",
                                         tag_history=[], tag_context=[])
         self.assertEqual(raised.exception.status_code, 503)
-        self.assertEqual(timeouts, [12, 12, 4.5])
+        # Before the change, the third paid request received only 4.5s.
+        # Avoid starting it because less than 5s remains for generation.
+        self.assertEqual(timeouts, [12, 12])
         self.assertIsNone(provider_timeout.get())
 
     def test_below_minimum_time_never_starts_critic(self):

@@ -83,9 +83,9 @@ class SpeechHistoryPromptTests(unittest.TestCase):
         self.assertEqual(plain, _prompt({**d, "speech_history": []}))
         d["speech_history"] = ["По-моему, [ANSWER]."]
         for outcome in ("KNOW", "MISTAKEN"):
-            inst, prompt = _prompt({**d, "outcome": outcome}, strict=True)
+            inst, prompt = _prompt({**d, "outcome": outcome})
             self.assertIn("По-моему, [ANSWER].", prompt)
-            self.assertIn("strict" if False else "Your earlier response", inst)
+            self.assertNotIn("Your earlier response", inst)
             self.assertNotIn("MISTAKEN", inst)
             self.assertNotIn("KNOW", inst)
         know = _prompt({**d, "outcome": "KNOW"})

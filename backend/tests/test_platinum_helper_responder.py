@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from helper_fallback_fixtures import english_templates, russian_templates
 from platinum_helper.responder import (
     HelperUnavailable, _fallback, _prompt, _validate, talk,
 )
@@ -87,6 +88,39 @@ class HelperResponderTests(unittest.TestCase):
             "KEY: B\nSPEECH: Я бы взял Кассини.", titan
         ), "Я бы взял Кассини.")
 
+    def test_dotted_initials_are_not_mistaken_for_extra_explanation(self):
+        data = sample("KNOW")
+        data.update(
+            letter="A", delivery_style="TENTATIVE",
+            question_text="Кто написал роман «Гарри Поттер и философский камень»?",
+            choices={
+                "A": "Дж. К. Роулинг", "B": "Дж. Р. Р. Толкин",
+                "C": "Клайв С. Льюис", "D": "Роальд Даль",
+            },
+            correct_option_text="Дж. К. Роулинг",
+        )
+        speech = "Мне кажется, здесь «Дж. К. Роулинг»."
+        self.assertEqual(_validate("KEY: A\nSPEECH: " + speech, data), speech)
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: " + speech + " Она написала книгу.", data
+        ))
+        self.assertIsNone(_validate(
+            "KEY: A\nSPEECH: Советую «Дж. Р. Р. Толкин».", data
+        ))
+        for index in (0, 1):
+            with self.subTest(template=index), patch(
+                "platinum_helper.responder.random.SystemRandom"
+            ) as rng:
+                rng.return_value.choice.side_effect = lambda variants: variants[index]
+                fallback = _fallback(data, russian_templates())
+                self.assertIn("Дж. К. Роулинг", fallback)
+                self.assertEqual(_validate("KEY: A\nSPEECH: " + fallback, data), fallback)
+        sdk = FakeClient(["KEY: A\nSPEECH: " + speech])
+        self.assertEqual(
+            talk(data, client=sdk, fallback_loader=russian_templates), speech
+        )
+        self.assertEqual(sdk.calls, 1)
+
     def test_self_negation_and_no_false_numeric_substrings(self):
         data = sample()
         self.assertIsNone(_validate(
@@ -104,65 +138,151 @@ class HelperResponderTests(unittest.TestCase):
             _validate("KEY: B\nSPEECH: Я выбираю 451.", small), "Я выбираю 451."
         )
 
-    def test_bounded_retry_does_not_change_frozen_key(self):
+    def test_one_successful_model_request_keeps_frozen_key(self):
+        client = FakeClient(["KEY: A\nSPEECH: Я выбираю 395."])
+        with patch.dict("os.environ", {"QUIZ_HELPER_MODEL_ID": "gpt-5.4"}):
+            self.assertEqual(talk(sample(), client=client, fallback_loader=russian_templates), "Я выбираю 395.")
+        self.assertEqual(client.calls, 1)
+        request = client.sent[0]
+        self.assertEqual(request["model"], "gpt-5.4")
+        self.assertEqual(request["reasoning"]["effort"], "low")
+        self.assertIn("Selected option: A: 395", request["input"])
+        self.assertNotIn("476", request["input"])
+
+    def test_invalid_model_reply_uses_template_without_retry(self):
         client = FakeClient([
             "KEY: A\nSPEECH: 476 — правильный ответ.",
-            "KEY: A\nSPEECH: Я бы выбрал 395.",
+            "KEY: A\nSPEECH: Я выбираю 395.",
         ])
-        with patch.dict("os.environ", {"QUIZ_HELPER_MODEL_ID": "gpt-5.4"}):
-            self.assertEqual(talk(sample(), client=client), "Я бы выбрал 395.")
-        self.assertEqual(client.calls, 2)
-        for request in client.sent:
-            self.assertEqual(request["model"], "gpt-5.4")
-            self.assertEqual(request["reasoning"]["effort"], "low")
-            self.assertIn("Selected option: A: 395", request["input"])
-            self.assertNotIn("476", request["input"])
-        self.assertIn("NO factual justification", client.sent[1]["instructions"])
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[0]
+            self.assertEqual(talk(sample(), client=client, fallback_loader=russian_templates), "Я знаю: «395».")
+        self.assertEqual(client.calls, 1)
 
-    def test_two_rejected_drafts_get_deterministic_safe_fallback(self):
-        client = FakeClient([
-            "KEY: A\nSPEECH: 476.",
-            "KEY: A\nSPEECH: Я бы не советовал выбирать 395.",
-        ])
-        self.assertEqual(talk(sample(), client=client), "Мой ответ: «395».")
-        self.assertEqual(client.calls, 2)
-        self.assertEqual(_fallback(sample("UNSURE")), "Не уверен, не хочу тебя запутать.")
+    def test_debug_trace_distinguishes_model_fallback_and_unavailable(self):
+        data = sample()
+        data["call_id"] = "qa-call-id"
 
-    def test_network_failures_are_not_charged(self):
-        client = FakeClient([TimeoutError(), TimeoutError()])
-        with self.assertRaises(HelperUnavailable):
-            talk(sample(), client=client)
-        self.assertEqual(client.calls, 2)
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient(["KEY: A\nSPEECH: Я выбираю 395."]),
+                fallback_loader=russian_templates,
+            )
+            self.assertEqual(speech, "Я выбираю 395.")
+            self.assertEqual(log.call_args.kwargs["source"], "model")
+            self.assertIsNone(log.call_args.kwargs.get("reason"))
+            self.assertEqual(log.call_args.kwargs["call_id"], "qa-call-id")
 
-    def test_mixed_timeout_then_valid(self):
-        client = FakeClient([TimeoutError(), "KEY: A\nSPEECH: Я выбрал 395."])
-        self.assertEqual(talk(sample(), client=client), "Я выбрал 395.")
-        self.assertEqual(client.calls, 2)
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient([RuntimeError("model not found")]),
+                fallback_loader=russian_templates,
+            )
+            self.assertIn("395", speech)
+            self.assertEqual(log.call_args.kwargs["source"], "fallback")
+            self.assertEqual(log.call_args.kwargs["reason"], "provider_error")
 
-    def test_openai_initialization_error_is_unavailable(self):
-        with patch("platinum_helper.responder.OpenAI",
-                   side_effect=RuntimeError("OPENAI_API_KEY not set")) as constructor:
+        with patch("platinum_helper.responder.response_source") as log:
+            speech = talk(
+                data, client=FakeClient(["KEY: A\nSPEECH: Правильный ответ 476."]),
+                fallback_loader=russian_templates,
+            )
+            self.assertIn("395", speech)
+            self.assertEqual(log.call_args.kwargs["source"], "fallback")
+            self.assertEqual(log.call_args.kwargs["reason"], "model_speech_rejected")
+
+        with patch("platinum_helper.responder.response_source") as log:
             with self.assertRaises(HelperUnavailable):
-                talk(sample())
-        self.assertEqual(constructor.call_count, 2)
+                talk(
+                    data, client=FakeClient([RuntimeError("model not found")]),
+                    fallback_loader=lambda: {},
+                )
+            self.assertEqual(log.call_args.kwargs["source"], "unavailable")
+            self.assertEqual(log.call_args.kwargs["reason"], "fallback_unavailable")
+
+    def test_network_timeout_uses_template_without_retry(self):
+        client = FakeClient([TimeoutError(), TimeoutError()])
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[1]
+            self.assertEqual(talk(sample(), client=client, fallback_loader=russian_templates), "Ну, здесь точно «395».")
+        self.assertEqual(client.calls, 1)
+
+    def test_incomplete_model_reply_uses_template_without_retry(self):
+        client = FakeClient([("incomplete", ""), ("completed", "KEY: A\nSPEECH: 395.")])
+        with patch("platinum_helper.responder.random.SystemRandom") as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[0]
+            self.assertEqual(talk(sample(), client=client, fallback_loader=russian_templates), "Я знаю: «395».")
+        self.assertEqual(client.calls, 1)
+
+    def test_openai_initialization_error_uses_template(self):
+        with patch("platinum_helper.responder.OpenAI",
+                   side_effect=RuntimeError("OPENAI_API_KEY not set")) as constructor, patch(
+            "platinum_helper.responder.random.SystemRandom"
+        ) as rng:
+            rng.return_value.choice.side_effect = lambda variants: variants[0]
+            self.assertEqual(talk(sample(), fallback_loader=russian_templates), "Я знаю: «395».")
+        self.assertEqual(constructor.call_count, 1)
+
+    def test_unsure_outage_never_mentions_any_choice(self):
+        client = FakeClient([TimeoutError()])
+        reply = talk(sample("UNSURE"), client=client, fallback_loader=russian_templates)
+        self.assertEqual(reply, "Тут я помочь не могу.")
+        self.assertEqual(client.calls, 1)
+        for option in sample("UNSURE")["choices"].values():
+            self.assertNotIn(option, reply)
+
+    def test_randomized_templates_do_not_reveal_correctness(self):
+        # KNOW vs MISTAKEN must use the same two templates for a given
+        # confidence. Their selected keys differ, not their wording.
+        for style in ("CONFIDENT", "TENTATIVE"):
+            for index in (0, 1):
+                with self.subTest(style=style, index=index), patch(
+                    "platinum_helper.responder.random.SystemRandom"
+                ) as rng:
+                    rng.return_value.choice.side_effect = lambda variants: variants[index]
+                    know, mistake = sample("KNOW"), sample("MISTAKEN")
+                    know["delivery_style"] = mistake["delivery_style"] = style
+                    yes, no = _fallback(know, russian_templates()), _fallback(mistake, russian_templates())
+                    self.assertEqual(yes.replace("476", "{answer}"),
+                                     no.replace("395", "{answer}"))
+                    self.assertIn("476", yes)
+                    self.assertIn("395", no)
+                    self.assertNotIn("476", no)
+                    self.assertNotIn("395", yes)
+
+    def test_missing_cached_localization_cannot_show_unsafe_fallback(self):
+        data = sample()
+        with self.assertRaises(HelperUnavailable):
+            _fallback(data, {})
 
     def test_safe_fallback_covers_all_supported_languages(self):
         for language in ("en", "de", "fr", "es", "it", "pt", "ru",
                          "he", "ar", "ja", "zh"):
-            with self.subTest(language=language):
+            for style in ("CONFIDENT", "TENTATIVE"):
                 data = sample()
-                data["language"] = language
-                self.assertIn("395", _fallback(data))
-                data["delivery_style"] = "TENTATIVE"
-                self.assertIn("395", _fallback(data))
-                data["outcome"] = "UNSURE"
-                self.assertTrue(_fallback(data))
-                self.assertNotIn("395", _fallback(data))
-
-    def test_two_incomplete_responses_are_not_charged(self):
-        client = FakeClient([("incomplete", ""), ("incomplete", "")])
-        with self.assertRaises(HelperUnavailable):
-            talk(sample(), client=client)
+                data["speech_language"] = language
+                data["delivery_style"] = style
+                with self.subTest(language=language, style=style):
+                    for index in (0, 1):
+                        # This loop tests the key/placeholder contract, not
+                        # AI Localizer fluency. The latter is covered by cache
+                        # integration and real-language validator tests.
+                        with patch("platinum_helper.responder.random.SystemRandom") as rng, patch(
+                            "platinum_helper.responder._validate",
+                            side_effect=lambda raw, _: raw.split("SPEECH: ", 1)[1],
+                        ):
+                            rng.return_value.choice.side_effect = lambda variants: variants[index]
+                            response = _fallback(data, english_templates())
+                        self.assertIn("395", response)
+                        for other in ("410", "476", "527"):
+                            self.assertNotIn(other, response)
+                        self.assertTrue(response.strip())
+            data["outcome"] = "UNSURE"
+            with patch("platinum_helper.responder._validate",
+                       side_effect=lambda raw, _: raw.split("SPEECH: ", 1)[1]):
+                self.assertTrue(_fallback(data, english_templates()))
+                for option in data["choices"].values():
+                    self.assertNotIn(option, _fallback(data, english_templates()))
 
 
 if __name__ == "__main__":

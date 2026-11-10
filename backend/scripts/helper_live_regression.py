@@ -11,7 +11,7 @@ approved PostgreSQL questions but NEVER creates games, debits stars, changes
 questions or invokes the player-facing purchase/call endpoints.
 
 Outcomes are FORCED to test guardrails, not sampled from competence weights.
-The actual responder.talk(), its 8-second timeout, prompts, retries, validator
+The actual responder.talk(), its 8-second timeout, prompts, single-request policy, validator
 and fallback are used unchanged. These tests do not replace browser QA.
 """
 from __future__ import annotations
@@ -38,8 +38,9 @@ from sqlalchemy.orm import Session
 
 from persistence.database import engine
 from persistence.models import Question, QuestionReview, Topic
+from platinum_helper.fallback_locale import cached_helper_templates
 from platinum_helper.core import CATEGORY_TOPICS, PROFESSIONAL_SKILLS, choose_delivery_style, choose_presentation_style, generate_profile
-from platinum_helper.responder import HelperUnavailable, _DENIAL, _REASK, _mentions, _validate, talk
+from platinum_helper.responder import _LANG, HelperUnavailable, _DENIAL, _REASK, _mentions, _validate, talk
 from platinum_helper.selection import best_visible_wrong
 from platinum_helper.settings import HelperSettings
 from star_perks import PerkUnavailable, choose_to_hide
@@ -299,13 +300,24 @@ class TraceClient:
 
 
 def evaluate(s: dict, sdk: OpenAI, attempts_path: Path,
-             input_price: float, output_price: float) -> dict:
+             input_price: float, output_price: float,
+             fallback_loader=None) -> dict:
     data = responder_data(s)
+
+    if fallback_loader is None:
+        # The real QA tool has PostgreSQL access; the cache is read only if
+        # the speech model fails. No extra provider or localizer call.
+        def fallback_loader():
+            raw = str(s.get("speech_language") or s["language"]).casefold()
+            code = next((key for key, name in _LANG.items()
+                         if raw in (key, name)), raw)
+            with Session(engine()) as db:
+                return cached_helper_templates(db, code)
     trace = TraceClient(sdk, s["id"], attempts_path)
     t0 = time.perf_counter()
     status, speech, error = "completed", "", ""
     try:
-        speech = talk(data, client=trace)
+        speech = talk(data, client=trace, fallback_loader=fallback_loader)
     except HelperUnavailable as exc:
         status, error = "unavailable", str(exc)
     except Exception as exc:

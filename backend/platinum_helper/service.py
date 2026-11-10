@@ -141,6 +141,9 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         purchase = get_purchase(db, run_id)
         if purchase is None:
             raise GameConflict("No helper purchased")
+        # Refunded unused helpers cannot grant subsequent free consultations.
+        if purchase.refunded:
+            raise GameConflict("Refunded helper is no longer available")
         if not 1 <= len(request_key) <= 80:
             raise ValueError("Invalid request key")
         old = db.scalar(select(PlatinumHelperCall).where(
@@ -191,7 +194,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
             rng = rng or Random()
             # Existing purchased characters predate the revised category map.
             # Their original strengths remain fixed; new areas use MEDIUM.
-            outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng)
+            outcome = choose_outcome(purchase.profile["skills"].get(broad, "MEDIUM"), rng, attempt.number)
             if outcome == "MISTAKEN":
                 # The bronze perk hides the lowest-scored answers. Never
                 # recommend a hidden option or an absurdly weak distractor.
@@ -226,6 +229,7 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         debug_reserved(
             purchase, old, question, category,
             run_id, reused=reused_outcome, competence_source=competence_source,
+            question_number=attempt.number,
         )
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
