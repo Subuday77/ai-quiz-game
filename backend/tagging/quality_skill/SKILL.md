@@ -83,6 +83,43 @@ from real game logs before turning on arbitration or authority.
 
 ## Source-backed false-fact guard and incident quarantine
 
+## Spatial comparison safety gate (2026-11-10)
+
+A confirmed player appeal found an apparently valid structured fact triple
+`ural-river / flows-into / caspian-sea` that dropped the critical literal
+restriction `южнее Волги`. The primary critic also evaluated only the weaker
+question and mistakenly approved the candidate.
+
+The Fact Tool now detects explicitly comparative directional phrases in
+Russian, English, German, French and Spanish, including `южнее Волги`,
+`к западу от Берлина`, `south of the Volga`. This is an *unknown-truth
+signal*, not a geography lookup or automatic verdict. In tagged
+`AI_QUALITY_MODE=enforce`, these candidates require independent Terra
+arbitration **even if** the generic `QUIZ_QUALITY_ARBITER_MODE=off` or
+`QUIZ_QUALITY_SKILL_MODE=off`. Other lexical/taxonomy/fact heuristics
+retain the usual shadow and optional arbitration behavior.
+
+Terra receives the exact extracted directional phrases and must inspect each
+as a distinct question condition. Its output must anchor every requirement
+in `stem_claims`; returning only a true endpoint/country fact without the
+spatial qualifier is a **quality rejection** (regenerate candidate), not an
+immediate HTTP 503. False or uncertain comparisons fail the same existing
+independent-review acceptance gate. Genuine model/provider outages retain
+normal fail-closed behavior. A correct comparative question can still be
+accepted when all qualifiers have explicit evidence.
+
+This is a second-model consistency check, **not independent geospatial source
+verification**. A hallucinated agreement by both models remains possible.
+Exact already-confirmed player-appeal wording is separately held by the
+existing known QA incident registry. Verified shared-pool questions still
+bypass new model calls as before.
+
+Regression command:
+
+```powershell
+python -m unittest tests.test_spatial_relation_guard tests.test_quality_arbitration_live tests.test_quality_skill_shadow -v
+```
+
 The shadow Fact Tool now nominates award + year (+ stated rationale) claims
 for independent evidence using `needs_source_verification:award_year_attribution`
 or `needs_source_verification:compound_award_year_reason`. Such a signal
