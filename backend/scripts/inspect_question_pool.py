@@ -34,6 +34,12 @@ from persistence.question_source_policy import community_vote_threshold  # noqa:
 from persistence.seed_topics import category_slug  # noqa: E402
 
 
+def _utc(value: datetime) -> datetime:
+    """Normalize PostgreSQL and SQLite dates for portable comparisons."""
+    return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None
+            else value.astimezone(timezone.utc))
+
+
 def inspect(db: Session, run_id: UUID, question_number: int,
             at: datetime | None = None) -> dict:
     run = db.get(GameRun, run_id)
@@ -207,15 +213,15 @@ def inspect(db: Session, run_id: UUID, question_number: int,
                 first_shown.isoformat() if first_shown else None
             ),
             "existed_at_requested_time": (
-                item.created_at <= at_utc if at_utc is not None else None
+                _utc(item.created_at) <= at_utc if at_utc is not None else None
             ),
             "review_existed_at_requested_time": (
-                first_approved <= at_utc if at_utc is not None
+                _utc(first_approved) <= at_utc if at_utc is not None
                 and first_approved is not None else
                 False if at_utc is not None else None
             ),
             "already_shown_to_user_at_requested_time": (
-                first_shown <= at_utc if at_utc is not None
+                _utc(first_shown) <= at_utc if at_utc is not None
                 and first_shown is not None else
                 False if at_utc is not None else None
             ),
