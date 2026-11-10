@@ -1,87 +1,118 @@
-# Community question votes and source priority
+# Question rating and DB First — implementation contract (10 Nov 2026)
 
-Feature branch: `feature/question-votes-pool-first-20261110`.
+Based on the agreed Russian specification `ai_quiz_question_rating_db_first_spec_2026-11-10.md`.
+Premium is intentionally not enabled in this release.
 
-## Runtime policy
+## Provisional client votes
 
-- During an **unanswered active question**, authenticated players may press 👍 or
-  👎. The same button toggles the vote back to neutral. Opposite button changes
-  the vote atomically (e.g. +1 -> -1 changes net by -2).
-- The server stores **one vote per (question, user)** in `question_votes`.
-  `questions.vote_score` is the row-locked aggregate, persisted in PostgreSQL.
-- The browser receives **only `my_vote`**, not likes, dislikes, net score, or
-  whether a community review is pending. Votes do not affect stars, hints,
-  results or the answer key.
-- At or below `QUIZ_COMMUNITY_VOTE_THRESHOLD` (default **-12**), a unique
-  `question_vote_reviews` item is queued. Subsequent changes to the rating
-  cannot create duplicate reviews.
-- Low rating is **not evidence of factual error**: independent Caddy
-  (`QUIZ_COMPLAINT_CADDY_MODEL_ID`) and Judge
-  (`QUIZ_COMPLAINT_JUDGE_MODEL_ID`) examine it. The Judge model must be
-  different from the question generator. Confirmation rejects the question
-  permanently; rejection leaves it approved; inconclusive decisions are
-  preserved for operator review and do **not** automatically block.
-- Paid player appeal workflows are independent: no synthetic appeals, no
-  deposits, no compensatory star transfers. This is *not* an overturn of
-  previous Judge rulings. A pending community review temporarily excludes the
-  question from the shared pool; a validated defect prevents reuse entirely.
-- Worker uses the existing 60s in-FastAPI maintenance scan and a durable
-  PostgreSQL queue. On model/DB failure it retries on the next day; after
-  seven days it records `technical_unresolved` rather than silently banning
-  the question. The initial trigger also schedules immediate best-effort
-  background processing.
-- Administrative/operator UI for community review history is not included in
-  this phase; results are audit-logged in `question_reviews` and
-  `question_vote_reviews`.
+- 👍, 👎 are shown **only on the unanswered question card**. Counts and
+  accumulated rating never appear to players.
+- Buttons implement `none -> like -> none`, `none -> dislike -> none`,
+  `like <-> dislike`.
+- All clicks are **local-only drafts** in browser storage, scoped by account ID,
+  game ID and question ID. No vote is sent to the server until the user submits
+  their answer. Refresh/Resume may recover the local choice.
+- `POST /api/v2/games/{run_id}/answer` optionally includes
+  `vote: -1|0|1`; an accepted answer and final vote are persisted together
+  in one transaction, then the draft is deleted from local storage. If answer
+  submission fails, the draft remains. No post-answer changes are possible.
+- `question_votes` enforces one **immutable lifetime** ballot for each
+  `(question_id,user_id)`. Re-answering, multiple tabs, retries, replay and
+  reissuing after any acquittal cannot add another rating contribution.
+- The answer response contains no aggregate score. Votes never cost stars,
+  affect hints, pay compensation, or reveal the correct answer.
 
-## Source order
+## Historical and working reputation
 
-Set `QUIZ_QUESTION_SOURCE_ORDER` in the backend environment:
+- `questions.vote_score` is the **historical net**, lifetime sum of all
+  finalized votes, never reset.
+- `questions.working_vote_score` is the **working net**, used in DB First
+  probability and the community review threshold; updated ±1 only for new
+  final ballots, reset after Judge acquittals.
+- `questions.community_referrals` counts threshold crossings.
+  `question_vote_reviews` stores immutable **numbered** referrals
+  `(question_id,referral_number)` and their outcomes.
+- At or below `QUIZ_QUESTION_RATING_REVIEW_THRESHOLD=-15`, the answer
+  transaction immediately quarantines the question and queues one referral.
+  It cannot be issued again until Judge acquittal.
+- First Judge acquittal: restore approved status and reset working net to
+  `-5`. Second acquittal: reset working net to `-10`.
+- Any Judge finding of a real defect: permanent ban.
+- **Third** threshold crossing: automatic permanent ban, **no model call**.
+- Historical score, ballots and all prior verdicts survive every reset and ban.
+  Technical failure/inconclusive review leaves the question quarantined,
+  not restored by accident. A player appeal cannot release a community hold.
+- Models for community review reuse Caddy and independent Judge. The Judge
+  model ID must differ from the original question generator ID; no automatic
+  star/appeal ledger changes. Existing FastAPI maintenance scans durable
+  review queue; transient errors retry, 7-day expiry is recorded.
+- Rejected Judge referral means the question was **acquitted**, not banned;
+  `upheld` means the suspected error was confirmed and the question banned.
 
-| Value | Lookup |
-| --- | --- |
-| `generate_first` (default) | Existing behavior: ask AI, then use verified pool when generation fails |
-| `pool_first` | First find reusable verified questions; if none, ask AI |
+## DB First source selection
 
-Both paths require exact **language, category and difficulty**, approved
-status, independent v5 acceptance, complete structured tags/facts, and
-**per-user semantic and tag deduplication**. Q16 still needs the stricter
-Terra arbitration evidence; an old bonus approval is never enough.
+`QUIZ_DB_FIRST_GENERATION=false` is **Model First**; original ordering
+is preserved: AI generation, emergency approved pool on recoverable failure.
 
-Eligible shared questions are ordered by their net rating (descending), with
-random ordering for ties; no rating influences whether a question is approved.
-Neither the source order nor the net rating is exposed to the browser. A
-question currently awaiting low-score review is not offered from the pool.
+When `QUIZ_DB_FIRST_GENERATION=true`, first scan the verified approved
+pool for exact player language, category and difficulty. Existing strict
+v5 quality reviews, complete fact/tag metadata, cross-language per-user
+deduplication and bonus Q16 Terra v2 evidence are still mandatory. Exclude
+quarantined, banned and pending-review questions.
 
-`QUIZ_QUESTION_POOL_SCAN_LIMIT` still caps candidate checks. In
-`pool_first`, the explicit policy tries the pool even if the emergency
-`QUIZ_QUESTION_POOL_FALLBACK_ENABLED` flag is false. In
-`generate_first`, the emergency flag retains its old meaning.
+Each fully qualified candidate undergoes ONE independent admission draw:
 
-## Deployment
-
-1. Run `python -m alembic upgrade head` from `backend` **before** restarting
-   FastAPI on an existing PostgreSQL database. Migration
-   `0013_votes_pool` adds the tables, index and net score.
-2. Configure `QUIZ_QUESTION_SOURCE_ORDER=generate_first` initially.
-3. Configure `QUIZ_COMMUNITY_VOTE_THRESHOLD=-12` (must be negative).
-4. Ensure Caddy, independent Judge, and `OPENAI_API_KEY` are configured,
-   just as for appeals. Do not run multiple scheduler instances on separate
-   DBs.
-5. Review net-score logs and moderation results before enabling pool-first in
-   production. Dislike storms can incur review cost; one ballot per account is
-   an abuse throttle, not Sybil protection.
-
-## Regression
-
-```powershell
-python -m unittest tests.test_question_votes tests.test_question_pool -v
-python -m unittest discover -s tests -v
+```
+p(admit | r) = 1 / (1 + exp(-(r-center)/scale))
 ```
 
-GitHub Actions also runs Angular tests and production build plus PostgreSQL
-migrations. No external AI calls are necessary in the offline suite.
+where `r` is the **working** score. Defaults:
+`QUIZ_DB_FIRST_RATING_CENTER=0`,
+`QUIZ_DB_FIRST_RATING_SCALE=10`.
+At `r=-10, -5, 0, +5, +10`, admission is approximately
+`26.9%, 37.8%, 50%, 62.2%, 73.1%` respectively. This is a filter,
+**not** the probability of final selection.
 
-Known limits: Subjective votes may be biased, malicious users may create
-multiple accounts, and the Judge has no trusted live-web fact checker. A
-threshold crossing requests inspection but does not itself prove an error.
+Choose **uniformly at random** among admitted verified candidates. If no
+candidate passes, call the normal AI generator once along the existing retry,
+quality and emergency fallback path. Never reroll the filter indefinitely.
+Weakly negative ratings (-1 to -14) are not excluded from the sample outright.
+No new model call is necessary after a successful DB hit.
+
+The pool scan is capped by `QUIZ_QUESTION_POOL_SCAN_LIMIT` to limit
+latency. Future Premium may shift `center` right, but Premium logic,
+subscription pricing and premium toggles are out of scope.
+
+## Configuration
+
+```dotenv
+QUIZ_DB_FIRST_GENERATION=false
+QUIZ_QUESTION_RATING_REVIEW_THRESHOLD=-15
+QUIZ_QUESTION_FIRST_ACQUITTAL_SCORE=-5
+QUIZ_QUESTION_SECOND_ACQUITTAL_SCORE=-10
+QUIZ_QUESTION_MAX_REFERRALS=3
+QUIZ_DB_FIRST_RATING_CENTER=0
+QUIZ_DB_FIRST_RATING_SCALE=10
+```
+
+## Deployment and QA
+
+1. Review the Draft PR and CI; do **not** deploy to live data until successful.
+2. Apply Alembic migration `0013_votes_pool` with
+   `python -m alembic upgrade head` on the correct backend environment.
+3. Keep DB First off for first smoke test; enable true only after regression.
+4. Test draft click/undo/change/F5/logout, successful answer commit, same-account
+   retry and two-tab race, HTTP answer validation and immutable ballot.
+5. Drive -15 -> acquit -> -5 -> -15 -> acquit -> -10 -> -15 -> automatic
+   permanent ban. Check original historical score, queued review count, star
+   ledger and zero Judge calls for the final strike.
+6. Validate DB First sampling with seeded draws, exact schema, empty-pool AI
+   fallback, Q16 refusal without modern Terra approval and no answer leakage.
+7. Observe `db_pool_candidates`, `db_admitted`, `db_first_hit`,
+   `ai_fallback`, `rating_quarantine`, `judge_referral`, `judge_ban`.
+
+Known limits: malicious accounts can vote strategically; one vote per account
+does not prevent coordinated abuse. Judge does not have trusted live-web fact
+checking. Dislikes trigger review, not proof. Interrupted in-flight reviews
+are retried based on durable leases; operator intervention is required if
+review ultimately becomes inconclusive or technically unresolved.
