@@ -27,21 +27,21 @@ _KNOWN_FALSE_FACTS = {
 # Match only geographic comparative wording with a named reference token;
 # a bare word ("southern", "южный") is NOT itself a comparison.
 _SPATIAL_DIRECTION = re.compile(
-    r"(?<!\\w)(?:"
+    r"(?<!\w)(?:"
     r"северо-восточнее|северо-западнее|юго-восточнее|юго-западнее|"
     r"севернее|южнее|восточнее|западнее|"
-    r"к\\s+(?:северу|югу|востоку|западу)\\s+от|"
-    r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\\s+of|"
-    r"(?:to\\s+the\\s+)?(?:north|south|east|west)\\s+of|"
-    r"(?:nördlich|südlich|östlich|westlich)\\s+von|"
-    r"(?:au\\s+nord|au\\s+sud|à\\s+l.est|à\\s+l.ouest)\\s+de|"
-    r"(?:al\\s+norte|al\\s+sur|al\\s+este|al\\s+oeste)\\s+de"
-    r")(?=\\s)",
+    r"к\s+(?:северу|югу|востоку|западу)\s+от|"
+    r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\s+of|"
+    r"(?:to\s+the\s+)?(?:north|south|east|west)\s+of|"
+    r"(?:nördlich|südlich|östlich|westlich)\s+von|"
+    r"(?:au\s+nord|au\s+sud|à\s+l.est|à\s+l.ouest)\s+de|"
+    r"(?:al\s+norte|al\s+sur|al\s+este|al\s+oeste)\s+de"
+    r")(?=\s)",
     flags=re.IGNORECASE | re.UNICODE,
 )
 _SPATIAL_REFERENCE = re.compile(
-    r"\\s+(?:(?:the|реки|река|города|город|от|de|del|der|des|la|le|du)\\s+)?"
-    r"([\\wЁё][\\wЁё-]*)",
+    r"\s+(?:(?:the|реки|река|города|город|от|de|del|der|des|la|le|du)\s+)?"
+    r"([\wЁё][\wЁё-]*)",
     flags=re.IGNORECASE | re.UNICODE,
 )
 
