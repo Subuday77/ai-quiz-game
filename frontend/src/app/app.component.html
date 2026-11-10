@@ -150,10 +150,14 @@
       <h2>{{ helper.name }}</h2>
       <p>{{ helperProfessionLabel(helper) }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
       <p class="helper-tagline">“{{ helperTagline(helper) }}”</p>
-      <h3>{{ locale.t('helper.strong') }}</h3>
-      <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
-      <h3>{{ locale.t('helper.weak') }}</h3>
-      <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <ng-container *ngIf="helper.strong_topics.length > 0">
+        <h3>{{ locale.t('helper.strong') }}</h3>
+        <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      </ng-container>
+      <ng-container *ngIf="helper.weak_topics.length > 0">
+        <h3>{{ locale.t('helper.weak') }}</h3>
+        <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      </ng-container>
       <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
       <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
     </section>
