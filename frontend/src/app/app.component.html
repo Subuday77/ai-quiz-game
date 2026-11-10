@@ -329,20 +329,17 @@
       <!-- One private ballot per player/question; never reveal totals. -->
       <div class="question-votes" role="group" [attr.aria-label]="locale.t('questionFeedback.title')">
         <button type="button" class="question-vote" (click)="voteQuestion(1)"
-                [class.selected]="question.my_vote === 1"
-                [attr.aria-pressed]="question.my_vote === 1"
+                [class.selected]="currentVote === 1"
+                [attr.aria-pressed]="currentVote === 1"
                 [attr.aria-label]="locale.t('questionFeedback.like')"
                 [title]="locale.t('questionFeedback.like')"
-                [disabled]="loading || voteBusy || appealBusy || perksBusy">👍</button>
+                [disabled]="loading || appealBusy || perksBusy">👍</button>
         <button type="button" class="question-vote" (click)="voteQuestion(-1)"
-                [class.selected]="question.my_vote === -1"
-                [attr.aria-pressed]="question.my_vote === -1"
+                [class.selected]="currentVote === -1"
+                [attr.aria-pressed]="currentVote === -1"
                 [attr.aria-label]="locale.t('questionFeedback.dislike')"
                 [title]="locale.t('questionFeedback.dislike')"
-                [disabled]="loading || voteBusy || appealBusy || perksBusy">👎</button>
-        <span *ngIf="voteError" class="question-vote-error" role="alert">
-          {{ locale.t('questionFeedback.error') }}
-        </span>
+                [disabled]="loading || appealBusy || perksBusy">👎</button>
       </div>
       <div class="answers">
         <ng-container *ngFor="let choice of choices">
