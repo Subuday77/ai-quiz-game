@@ -38,6 +38,10 @@ Put in stem_claims[] ONLY assertions made by the QUESTION STEM itself.
 For each one, anchor MUST be an EXACT CONTIGUOUS quotation copied from the
 question's stem, not a paraphrase, and claim should describe the assertion.
 A question that is purely interrogative can have zero stem_claims.
+In particular, for a straightforward science "Which gas/element/...?" stem,
+do not turn a proposed option into an asserted premise. Never copy any
+answer-choice wording into stem_claims unless those words occur VERBATIM
+in the stem. If there are no independent stem claims, return [].
 NEVER insert in stem_claims any statement about whether A/B/C/D is true or
 false, or an invented statement about what the wrong options normally mean.
 Incorrect distractors are EXPECTED and are not false question premises.
@@ -222,9 +226,32 @@ def arbitrate(question, *, language: str, category: str,
             json.loads(normalize_output(completed_text(response)))
         )
         if not stem_claims_anchored(verdict, question.question):
-            event("quality_arbitration", outcome="unavailable",
+            # The provider completed a well-formed review, but its cited
+            # "stem" claim wasn't in the stem (often a distractor or a
+            # paraphrase). This is NOT evidence that the provider is down,
+            # nor grounds for accepting this unverified candidate.
+            #
+            # Reject the candidate for bounded *new-question* regeneration.
+            # This preserves fail-closed factual safety without turning a
+            # single evidence/anchoring mistake into a terminal HTTP 503.
+            event("quality_arbitration", outcome="reject",
                   reason="invalid_stem_anchor", model_id=model, bonus=bonus)
-            return False, None, "invalid_stem_anchor"
+            invalid_count = sum(
+                1 for item in verdict.stem_claims
+                if not stem_claims_anchored(
+                    verdict.model_copy(update={"stem_claims": [item]}),
+                    question.question)
+            )
+            debug_event("quality_arbitration_anchor_mismatch",
+                        invalid_claim_count=invalid_count, bonus=bonus)
+            return False, {
+                "checker_type": "ai_terra_arbiter",
+                "provider": "openai", "model": model,
+                "contract_version": ARBITRATION_CONTRACT_VERSION,
+                "decision": "reject", "issues": ["invalid_stem_anchor"],
+                "details": verdict.model_dump(mode="json"),
+                "duration_ms": round((clock() - started) * 1000),
+            }, "invalid_stem_anchor"
         if constraints and not spatial_constraints_covered(verdict, constraints):
             # Provider delivered a complete answer but failed to inspect a
             # required qualifier. Reject this candidate and regenerate; this
