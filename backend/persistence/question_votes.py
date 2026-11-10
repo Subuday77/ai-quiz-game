@@ -1,80 +1,75 @@
-"""Authenticated player vote policy. No payment, hints or answer-key exposure.
+"""Atomic, immutable votes recorded only after a successful answer.
 
-Unique (question_id, user_id) ballot and a row-locked aggregate ensure a
-player can toggle or change their own vote without inflating the score.
-The single persistent community-review row is a durable queue marker.
+This module never commits: the caller owns the answer + vote + history
+transaction, and must already have locked the player, game and question.
+An unanswered preference is browser-local only, not a SQL vote.
 """
-from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from persistence.gameplay import GameConflict, owned_game
+from diagnostics import event
 from persistence.models import (
-    Question, QuestionAttempt, QuestionVote, QuestionVoteReview, User,
+    Question, QuestionModeration, QuestionVote, QuestionVoteReview,
 )
-from persistence.question_source_policy import community_vote_threshold
+from persistence.question_source_policy import (
+    community_vote_threshold, max_referrals,
+)
 
 
-def my_vote(db: Session, *, user_id: UUID, question_id: UUID) -> int:
-    return db.scalar(select(QuestionVote.value).where(
-        QuestionVote.question_id == question_id,
-        QuestionVote.user_id == user_id,
-    )) or 0
+def record_final_vote(db: Session, *, question: Question, user_id: UUID,
+                      run_id: UUID, value: int) -> bool:
+    """Update both nets once; queue Judge or third-strike ban atomically.
 
-
-def submit_vote(db: Session, *, run_id: UUID, question_id: UUID,
-                user_id: UUID, value: int) -> tuple[int, bool]:
-    """Save one ballot; return (my_vote, new_review_queued), never a tally."""
+    Returns True only when a new permanent vote was inserted.
+    Call *inside* the same transaction as the accepted answer; do not commit.
+    """
     if type(value) is not int or value not in (-1, 0, 1):
-        raise ValueError("Vote must be -1, 0 or 1")
-    threshold = community_vote_threshold()
-    try:
-        # Standard lock order: user -> run -> question.
-        user_exists = db.scalar(select(User.id).where(
-            User.id == user_id).with_for_update())
-        if user_exists is None:
-            raise GameConflict("User missing")
-        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
-        if run.status not in ("main", "bonus"):
-            raise GameConflict("Game already ended")
-        attempt = db.scalar(select(QuestionAttempt.id).where(
-            QuestionAttempt.run_id == run.id,
-            QuestionAttempt.question_id == question_id,
-            QuestionAttempt.superseded_at.is_(None),
-            QuestionAttempt.answered_at.is_(None),
-        ).limit(1))
-        if attempt is None:
-            raise GameConflict("Vote requires the unanswered active question")
-        question = db.scalar(select(Question).where(
-            Question.id == question_id).with_for_update())
-        if question is None or question.status != "approved":
-            raise GameConflict("Question no longer available")
-        vote = db.get(QuestionVote, (question_id, user_id))
-        previous = vote.value if vote is not None else 0
-        if value != previous:
-            if value == 0:
-                db.delete(vote)
-            elif vote is None:
-                db.add(QuestionVote(
-                    question_id=question_id, user_id=user_id, value=value))
-            else:
-                vote.value = value
-                vote.updated_at = datetime.now(timezone.utc)
-            question.vote_score = int(question.vote_score or 0) + value - previous
+        raise ValueError("Final vote must be -1, 0 or 1")
+    if value == 0:
+        return False
+    # (user, game, question) row locks were obtained by record_answer.
+    # Existing historical votes are immutable, even after two acquittals.
+    if db.get(QuestionVote, (question.id, user_id)) is not None:
+        return False
+    db.add(QuestionVote(
+        question_id=question.id, user_id=user_id, run_id=run_id, value=value,
+    ))
+    question.vote_score += value
+    question.working_vote_score += value
+    if (question.status != "approved" or
+            question.working_vote_score > community_vote_threshold()):
+        return True
 
-        queued = False
-        if question.vote_score <= threshold and db.get(
-                QuestionVoteReview, question_id) is None:
-            db.add(QuestionVoteReview(
-                question_id=question_id,
-                score_at_trigger=question.vote_score,
-                status="pending",
-            ))
-            queued = True
-        db.commit()
-        return value, queued
-    except Exception:
-        db.rollback()
-        raise
+    next_referral = question.community_referrals + 1
+    maximum = max_referrals()
+    question.community_referrals = next_referral
+    auto_ban = next_referral >= maximum
+    review = QuestionVoteReview(
+        question_id=question.id, referral_number=next_referral,
+        trigger_user_id=user_id,
+        score_at_trigger=question.working_vote_score,
+        status="auto_banned" if auto_ban else "pending",
+    )
+    db.add(review)
+    event("rating_quarantine", question_id=str(question.id),
+          working_score=question.working_vote_score,
+          referral_number=next_referral)
+    if auto_ban:
+        question.status = "rejected"
+        moderation = db.get(QuestionModeration, question.id)
+        if moderation is None:
+            moderation = QuestionModeration(question_id=question.id)
+            db.add(moderation)
+        moderation.permanently_blocked = True
+        moderation.block_reason = moderation.block_reason or "community_third_referral"
+        review.verdict = "Third threshold crossing: automatic permanent ban."
+        from datetime import datetime, timezone
+        review.reviewed_at = datetime.now(timezone.utc)
+        event("judge_ban", question_id=str(question.id),
+              reason="community_third_referral")
+    else:
+        question.status = "quarantined"
+        event("judge_referral", question_id=str(question.id),
+              referral_number=next_referral)
+    return True
