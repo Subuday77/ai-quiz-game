@@ -193,9 +193,11 @@ class GlobalPoolTests(unittest.TestCase):
     def test_pool_first_uses_approved_question_without_model_call(self):
         existing_id = self.seed_other_user_question()
         with patch.dict(os.environ, {
-            "QUIZ_QUESTION_SOURCE_ORDER": "pool_first",
+            "QUIZ_DB_FIRST_GENERATION": "true",
             "QUIZ_QUESTION_POOL_FALLBACK_ENABLED": "false",
-        }), patch("api.generate_valid_question") as generate:
+        }), patch("persistence.question_pool.random.random", return_value=0.0), patch(
+            "api.generate_valid_question"
+        ) as generate:
             response = self.request()
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["question_id"], str(existing_id))
@@ -213,7 +215,7 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(response.json()["question"], proposed.question)
         generate.assert_called_once()
 
-    def test_pool_selects_highest_net_rating_only_after_quality_gates(self):
+    def test_db_first_probabilistic_filter_favors_but_never_guarantees_high_rating(self):
         older_id = self.seed_other_user_question()
         with TestClient(app) as third:
             charlie = self._register(third, "Charlie")
@@ -230,23 +232,38 @@ class GlobalPoolTests(unittest.TestCase):
                 question=new, category=self.category,
                 provider="test", model="stub", dedup_enforce=True,
             )
-            db.get(Question, older_id).vote_score = -2
-            high.vote_score = 7
+            db.get(Question, older_id).working_vote_score = -2
+            high.working_vote_score = 7
             db.commit()
             chosen_id = high.id
-        with Session(self.engine) as db:
-            result = offer_approved_pool_question(
-                db, run_id=self.run_id, user_id=self.alice,
-                category=self.category,
-            )
-            self.assertEqual(result[1].id, chosen_id)
+        with patch("persistence.question_pool.random.random", return_value=0.6):
+            with Session(self.engine) as db:
+                result = offer_approved_pool_question(
+                    db, run_id=self.run_id, user_id=self.alice,
+                    category=self.category, rating_filter=True,
+                )
+                self.assertEqual(result[1].id, chosen_id)
+
+    def test_db_first_zero_admissions_falls_back_to_ai(self):
+        self.seed_other_user_question()
+        generated = candidate(relation="nobel-prize-reason",
+                              concept="photoelectric-effect",
+                              answer="photoelectric-effect")
+        generated._review_report = review_report()
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.999999
+        ), patch("api.generate_valid_question", return_value=generated) as create:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question"], generated.question)
+        create.assert_called_once()
 
     def test_pool_excludes_queued_community_review(self):
         existing_id = self.seed_other_user_question()
         from persistence.models import QuestionVoteReview
         with Session(self.engine) as db:
             db.add(QuestionVoteReview(
-                question_id=existing_id, score_at_trigger=-12,
+                question_id=existing_id, referral_number=1, score_at_trigger=-15,
                 status="pending",
             ))
             db.commit()
