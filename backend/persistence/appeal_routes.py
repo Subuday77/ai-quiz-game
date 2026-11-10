@@ -41,10 +41,13 @@ def _appeal_display_status(appeal: QuestionAppeal, *, now: datetime | None = Non
     """
     if appeal.status != "retry_pending":
         return appeal.status
-    if appeal.next_retry_at is None:
+    # Some legacy private serializers/test snapshots do not carry a lease.
+    # Missing/None means no scheduled technical retry; show "In review".
+    next_retry_at = getattr(appeal, "next_retry_at", None)
+    if next_retry_at is None:
         return "pending"
     now = now or datetime.now(timezone.utc)
-    when = appeal.next_retry_at
+    when = next_retry_at
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     return ("retry_pending" if when - now > timedelta(minutes=30)
