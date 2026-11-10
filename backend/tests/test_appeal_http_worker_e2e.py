@@ -383,7 +383,15 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
 
     def test_unused_helper_refunded_once_only_when_bad_question_caused_loss(self):
         run_id, question_id, attempt_id = self.fixture(12)
-        purchase_id = self.paid_helper(run_id, attempt_id, price=2)
+        purchase_id = self.paid_helper(run_id, attempt_id, price=2, hint_bronze=2)
+        # A separate hint refund is flushed before the unused-helper receipt.
+        with Session(self.engine) as db:
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:bronze-seed",
+                amount=2, reason="star/bronze/qa-http-seed",
+            ))
+            db.commit()
         with patch("persistence.appeal_worker._completion",
                    side_effect=self.mock_model):
             submission, payload = self.appeal(run_id, question_id)
@@ -394,8 +402,15 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         self.assertEqual(self.ledger(appeal_id), {
             "deposit": ("gold", -1),
             "appeal-deposit-refund": ("gold", 1),
+            "appeal-hint-refund": ("bronze", 2),
             "appeal-compensation": ("gold", 1),
         })
+        self.assertEqual(
+            self.client.get(f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"],
+            [{"tier": "bronze", "amount": 2, "reason": "hints"},
+             {"tier": "platinum", "amount": 2, "reason": "unused_helper"}],
+            "Unused-helper platinum must survive JSON persistence after hints",
+        )
         with Session(self.engine) as db:
             purchase = db.get(PlatinumHelperPurchase, UUID(purchase_id))
             self.assertTrue(purchase.refunded)
@@ -466,6 +481,42 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             self.assertIsNone(db.scalar(select(WalletTransaction.id).where(
                 WalletTransaction.idempotency_key == f"helper:{purchase_id}:refund"
             )))
+
+        # Reconstruct a historical receipt affected by the original in-place
+        # JSON mutation. The gold transaction remains and must never replay.
+        from scripts.repair_appeal_helper_receipt import repair
+        with Session(self.engine) as db:
+            row = db.get(QuestionAppeal, UUID(appeal_id))
+            row.verdict_data = {
+                **(row.verdict_data or {}),
+                "expenses_refunded": [{"tier": "bronze", "amount": 3, "reason": "hints"}],
+            }
+            db.commit()
+        with Session(self.engine) as db:
+            preview = repair(db, UUID(appeal_id))
+            self.assertEqual(preview["status"], "eligible_dry_run")
+            db.rollback()
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"],
+            [{"tier": "bronze", "amount": 3, "reason": "hints"}])
+        with Session(self.engine) as db:
+            fixed = repair(db, UUID(appeal_id), apply=True)
+            self.assertEqual(fixed["status"], "repaired")
+            db.commit()
+        with Session(self.engine) as db:
+            second = repair(db, UUID(appeal_id), apply=True)
+            self.assertEqual(second["status"], "already_recorded")
+            db.rollback()
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"], [
+            {"tier": "bronze", "amount": 3, "reason": "hints"},
+            {"tier": "gold", "amount": 1, "reason": "helper"},
+        ])
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:appeal-gold"
+            )), 1)
+            self.assertEqual(star_balances(db, self.user_id)["gold"], 3)
 
 
 if __name__ == "__main__":
