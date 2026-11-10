@@ -2,7 +2,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 from sqlalchemy.orm import Session
 
 from persistence.auth import authenticated_user, validate_origin
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v2/games", tags=["Question feedback"])
 
 
 class QuestionVoteInput(BaseModel):
-    value: int
+    value: StrictInt
 
 
 @router.put("/{run_id}/questions/{question_id}/vote")
