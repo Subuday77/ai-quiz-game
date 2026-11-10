@@ -21,6 +21,33 @@ tag deduplication, before local leakage gates and the paid tagged reviewer.
   or historical private user questions. Optional DEBUG includes generated
   candidate snippets and is unsuitable for public/shared logs.
 
+## Curated short noun/adjective clues (2026-11-10)
+
+Real English Q4 slipped through both primary reviewer and lexical shadow:
+`Which substance turns blue litmus paper red because it is acidic?`
+with the only `acid`-named option `Hydrochloric acid`. The existing
+`QUIZ_QUALITY_LEXICAL_MIN_PREFIX=5` found no signal because `acid`
+has four letters.
+
+The lexical tool now recognizes **exact whole-token** curated pairs
+`acid ↔ acidic`, `base ↔ basic`, and `magnet ↔ magnetic`.
+The configured general minimum shared-root length is **unchanged**;
+other short coincidences are not guessed. Only one matching option
+is allowed to nominate a `unique_noun_adjective_shortcut`. Multiple
+matching options suppress that signal, while an overlap in a wrong
+option is recorded only as low-severity diagnostic evidence.
+Findings remain shadow-only and never directly reject a question.
+With optional `QUIZ_QUALITY_ARBITER_MODE=on`, a high-confidence keyed
+signal sends the candidate to Terra, which must independently decide
+whether the wording really leaks the answer. Both primary reviewer
+and Terra prompts mention these specific families. If Terra confirms
+an answer leak, the candidate is rejected through the existing bounded
+quality regeneration path.
+
+Regression tests cover the original English question, the paired
+word families in both directions, uniqueness, irrelevant four-letter
+overlaps and a primary-reviewer-pass / Terra-leak-veto scenario.
+
 ## Shadow configuration — independent weights
 
 | Environment variable | Default | Purpose |
