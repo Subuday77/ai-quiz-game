@@ -204,6 +204,40 @@ class GlobalPoolTests(unittest.TestCase):
         generate.assert_not_called()
         self.assertNotIn("correct_answer", response.json())
 
+    def test_pool_inspection_uses_original_q1_category_after_game_is_lost(self):
+        """Regression: a completed Q1 moves the live category rotation."""
+        from persistence.gameplay import record_answer
+        from scripts.inspect_question_pool import inspect
+        from persistence.models import GameRun
+
+        existing_id = self.seed_other_user_question()
+        with patch.dict(os.environ, {
+            "QUIZ_DB_FIRST_GENERATION": "true",
+        }), patch("persistence.question_pool.random.random", return_value=0.0):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(existing_id))
+        with Session(self.engine) as db:
+            result, _ = record_answer(
+                db, run_id=self.run_id, user_id=self.alice,
+                question_id=existing_id, selected="A",
+            )
+            self.assertEqual(db.get(GameRun, self.run_id).status, "lost")
+        with Session(self.engine) as db:
+            report = inspect(db, self.run_id, 1)
+            self.assertEqual(report["initial_q1_category"], self.category)
+            self.assertEqual(report["first_issued_category"], self.category)
+            self.assertTrue(report["initial_category_matches_first_issued"])
+            self.assertEqual(report["category_used_for_filter_counts"], self.category)
+            self.assertNotEqual(report["selected_category_now"], self.category)
+            self.assertEqual(report["category_basis"],
+                             "pre-issuance seeded Q1 rotation")
+            self.assertGreaterEqual(
+                next(x["count"] for x in report["cumulative_sql_filter_counts"]
+                     if x["stage"] == "same_category"), 1,
+            )
+            db.rollback()
+
     def test_pool_first_generates_when_verified_pool_is_empty(self):
         proposed = candidate()
         proposed._review_report = review_report()
