@@ -31,6 +31,25 @@ def _prefix_length(left: str, right: str) -> int:
 # establish grammatical lemma identity or a definitive answer leak.
 _RUSSIAN_PREFIXES = ("над", "под", "без", "бес", "пред", "пере")
 
+# Curated English noun/adjective pairs whose short stems escape the normal
+# five-letter minimum. Exact whole tokens only: never lower the global
+# prefix threshold or infer relationships from arbitrary four-letter roots.
+# This is a reason for independent review, NOT proof of an answer leak.
+_NOUN_ADJECTIVE_PAIRS = (
+    ("acid", "acidic"),
+    ("base", "basic"),
+    ("magnet", "magnetic"),
+)
+
+
+def _noun_adjective_family(stem_word: str, answer_word: str) -> str:
+    for noun, adjective in _NOUN_ADJECTIVE_PAIRS:
+        if ((stem_word == adjective and answer_word == noun)
+                or (stem_word == noun and answer_word == adjective)):
+            return noun
+    return ""
+
+
 
 def _prefixed_root(stem_word: str, answer_word: str, min_letters: int) -> tuple[int, str]:
     """Return shared root length and leading prefix, or (0, "").
@@ -50,7 +69,7 @@ def _prefixed_root(stem_word: str, answer_word: str, min_letters: int) -> tuple[
 
 def inspect(question, settings) -> list[Finding]:
     stem = _tokens(question.question)
-    matches: dict[str, tuple[str, str, int, str]] = {}
+    matches: dict[str, tuple[str, str, int, str, str]] = {}
     for key, text in question.answers.items():
         best = None
         for answer_word in _tokens(text):
@@ -75,23 +94,28 @@ def inspect(question, settings) -> list[Finding]:
                 internal_length, root_prefix = _prefixed_root(
                     stem_word, answer_word, settings.lexical_min_prefix
                 )
+                noun_adjective = _noun_adjective_family(stem_word, answer_word)
                 if not (exact_component or geographic_root
-                        or prefix_match or internal_length):
+                        or prefix_match or internal_length or noun_adjective):
                     continue
-                common_length = max(prefix, internal_length)
+                common_length = max(prefix, internal_length,
+                                    len(noun_adjective))
                 internal_source = root_prefix if internal_length > prefix else ""
                 if best is None or common_length > best[2]:
-                    best = (stem_word, answer_word, common_length, internal_source)
+                    best = (stem_word, answer_word, common_length,
+                            internal_source, noun_adjective)
         if best is not None:
             matches[key] = best
 
     # A clue shared by several answers does not reveal one choice.
     if len(matches) != 1:
         return []
-    key, (stem_word, answer_word, prefix, internal_source) = next(iter(matches.items()))
+    key, (stem_word, answer_word, prefix, internal_source,
+          noun_adjective) = next(iter(matches.items()))
     is_keyed = key == question.correct_answer
     exact = stem_word == answer_word
     code = ("unique_exact_name_component" if exact
+            else "unique_noun_adjective_shortcut" if noun_adjective
             else "unique_prefixed_root_shortcut" if internal_source
             else "unique_morphological_shortcut") if is_keyed else "distractor_word_overlap"
     return [Finding(
@@ -108,6 +132,7 @@ def inspect(question, settings) -> list[Finding]:
             "matches_correct_option": is_keyed,
             "exact_component": exact,
             "prefix_in_option": internal_source,
-            "note": "heuristic shared root; not proof of a shortcut",
+            "noun_adjective_family": noun_adjective,
+            "note": "heuristic lexical relation; not proof of a shortcut",
         },
     )]
