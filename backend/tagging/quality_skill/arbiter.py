@@ -69,8 +69,17 @@ and all restrictions of the question. Express whether each answer is correct
 ONLY in choices, not in stem_claims. Mark yes/no/uncertain; any second yes,
 any unresolved uncertain option, or a false/uncertain premise disqualifies it.
 Identify partial-name, hyphenated surname, abbreviation, root and exact-token
-shortcuts: 'саварен' -> 'Брийя-Саварен'; 'Римской' -> 'Рим'. A genuine
-one-choice shortcut is answer_leak=true. Generic shared words are not leaks.
+shortcuts: 'саварен' -> 'Брийя-Саварен'; 'Римской' -> 'Рим'.
+Also check curated NOUN/ADJECTIVE pairs: 'acidic' in the stem with the
+only 'acid'-named answer (e.g. 'Hydrochloric acid'), 'basic'/'base', and
+'magnetic'/'magnet'. Ask whether a player can guess the uniquely named
+answer from words alone, WITHOUT knowing the subject. If so, set
+answer_leak=true even if the factual answer is correct. A noun/adjective
+shared by multiple options, or a relationship requiring actual knowledge,
+is not automatically a leak. Local lexical findings are risk signals,
+not proof: independently judge before setting answer_leak.
+A genuine one-choice shortcut is answer_leak=true. Generic shared words
+are not leaks.
 Validate government/state status claims in options too. No nonsense
 options or obvious category eliminations should survive a final bonus.
 For the bonus difficulty 15, any clearly easy/general-knowledge question must
