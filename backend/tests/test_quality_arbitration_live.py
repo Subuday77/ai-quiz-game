@@ -296,6 +296,64 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertEqual(reason, "invalid_stem_anchor")
         self.assertEqual(llm.return_value.responses.create.call_count, 1)
 
+    def test_acidic_acid_player_shortcut_routes_to_terra_and_vetoes(self):
+        """Real Q4: 5.4-mini may pass science but wording gives away B."""
+        q = TaggedQuestion.model_validate({
+            "difficulty": 4,
+            "question": "Which substance turns blue litmus paper red because it is acidic?",
+            "answers": {
+                "A": "Sodium hydroxide solution", "B": "Hydrochloric acid",
+                "C": "Ammonia solution", "D": "Calcium carbonate",
+            },
+            "correct_answer": "B",
+            "tags": {"entity": ["hydrochloric-acid", "litmus"],
+                     "concept": ["acids-and-bases", "indicators"],
+                     "keyword": ["blue-litmus", "acidic"]},
+            "fact": {"subject": "hydrochloric-acid",
+                     "relation": "turns-blue-litmus-paper", "object": "red"},
+        })
+        primary_accepts = sample_critic(
+            difficulty="appropriate", distractors=0, knowledge=0,
+        )
+        terra_flags_leak = verdict(stem_claims=[], answer_leak=True)
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_SKILL_MODE": "shadow",
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("tagging.review.LLMClient") as reviewer, patch(
+            "tagging.quality_skill.arbiter.LLMClient"
+        ) as terra:
+            shadow = evaluate_shadow(q, requested_difficulty=4)
+            self.assertEqual(shadow["arbitration_reasons"],
+                             ["unique_noun_adjective_shortcut"])
+            reviewer.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(primary_accepts.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            terra.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(terra_flags_leak.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            with self.assertRaises(QualityRegenerationError):
+                check_tagged_quality(
+                    q, language="English", category="Chemistry",
+                    requested_difficulty=4, neighbors=[],
+                    mode=QualityMode.ENFORCE,
+                    deadline=perf_counter() + 30, timeout_seconds=12,
+                    shadow=shadow,
+                )
+            payload = json.loads(
+                terra.return_value.responses.create.call_args.kwargs["input"]
+            )
+            self.assertEqual(payload["local_findings"][0]["code"],
+                             "unique_noun_adjective_shortcut")
+            self.assertIn("acidic", terra.return_value.responses.create.call_args.kwargs[
+                "instructions"])
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(terra.call_count, 1)
+        self.assertEqual(q._review_report["decision"], "reject")
+        self.assertEqual(q._review_report["details"]["arbitration"]["issues"],
+                         ["answer_leak"])
+
     def test_carbonate_shortcut_invalid_stem_claim_regenerates_without_503(self):
         from api import generate_valid_question
         from tagging.quality_skill.arbiter import stem_claims_anchored
