@@ -236,6 +236,20 @@ class GlobalPoolTests(unittest.TestCase):
                 next(x["count"] for x in report["cumulative_sql_filter_counts"]
                      if x["stage"] == "same_category"), 1,
             )
+            # Exact same row is "seen" today, but was not "seen" before
+            # the issue timestamp. Prove the inspector does not confuse them.
+            from datetime import datetime, timedelta, timezone
+            row = report["matching_candidate_timeline"][0]
+            shown = datetime.fromisoformat(row["first_shown_to_this_user_at"])
+            if shown.tzinfo is None:
+                shown = shown.replace(tzinfo=timezone.utc)
+            before = inspect(db, self.run_id, 1, at=shown - timedelta(seconds=1))
+            after = inspect(db, self.run_id, 1, at=shown + timedelta(seconds=1))
+            self.assertFalse(before["matching_candidate_timeline"][0][
+                "already_shown_to_user_at_requested_time"])
+            self.assertTrue(after["matching_candidate_timeline"][0][
+                "already_shown_to_user_at_requested_time"])
+            self.assertEqual(before["category_used_for_filter_counts"], self.category)
             db.rollback()
 
     def test_pool_first_generates_when_verified_pool_is_empty(self):
