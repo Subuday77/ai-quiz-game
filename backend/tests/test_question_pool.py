@@ -3,7 +3,7 @@ import os
 import unittest
 from copy import deepcopy
 from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -13,10 +13,10 @@ from sqlalchemy.pool import StaticPool
 
 from api import app
 from persistence.database import get_db
-from persistence.game_routes import _category_for_round
+from persistence.game_routes import _category_for_round, _main_pool_search_categories
 from persistence.gameplay import create_game, offer_question
 from persistence.models import (
-    Base, Question, QuestionAttempt, QuestionReview,
+    Base, GameRun, Question, QuestionAttempt, QuestionReview, Topic, WalletTransaction,
 )
 from persistence.question_pool import (
     enabled, offer_approved_pool_question, scan_limit,
@@ -157,21 +157,203 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.text)
         return UUID(response.json()["id"])
 
-    def seed_other_user_question(self, *, accepted=True):
+    def seed_other_user_question(self, *, accepted=True, category=None,
+                                 question=None):
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
             bob_run = create_game(db, user_id=self.bob, language="English")
-            q = candidate()
+            q = question if question is not None else candidate()
             if accepted:
                 q._review_report = review_report()
             attempt, saved = offer_question(
                 db, run_id=bob_run.id, user_id=self.bob, question=q,
-                category=self.category, provider="test", model="stub",
+                category=category or self.category, provider="test", model="stub",
                 dedup_enforce=True,
             )
             return saved.id
 
     def request(self):
         return self.client.get(f"/api/v2/games/{self.run_id}/question")
+
+    def _silver_credit(self, amount):
+        with Session(self.engine) as db:
+            db.add(WalletTransaction(
+                user_id=self.alice, reason="star/silver/offline-test-credit",
+                amount=amount, idempotency_key=str(uuid4()),
+            ))
+            db.commit()
+
+    def _silver_balance(self):
+        return self.client.get("/api/v2/stars").json()["silver"]
+
+    def test_pool_first_q1_searches_other_allowed_categories_before_ai(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            search = _main_pool_search_categories(db, run, 1, self.category)
+            self.assertEqual(search[0], self.category)
+            self.assertEqual(set(search), set(run.allowed_categories or __import__(
+                "consts").QUESTION_CATEGORIES))
+            secondary = search[-1]  # Force an exhaustive search, not one backup.
+        pooled_id = self.seed_other_user_question(category=secondary)
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(pooled_id))
+        ai.assert_not_called()
+        with Session(self.engine) as db:
+            stored = db.get(Question, pooled_id)
+            self.assertEqual(db.get(Topic, stored.topic_id).labels["en"], secondary)
+
+    def test_pool_first_skips_paid_excluded_category(self):
+        self._silver_credit(5)
+        excluded = self.category
+        response = self.client.post(
+            f"/api/v2/games/{self.run_id}/categories/exclude",
+            json={"categories": [excluded], "request_id": str(uuid4())},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            assigned = _category_for_round(run.id, 1, db=db)
+            search = _main_pool_search_categories(db, run, 1, assigned)
+            self.assertNotIn(excluded, search)
+            other = search[-1]
+        blocked_id = self.seed_other_user_question(category=excluded)
+        eligible_id = self.seed_other_user_question(
+            category=other,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            result = self.request()
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["question_id"], str(eligible_id))
+        self.assertNotEqual(result.json()["question_id"], str(blocked_id))
+        self.assertEqual(self._silver_balance(), 0)
+        ai.assert_not_called()
+
+    def test_pool_first_main_q14_uses_other_topic_before_any_ai(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 13
+            db.commit()
+            primary = _category_for_round(run.id, 14, db=db)
+            secondary = _main_pool_search_categories(db, run, 14, primary)[-1]
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 13
+            db.commit()
+            item = candidate(difficulty=13)
+            item._review_report = review_report()
+            _, stored = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=item,
+                category=secondary, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            expected_id = stored.id
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            result = self.request()
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["number"], 14)
+        self.assertEqual(result.json()["difficulty"], 13)
+        self.assertEqual(result.json()["question_id"], str(expected_id))
+        ai.assert_not_called()
+
+    def test_paid_manual_pool_hit_keeps_exact_category_and_charges_once(self):
+        original = candidate()
+        original._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=original):
+            first = self.request().json()
+        self._silver_credit(2)
+        base = f"/api/v2/games/{self.run_id}"
+        selected = self.client.get(base + "/categories").json()["alternatives"][0]
+        reused_id = self.seed_other_user_question(
+            category=selected,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            changed = self.client.post(base + "/categories/change", json={
+                "question_id": first["question_id"], "mode": "manual",
+                "category": selected, "request_id": str(uuid4()),
+            })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["question_id"], str(reused_id))
+        ai.assert_not_called()
+        self.assertEqual(self._silver_balance(), 0)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            attempts = db.scalars(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == run.id).order_by(QuestionAttempt.revision)).all()
+            self.assertEqual(len(attempts), 2)
+            self.assertIsNotNone(attempts[0].superseded_at)
+            self.assertEqual(attempts[1].revision, 1)
+            self.assertEqual(attempts[1].manual_category_used, 1)
+            self.assertEqual(run.hints_used, 1)
+            self.assertEqual(db.scalar(select(func.count(Question.id))), 2)
+        self.assertEqual(self.request().json(), changed.json())
+
+    def test_paid_manual_pool_miss_generates_only_selected_category(self):
+        original = candidate()
+        original._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=original):
+            first = self.request().json()
+        self._silver_credit(2)
+        base = f"/api/v2/games/{self.run_id}"
+        options = self.client.get(base + "/categories").json()["alternatives"]
+        selected, other = options[:2]
+        self.seed_other_user_question(
+            category=other,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        proposed = candidate(relation="nobel-prize-reason",
+                             concept="photoelectric-effect", answer="photoelectric-effect")
+        proposed._review_report = review_report()
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question", return_value=proposed) as ai:
+            changed = self.client.post(base + "/categories/change", json={
+                "question_id": first["question_id"], "mode": "manual",
+                "category": selected, "request_id": str(uuid4()),
+            })
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(ai.call_count, 1)
+        self.assertEqual(ai.call_args.args[2], selected)
+        with Session(self.engine) as db:
+            new = db.get(Question, UUID(changed.json()["question_id"]))
+            self.assertEqual(db.get(Topic, new.topic_id).labels["en"], selected)
+        self.assertEqual(self._silver_balance(), 0)
+
+    def test_paid_manual_pool_miss_ai_failure_never_charges(self):
+        original = candidate()
+        original._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=original):
+            first = self.request().json()
+        self._silver_credit(2)
+        base = f"/api/v2/games/{self.run_id}"
+        selected = self.client.get(base + "/categories").json()["alternatives"][0]
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "api.generate_valid_question",
+            side_effect=HTTPException(status_code=503, detail="AI unavailable"),
+        ) as ai:
+            result = self.client.post(base + "/categories/change", json={
+                "question_id": first["question_id"], "mode": "manual",
+                "category": selected, "request_id": str(uuid4()),
+            })
+        self.assertEqual(result.status_code, 503, result.text)
+        self.assertEqual(ai.call_args.args[2], selected)
+        self.assertEqual(self._silver_balance(), 2)
+        self.assertEqual(self.request().json(), first)
 
     def test_emergency_reuses_other_users_question_without_ai_or_copy(self):
         existing_id = self.seed_other_user_question()
