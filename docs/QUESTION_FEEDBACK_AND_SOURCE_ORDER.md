@@ -54,11 +54,36 @@ Premium is intentionally not enabled in this release.
 `QUIZ_DB_FIRST_GENERATION=false` is **Model First**; original ordering
 is preserved: AI generation, emergency approved pool on recoverable failure.
 
-When `QUIZ_DB_FIRST_GENERATION=true`, first scan the verified approved
-pool for exact player language, category and difficulty. Existing strict
-v5 quality reviews, complete fact/tag metadata, cross-language per-user
-deduplication and bonus Q16 Terra v2 evidence are still mandatory. Exclude
-quarantined, banned and pending-review questions.
+When `QUIZ_DB_FIRST_GENERATION=true` and tagged gameplay is enabled,
+the **main questions Q1–Q15** follow this priority:
+
+1. Search the assigned category's verified approved pool.
+2. If no candidate is admitted, search **each other not-yet-answered category**
+   in the saved per-game allowlist (never any category excluded before the
+   game for silver). The search order is deterministic for the game; it neither
+   spends stars nor records a category change/hint.
+3. Only after every eligible category is exhausted, call the existing AI
+   generator, keeping its retry/quality/fallback behavior.
+
+A played/answered category is consumed; a skipped or replaced question's
+category can return later, according to existing `available_categories`
+rules. The existing emergency reset when all allowed categories are consumed
+is preserved (normally not reached within Q1–Q15). The offered question
+must match the current difficulty and player language regardless of category.
+
+**Paid manual selection (2 silver):** an explicit category choice overrides
+the cross-category search. First try only that chosen category's eligible
+approved pool; if none is admitted, generate within **that same category**.
+Do not auto-substitute a different topic. A successful pooled replacement
+atomically supersedes the old attempt and charges silver; an unsuccessful
+lookup or generation charges nothing.
+
+**Bonus Q16** retains its separate persisted topic rotation and strict Terra
+v2 reuse requirements; the new all-category search does not apply.
+
+Existing strict v5 quality reviews, complete fact/tag metadata, cross-language
+per-user deduplication and bonus Q16 Terra v2 evidence are still mandatory.
+Exclude quarantined, banned and pending-review questions.
 
 Each fully qualified candidate undergoes ONE independent admission draw:
 
