@@ -53,5 +53,3 @@ class PublicQuestion(BaseModel):
     answers: dict[Choice, str]
     bonus: bool
     hidden_count: int = Field(default=0, ge=0, le=2)
-    # Only the requesting player's own vote; no aggregate rating.
-    my_vote: Literal[-1, 0, 1] = 0
