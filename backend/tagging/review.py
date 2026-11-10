@@ -490,6 +490,20 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
     )
+    # Spatial qualifiers are correctness constraints, not mere editorial
+    # signals. The primary critic can wrongly validate "flows into Caspian"
+    # while ignoring "south of Volga". Even with generic arbitration OFF
+    # or shadow skill OFF, enforce independent verification for these stems.
+    from tagging.quality_skill.fact_tool import spatial_constraints
+    required_spatial = (
+        spatial_constraints(question.question)
+        if mode == QualityMode.ENFORCE else []
+    )
+    if required_spatial:
+        event("spatial_constraint_verification_requested",
+              count=len(required_spatial),
+              reviewer_fact=verdict.fact_valid.value,
+              reviewer_premise=verdict.premise.value)
     should_arbitrate = mode == QualityMode.ENFORCE and (
         not review_rejected or (bonus_too_easy and not hard_rejected)
     )
@@ -501,6 +515,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
             deadline=deadline, timeout_seconds=timeout_seconds, clock=clock,
             primary_difficulty=(verdict.difficulty.value
                                 if requested_difficulty == 15 else None),
+            mandatory_spatial=required_spatial,
         )
         # A missing or disabled arbiter must never silently approve a
         # primary critic's too_easy bonus.
