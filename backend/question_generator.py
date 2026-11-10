@@ -40,6 +40,12 @@ Every slug MUST be canonical LOWERCASE ENGLISH ASCII kebab-case
 language used for the question. The fact.subject MUST be one of the
 entity tags. The relation must describe the EXACT knowledge being asked
 (e.g. birth-year, not simply date); object represents the correct answer.
+When the stem includes a directional comparison to a named reference
+(e.g. "южнее Волги", "south of London"), the fact.relation MUST encode
+that comparison, NOT just the river's destination or city's country.
+A candidate satisfying only the weaker condition is INVALID. Check that
+the chosen answer actually lies in the specified direction from the
+reference. If uncertain, choose a simpler question without that comparison.
 Different wordings and answer orders for the same knowledge MUST produce
 the same subject and relation. Do NOT use the difficulty as a tag.
 
