@@ -269,7 +269,7 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertEqual(reviewer.call_count, 1)
         sleep.assert_not_called()
 
-    def test_invalid_claim_anchor_is_unavailable_not_a_false_fact(self):
+    def test_invalid_claim_anchor_is_candidate_rejection_not_a_false_fact(self):
         from tagging.quality_skill.arbiter import stem_claims_anchored
         q = sample_question()
         invalid = verdict(stem_claims=[{
@@ -291,9 +291,88 @@ class ArbitrationPolicyTests(unittest.TestCase):
                 deadline=perf_counter()+20, timeout_seconds=12,
             )
         self.assertFalse(allowed)
-        self.assertIsNone(report)
+        self.assertEqual(report["decision"], "reject")
+        self.assertEqual(report["issues"], ["invalid_stem_anchor"])
         self.assertEqual(reason, "invalid_stem_anchor")
         self.assertEqual(llm.return_value.responses.create.call_count, 1)
+
+    def test_carbonate_shortcut_invalid_stem_claim_regenerates_without_503(self):
+        from api import generate_valid_question
+        from tagging.quality_skill.arbiter import stem_claims_anchored
+        from tagging.quality_skill.engine import evaluate_shadow
+
+        q = TaggedQuestion.model_validate({
+            "difficulty": 4,
+            "question": "Which gas is commonly released when an acid reacts with a carbonate?",
+            "answers": {
+                "A": "Oxygen", "B": "Hydrogen",
+                "C": "Carbon dioxide", "D": "Chlorine",
+            },
+            "correct_answer": "C",
+            "tags": {"entity": ["carbonates", "carbon-dioxide", "acids"],
+                     "concept": ["chemical-reactions", "gas-evolution"],
+                     "keyword": ["acid-plus-carbonate"]},
+            "fact": {"subject": "carbonates",
+                     "relation": "reacts-with-acid-produces-gas",
+                     "object": "carbon-dioxide"},
+        })
+        bogus = ArbitrationVerdict.model_validate({
+            "premise": "valid",
+            "choices": {"A": "no", "B": "no", "C": "yes", "D": "no"},
+            "difficulty": "appropriate",
+            "answer_leak": False,
+            "stem_claims": [{
+                "claim": "The correct answer says carbon dioxide",
+                "anchor": "Carbon dioxide",
+                "verdict": "supported",
+                "reason": "This text appears only in an answer choice.",
+            }],
+            "rationale": "The science question is sound.",
+        })
+        self.assertFalse(stem_claims_anchored(bogus, q.question))
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_SKILL_MODE": "shadow",
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("tagging.quality_skill.arbiter.LLMClient") as llm:
+            shadow = evaluate_shadow(q, requested_difficulty=4)
+            self.assertTrue(shadow["would_arbitrate"])
+            self.assertTrue(any(
+                f["code"] == "unique_morphological_shortcut"
+                for f in shadow["findings"]
+            ))
+            llm.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(bogus.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            allowed, report, reason = arbitrate(
+                q, language="English", category="Chemistry",
+                requested_difficulty=4, shadow=shadow,
+                deadline=perf_counter()+20, timeout_seconds=12,
+            )
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "invalid_stem_anchor")
+        self.assertEqual(report["decision"], "reject")
+        self.assertEqual(report["issues"], ["invalid_stem_anchor"])
+
+        # The existing bounded generation loop should retry this
+        # unverifiable candidate. Real Terra timeouts must NOT retry.
+        with patch.dict(os.environ, {
+            "AI_GENERATION_MAX_ATTEMPTS": "3",
+            "AI_GENERATION_BUDGET_SECONDS": "60",
+            "AI_QUALITY_MODE": "enforce",
+            "AI_LOCAL_LEAK_MODE": "off",
+        }), patch("api.create_question", return_value=q.model_dump()) as gen, patch(
+            "tagging.review.check_tagged_quality",
+            side_effect=[QualityRegenerationError(), None]
+        ) as review, patch("api.sleep") as sleep:
+            result = generate_valid_question(
+                4, "English", "Chemistry",
+                tag_history=[], tag_context=[], too_easy_reserve=[],
+            )
+        self.assertEqual(result.correct_answer, "C")
+        self.assertEqual(gen.call_count, 2)
+        self.assertEqual(review.call_count, 2)
+        sleep.assert_not_called()
 
     def test_savarin_rome_river_origin_and_calvados_signals(self):
         scenarios = [
