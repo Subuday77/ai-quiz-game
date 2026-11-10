@@ -351,12 +351,17 @@ def offer_approved_pool_question(
                 )
                 old_attempt.superseded_at = datetime.now(timezone.utc)
                 run.hints_used += 1
+            number = (old_attempt.number if replacing else
+                      16 if run.status == "bonus" else game_progress.main_question_index + 1)
+            revision = (old_attempt.revision + 1 if replacing else
+                        int(db.scalar(select(func.coalesce(func.max(QuestionAttempt.revision), -1))
+                                      .where(QuestionAttempt.run_id == run.id,
+                                             QuestionAttempt.number == number))) + 1)
             attempt = QuestionAttempt(
                 run_id=run.id, question_id=saved.id,
-                number=(old_attempt.number if replacing else
-                        16 if run.status == "bonus" else game_progress.main_question_index + 1),
+                number=number,
                 requested_difficulty=difficulty,
-                revision=old_attempt.revision + 1 if replacing else 0,
+                revision=revision,
                 category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
                 manual_category_used=old_attempt.manual_category_used + (
                     1 if replace_manual else 0
