@@ -989,8 +989,6 @@ export class AppComponent implements OnInit, OnDestroy {
             (marker ? ' <span class="appeal-answer-tag">(' + safe(marker) + ')</span>' : '') +
             '</li>';
         }).join('');
-        const refundFields = appealHistoryRefundRows(item.expenses_refunded).map(row =>
-          fieldRefund(row.labelKey, row.tier, row.amount)).join('');
         const displayedStatus = item.display_status || item.status;
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
           'technical_unresolved'].includes(displayedStatus) ? displayedStatus : 'unknown';
@@ -1001,6 +999,8 @@ export class AppComponent implements OnInit, OnDestroy {
           localized(labelKey) + ':</span> ' + value + '</p>';
         const fieldRefund = (labelKey: string, tier: StarTier, amount: number) =>
           field(labelKey, safe('+' + amount + ' ' + this.locale.t('stars.' + tier)));
+        const refundFields = appealHistoryRefundRows(item.expenses_refunded).map(row =>
+          fieldRefund(row.labelKey, row.tier, row.amount)).join('');
         return '<details class="appeal-history-item" data-history-index="' + index + '">' +
           '<summary title="' + safe(question) + '">' +
             '<span class="appeal-history-heading">' +
