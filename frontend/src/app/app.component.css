@@ -526,3 +526,17 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .card-topline .appeal-header-button { max-width: 100%; margin: 2px 0; }
   .appeal-allowance-inline { margin-inline-start: 0; }
 }
+
+/* Question feedback is intentionally private: never show counts or net score. */
+.question-votes { display: flex; align-items: center; gap: 10px;
+  margin: -9px 0 19px; min-height: 43px; flex-wrap: wrap; }
+.question-vote { width: 46px; height: 43px; border-radius: 12px;
+  display: inline-grid; place-items: center; font-size: 23px;
+  border: 1px solid #6a719f; background: #282c50; color: #f2f2ff;
+  cursor: pointer; transition: background .14s, border-color .14s; }
+.question-vote:hover:not(:disabled), .question-vote:focus-visible {
+  border-color: #8ce9ef; background: #373d6a; outline: none; }
+.question-vote.selected { border: 2px solid #8ce9ef;
+  background: #35566b; box-shadow: 0 0 0 2px #8ce9ef26; }
+.question-vote:disabled { opacity: .55; cursor: not-allowed; }
+.question-vote-error { color: #ffb9bb; font-size: 12px; }
