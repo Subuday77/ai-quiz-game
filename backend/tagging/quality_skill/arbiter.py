@@ -42,6 +42,20 @@ NEVER insert in stem_claims any statement about whether A/B/C/D is true or
 false, or an invented statement about what the wrong options normally mean.
 Incorrect distractors are EXPECTED and are not false question premises.
 For each real stem claim you cannot independently verify, use 'uncertain'.
+MANDATORY SPATIAL COMPARISONS: A geographic constraint such as "южнее Волги",
+"south of the Volga", "west of Berlin", "nördlich von München" is a
+SEPARATE condition in the question, even in interrogative wording. The main
+fact (e.g. "Ural flows into Caspian Sea") DOES NOT establish the comparison
+("Ural south of Volga"). If mandatory_spatial_constraints is nonempty,
+for EACH exact constraint include a stem_claims entry with anchor containing
+the EXACT quoted constraint. The claim must assess whether the proposed
+answer satisfies that RELATION to the named reference, not whether it merely
+has the right endpoint or category. Provide independent factual reasoning
+in reason; if you cannot verify the comparison, verdict MUST be "uncertain".
+If the comparison is false, verdict="false" and premise="invalid".
+Even if no affirmative stem statements exist, these mandatory *question
+conditions* MUST still be audited in stem_claims.
+Do not claim to have looked up coordinates, maps, or sources you cannot access.
 You have NO web/source tool; do not invent citations or claim a source was
 searched. Do not assume a plausible invented place-name is authentic merely
 because the capital/country is real.
@@ -115,6 +129,20 @@ def stem_claims_anchored(verdict: ArbitrationVerdict, stem: str) -> bool:
     )
 
 
+def spatial_constraints_covered(verdict: ArbitrationVerdict,
+                                constraints: list[str]) -> bool:
+    """Require evidence addressing every supplied exact spatial restriction.
+
+    Merely verifying a river's endpoint or a city's country does not qualify.
+    This checks coverage, not geography; Terra must judge truth independently.
+    """
+    normalize = lambda t: " ".join(unicodedata.normalize("NFKC", t).casefold().split())
+    return all(any(
+        normalize(constraint) in normalize(item.anchor)
+        for item in verdict.stem_claims
+    ) for constraint in constraints)
+
+
 def is_suitable(verdict: ArbitrationVerdict, *, correct_answer: str,
                 bonus: bool, primary_difficulty: str | None = None) -> tuple[bool, str]:
     if verdict.premise != "valid":
@@ -140,7 +168,8 @@ def is_suitable(verdict: ArbitrationVerdict, *, correct_answer: str,
 def arbitrate(question, *, language: str, category: str,
               requested_difficulty: int, shadow: dict | None,
               deadline: float, timeout_seconds: float,
-              clock=perf_counter, primary_difficulty: str | None = None
+              clock=perf_counter, primary_difficulty: str | None = None,
+              mandatory_spatial: list[str] | None = None,
               ) -> tuple[bool, dict | None, str]:
     """Return (accepted, confidential report, reason).
 
@@ -150,8 +179,13 @@ def arbitrate(question, *, language: str, category: str,
     """
     enabled, model, configured_timeout = settings()
     bonus = requested_difficulty == 15
+    constraints = mandatory_spatial or []
+    # Spatial relationships are a correctness-critical exception to the
+    # opt-in generic arbitration policy. All unrelated shadow skills retain
+    # their existing off/on behavior.
+    enabled = enabled or bool(constraints)
     flagged = bool(shadow and shadow.get("would_arbitrate"))
-    if not enabled or (not bonus and not flagged):
+    if not enabled or (not bonus and not flagged and not constraints):
         return True, None, "disabled" if not enabled else "not_triggered"
 
     remaining = deadline - clock()
@@ -174,6 +208,7 @@ def arbitrate(question, *, language: str, category: str,
                     "language": language, "category": category,
                     "question": question.model_dump(exclude={"plausibility"}),
                     "local_findings": (shadow or {}).get("findings", []),
+                    "mandatory_spatial_constraints": constraints,
                 }, ensure_ascii=False),
                 max_output_tokens=2400,
                 reasoning={"effort": "low"},
@@ -190,6 +225,22 @@ def arbitrate(question, *, language: str, category: str,
             event("quality_arbitration", outcome="unavailable",
                   reason="invalid_stem_anchor", model_id=model, bonus=bonus)
             return False, None, "invalid_stem_anchor"
+        if constraints and not spatial_constraints_covered(verdict, constraints):
+            # Provider delivered a complete answer but failed to inspect a
+            # required qualifier. Reject this candidate and regenerate; this
+            # is not a transient provider outage or proof that geography is
+            # false. A 503 would only strand the player unnecessarily.
+            event("quality_arbitration", outcome="reject",
+                  reason="spatial_constraint_unchecked", model_id=model,
+                  bonus=bonus, constraint_count=len(constraints))
+            return False, {
+                "checker_type": "ai_terra_arbiter",
+                "provider": "openai", "model": model,
+                "contract_version": ARBITRATION_CONTRACT_VERSION,
+                "decision": "reject", "issues": ["spatial_constraint_unchecked"],
+                "details": verdict.model_dump(mode="json"),
+                "duration_ms": round((clock() - started) * 1000),
+            }, "spatial_constraint_unchecked"
     except Exception as exc:
         event("quality_arbitration", outcome="unavailable",
               error_type=type(exc).__name__, bonus=bonus,
