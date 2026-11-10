@@ -615,7 +615,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         reserves = []
         last_generation_error = None
 
-        def offer_pool(candidate_category: str):
+        def offer_pool(candidate_category: str, *, probability_filter: bool = False):
             if not pool_settings[0]:
                 return None
             try:
@@ -623,6 +623,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     db, run_id=run_id, user_id=user.id,
                     category=candidate_category, max_candidates=pool_settings[2],
                     expected_bonus_topic_index=bonus_index,
+                    rating_filter=probability_filter,
                 )
             except Exception as exc:
                 # The optional pool must never bypass quality checks or
@@ -652,7 +653,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 db.rollback()
             selected_category = proposed_category
             if category_attempt == 0 and source_order == "pool_first":
-                pooled = offer_pool(selected_category)
+                pooled = offer_pool(selected_category, probability_filter=True)
                 if pooled is not None:
                     event("question_source_selected", source="pool",
                           order=source_order, number=question_number)
@@ -677,6 +678,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                         db=db,
                     )
             exclusions = generator_context(history, category_slug(selected_category))
+            if source_order == "pool_first" and category_attempt == 0:
+                event("ai_fallback", reason="no_db_admitted", number=question_number)
             event("question_source_selected", source="generator",
                   order=source_order, number=question_number)
             db.rollback()
