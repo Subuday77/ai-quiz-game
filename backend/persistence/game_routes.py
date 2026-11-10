@@ -282,6 +282,26 @@ def _category_for_round(run_id: UUID, number: int,
 
 
 
+def _main_pool_search_categories(
+    db: Session, run: GameRun, number: int, primary: str,
+) -> list[str]:
+    """DB First: search the assigned topic, then every other usable main topic.
+
+    Use the game's saved allowlist and answered-category history. This is only
+    a read-only search order: no paid category change, new hint or saved state.
+    """
+    available = set(available_categories(db, run, number))
+    allowed = list(allowed_categories(run))
+    seeded = random.Random(run.id.int).sample(allowed, k=len(allowed))
+    offset = (number - 1) % len(seeded)
+    rotated = seeded[offset:] + seeded[:offset]
+    remaining = [item for item in rotated if item != primary and item in available]
+    ranked = prefer_other_family(
+        remaining, preceding_question_category(db, run.id, number),
+    )
+    return [primary] + ranked
+
+
 def _alternate_main_category(db: Session, run: GameRun, number: int,
                              primary: str) -> str | None:
     """One deterministic, allowed, unconsumed backup for a late main slot.
@@ -586,8 +606,13 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 detail="Historical questions lack verified tags; run tagging.backfill",
             ) from None
 
-        # Q10–Q15 may try one other unused allowed category automatically.
-        # Q16 uses its existing *persisted* bonus rotation and the same cap.
+        # AI retry policy stays unchanged: one alternate for late main slots.
+        # DB First searches all unplayed/allowed main topics before *any* AI.
+        # Q16 retains its separate persisted rotation and stricter pool checks.
+        pool_search_categories = (
+            _main_pool_search_categories(db, run, question_number, category)
+            if source_order == "pool_first" and question_number <= 15 else []
+        )
         categories_to_try = [category]
         if 10 <= question_number <= 15:
             alternate = _alternate_main_category(db, run, question_number, category)
@@ -632,6 +657,16 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 db.rollback()
                 return None
 
+        if pool_search_categories:
+            for pool_category in pool_search_categories:
+                pooled = offer_pool(pool_category, probability_filter=True)
+                if pooled is not None:
+                    event("question_source_selected", source="pool",
+                          order=source_order, number=question_number,
+                          category=pool_category)
+                    return _public(*pooled, phase="main", db=db)
+            event("ai_fallback", reason="no_db_admitted", number=question_number)
+
         for category_attempt, proposed_category in enumerate(categories_to_try):
             if category_attempt and question_number == 16:
                 previous_index = bonus_index
@@ -652,7 +687,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 )
                 db.rollback()
             selected_category = proposed_category
-            if category_attempt == 0 and source_order == "pool_first":
+            if (category_attempt == 0 and source_order == "pool_first"
+                    and question_number == 16):
                 pooled = offer_pool(selected_category, probability_filter=True)
                 if pooled is not None:
                     event("question_source_selected", source="pool",
@@ -678,7 +714,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                         db=db,
                     )
             exclusions = generator_context(history, category_slug(selected_category))
-            if source_order == "pool_first" and category_attempt == 0:
+            if (source_order == "pool_first" and category_attempt == 0
+                    and question_number == 16):
                 event("ai_fallback", reason="no_db_admitted", number=question_number)
             event("question_source_selected", source="generator",
                   order=source_order, number=question_number)
@@ -935,6 +972,32 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
 
     from api import generate_valid_question
     tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
+    # A paid manual category selection must not silently switch topics. Query
+    # this exact topic's verified pool before generating anything new.
+    if tagged and manual:
+        from persistence.question_source_policy import question_source_order
+        from persistence.question_pool import offer_approved_pool_question, scan_limit
+        try:
+            if question_source_order() == "pool_first":
+                pooled = offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id, category=chosen,
+                    max_candidates=scan_limit(), rating_filter=True,
+                    replace_question_id=payload.question_id,
+                    replace_attempt_id=old_attempt_id,
+                    replace_manual=True,
+                    category_operation_key=f"star:{user.id}:{payload.request_id}:category",
+                )
+                if pooled is not None:
+                    event("question_source_selected", source="pool",
+                          order="pool_first", number=attempt.number,
+                          paid_category=True)
+                    return _public(*pooled, phase="main", db=db)
+        except ValueError:
+            raise HTTPException(status_code=503, detail="Invalid question pool configuration") from None
+        except GameNotFound:
+            raise HTTPException(status_code=404, detail="Game not found") from None
+        except (GameConflict, PerkUnavailable) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
         from tagging.repository import history_for_user
