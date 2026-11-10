@@ -1,0 +1,152 @@
+{
+  "leakage": [
+    {
+      "language": "English",
+      "answer": "Big Ben",
+      "leaked": "Which landmark is called \"Big Ben\" in this clue?",
+      "clean": "Which famous bell is housed at the Palace of Westminster?"
+    },
+    {
+      "language": "Russian",
+      "answer": "Первый канал",
+      "leaked": "Какой телеканал упомянут в выражении «Первый канал»?",
+      "clean": "Как называется российский телеканал, начавший вещание как ОРТ в 1995 году?"
+    },
+    {
+      "language": "Hebrew",
+      "answer": "ים המלח",
+      "leaked": "איזה אגם נקרא \"ים המלח\" ברמז הזה?",
+      "clean": "איזה אגם מלוח נמצא בין ישראל לירדן?"
+    },
+    {
+      "language": "German",
+      "answer": "Schwarzes Meer",
+      "leaked": "Welches Meer heißt in diesem Hinweis „Schwarzes Meer“?",
+      "clean": "Welches Meer liegt südlich der Ukraine?"
+    },
+    {
+      "language": "French",
+      "answer": "Tour Eiffel",
+      "leaked": "Quel monument est nommé « Tour Eiffel » dans cet indice ?",
+      "clean": "Quel monument métallique parisien a été inauguré en 1889 ?"
+    },
+    {
+      "language": "Spanish",
+      "answer": "Mar Muerto",
+      "leaked": "¿Qué lago se nombra como «Mar Muerto» en esta pista?",
+      "clean": "¿Qué lago salado se encuentra entre Israel y Jordania?"
+    },
+    {
+      "language": "Italian",
+      "answer": "Torre di Pisa",
+      "leaked": "Quale monumento è chiamato «Torre di Pisa» in questo indizio?",
+      "clean": "Quale celebre campanile italiano è noto per la sua inclinazione?"
+    }
+  ],
+  "judgments": [
+    {
+      "name": "mantle_derivative",
+      "language": "Russian",
+      "question": {
+        "difficulty": 5,
+        "question": "Какой слой Земли является источником мантийных пород?",
+        "answers": {
+          "A": "Мантия",
+          "B": "Земная кора",
+          "C": "Внешнее ядро",
+          "D": "Внутреннее ядро"
+        },
+        "correct_answer": "A"
+      },
+      "issues": [
+        "answer_leak"
+      ]
+    },
+    {
+      "name": "bolivian_capitals",
+      "language": "English",
+      "question": {
+        "difficulty": 5,
+        "question": "What is the capital of Bolivia?",
+        "answers": {
+          "A": "Sucre",
+          "B": "La Paz",
+          "C": "Santa Cruz",
+          "D": "Cochabamba"
+        },
+        "correct_answer": "A"
+      },
+      "issues": [
+        "ambiguous",
+        "multiple_correct"
+      ]
+    },
+    {
+      "name": "subjective_borscht_drink",
+      "language": "Russian",
+      "question": {
+        "difficulty": 5,
+        "question": "Какой напиток часто подают к борщу?",
+        "answers": {
+          "A": "Чёрный чай",
+          "B": "Компот",
+          "C": "Квас",
+          "D": "Вода"
+        },
+        "correct_answer": "A"
+      },
+      "issues": [
+        "ambiguous",
+        "needs_verification"
+      ]
+    },
+    {
+      "name": "closest_planet",
+      "language": "English",
+      "question": {
+        "difficulty": 5,
+        "question": "Which planet is closest to the Sun?",
+        "answers": {
+          "A": "Mercury",
+          "B": "Venus",
+          "C": "Earth",
+          "D": "Mars"
+        },
+        "correct_answer": "A"
+      },
+      "issues": []
+    },
+    {
+      "name": "religious_conventional",
+      "language": "English",
+      "question": {
+        "difficulty": 5,
+        "question": "Which event does the Jewish festival of Passover commemorate?",
+        "answers": {
+          "A": "The Exodus from Egypt",
+          "B": "The dedication of the Second Temple",
+          "C": "The giving of the Torah at Sinai",
+          "D": "The end of the Babylonian exile"
+        },
+        "correct_answer": "A"
+      },
+      "issues": []
+    },
+    {
+      "name": "cultural_scoped",
+      "language": "English",
+      "question": {
+        "difficulty": 5,
+        "question": "On which date is Christmas celebrated in the Western Christian Gregorian calendar?",
+        "answers": {
+          "A": "25 December",
+          "B": "6 January",
+          "C": "7 January",
+          "D": "24 December"
+        },
+        "correct_answer": "A"
+      },
+      "issues": []
+    }
+  ]
+}

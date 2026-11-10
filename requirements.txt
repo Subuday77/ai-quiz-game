@@ -1,4 +1,0 @@
-python-dotenv
-openai
-boto3
-colorama

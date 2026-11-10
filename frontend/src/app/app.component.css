@@ -1,0 +1,510 @@
+:host { display: block; min-height: 100vh; background: radial-gradient(ellipse at 20% 0, #373064 0, transparent 48%),radial-gradient(ellipse at 90% 95%,#143a5a 0,transparent 48%); }
+.shell { max-width: 920px; margin: 0 auto; padding: 38px 22px 24px; }
+.brand { display: flex; align-items: center; gap: 9px; letter-spacing: .13em; font-size: 14px; font-weight: 750; margin-bottom: 30px; }
+.brand strong { color: #8de8f4; }
+.spark { color: #b9a0ff; font-size: 24px; }
+.prototype { margin-inline-start: auto; border: 1px solid #ffffff30; color: #c5c7dd; border-radius: 25px; padding: 7px 11px; font-size: 10px; letter-spacing: .1em; }
+.card { border: 1px solid #ffffff20; border-radius: 24px; padding: clamp(24px, 6vw, 56px); background: #181a37e8; box-shadow: 0 28px 80px #080c20a8; min-height: 440px; }
+.eyebrow { letter-spacing: .18em; color: #9b9fd1; font-size: 11px; font-weight: 800; margin-bottom: 18px; }
+h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1.1; margin: 0 0 20px; letter-spacing: -.04em; }
+h2 { font-size: clamp(23px, 3vw, 30px); line-height: 1.4; font-weight: 650; margin: 16px 0 26px; }
+.intro, .feedback p, .results p { line-height: 1.65; color: #c7cce1; font-size: 17px; max-width: 600px; }
+.setup { display: flex; flex-direction: column; gap: 13px; margin-top: 30px; max-width: 380px; }
+.setup label { font-size: 13px; color: #aeb5d4; }
+select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #292c4c; border: 1px solid #626988; }
+.primary { border: 0; background: linear-gradient(100deg,#8be3f1,#bca5ff); color: #11132b; font-weight: 800; border-radius: 11px; padding: 15px 22px; margin-top: 14px; transition: transform .16s; }
+.primary:hover:not(:disabled) { transform: translateY(-2px); }
+.status { margin-bottom: 28px; }
+.status > div:first-child { display: flex; justify-content: space-between; color: #aeb5d4; font-size: 12px; letter-spacing: .09em; }
+.status strong { color: #f0f4ff; letter-spacing: 0; font-size: 15px; }
+.track { height: 7px; border-radius: 20px; margin-top: 10px; background: #393d60; overflow: hidden; }
+.fill { height: 100%; background: linear-gradient(90deg,#8ce9ef,#baa5ff); transition: width .3s; }
+.question-label { color: #97c9f7; font-size: 12px; font-weight: 800; letter-spacing: .15em; }
+.bonus { color: #f6d88c; margin-inline-start: 10px; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.answers .hidden-answer-slot { min-height: 74px; visibility: hidden; pointer-events: none; }
+.answers button { background: #26294a; border: 1px solid #515879; color: #eff2ff; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; text-align: start; gap: 14px; min-height: 74px; }
+.answers button:hover:not(:disabled), .answers button:focus-visible { border-color: #8ce9ef; background: #32375d; outline: none; }
+.letter { display: grid; place-items: center; border-radius: 9px; border: 1px solid #6c769e; flex: 0 0 36px; height: 36px; color: #a3dce8; font-weight: 800; }
+.achievement, .star-list { padding: 14px 18px; background: #46416d; border: 1px solid #8b7fc7; border-radius: 12px; color: #f6dfa0; margin-bottom: 15px; }
+.error { margin-top: 18px; color: #ffb9bb; background: #7c324433; border-radius: 8px; padding: 12px; line-height: 1.4; }
+footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; }
+@media (max-width: 640px) { .brand { margin-bottom: 35px; } .answers { grid-template-columns: 1fr; } .card { min-height: auto; } }
+
+/* Two always-visible star counters. Prototype all-time totals live in this browser only. */
+.star-dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+.star-panel { padding: 16px 18px; background: #181a37d9; border: 1px solid #ffffff20; border-radius: 15px; min-width: 0; }
+.star-panel-title { letter-spacing: .13em; font-size: 11px; font-weight: 800; color: #acb6da; margin-bottom: 12px; }
+.star-local { font-size: 10px; letter-spacing: normal; text-transform: none; font-weight: 500; color: #8c93b8; }
+.star-items { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.star-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; border: 1px solid #ffffff12; background: #ffffff08; border-radius: 10px; padding: 7px 4px; }
+.star-icon { font-size: 21px; line-height: 1; }
+.star-label { font-size: 10px; line-height: 1.2; color: #c4c9e2; overflow-wrap: anywhere; text-align: center; }
+.star-number { font-size: 15px; color: #f6f6ff; }
+.star-item.bronze .star-icon { color: #d6996e; }
+.star-item.silver .star-icon { color: #c2d3e8; }
+.star-item.gold .star-icon { color: #ffd26f; }
+.star-item.platinum .star-icon { color: #a9f1f5; }
+
+.primary { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+/* Adapted from the selected CSS Loaders two-gears animation, recolored for this UI.
+   The spinner is intentionally OUTSIDE the button, so button width stays stable. */
+.question-actions { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.gear-loader {
+  --size: 1px;
+  --gear-hole: #232747;
+  --gear-primary: #8ce9ef;
+  --gear-secondary: #bca5ff;
+  position: relative;
+  display: inline-block;
+  width: calc(60 * var(--size));
+  height: calc(40 * var(--size));
+  flex: 0 0 calc(60 * var(--size));
+  margin-top: 14px;
+}
+.gear-loader::before,
+.gear-loader::after {
+  content: '';
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background-repeat: no-repeat;
+}
+.gear-loader::before {
+  top: 0;
+  left: 0;
+  width: calc(36 * var(--size));
+  height: calc(36 * var(--size));
+  background-color: var(--gear-primary);
+  background-image:
+    radial-gradient(circle calc(8 * var(--size)) at 50% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 50% 0, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 0 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 100% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 50% 100%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 83.33% 13.89%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 83.33% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 13.89% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(4 * var(--size)) at 13.89% 13.89%, var(--gear-hole) 100%, transparent 0);
+  animation: gear-turn 2.1s linear infinite;
+}
+.gear-loader::after {
+  top: calc(15 * var(--size));
+  left: calc(35 * var(--size));
+  width: calc(24 * var(--size));
+  height: calc(24 * var(--size));
+  background-color: var(--gear-secondary);
+  background-image:
+    radial-gradient(circle calc(5 * var(--size)) at 50% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 50% 0, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 0 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 100% 50%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 50% 100%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 83.33% 12.5%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 83.33% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 12.5% 83.33%, var(--gear-hole) 100%, transparent 0),
+    radial-gradient(circle calc(2.5 * var(--size)) at 12.5% 12.5%, var(--gear-hole) 100%, transparent 0);
+  animation: gear-turn 2.8s linear infinite reverse;
+}
+@keyframes gear-turn {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Gear animation remains active while a question is being generated. */
+@media (max-width: 640px) {
+  .brand { margin-bottom: 20px; }
+  .star-dashboard { grid-template-columns: 1fr; gap: 8px; }
+  .star-panel { padding: 12px; }
+  .star-items { gap: 5px; }
+  .star-item { flex-direction: row; padding: 7px 3px; gap: 3px; flex-wrap: wrap; }
+  .star-icon { font-size: 15px; }
+  .star-label { font-size: 10px; }
+  .star-number { font-size: 13px; }
+}
+
+
+/* Logged-in player toolbar and persisted reward details. */
+.brand { flex-wrap: wrap; }
+.account-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.account-button {
+  border: 1px solid #6b729d;
+  color: #e4eaff;
+  background: #292d50;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.account-button:hover:not(:disabled), .account-button:focus-visible {
+  border-color: #8ce9ef;
+  background: #393e67;
+}
+.account-signup {
+  color: #15162c;
+  border-color: #b6e8ee;
+  background: linear-gradient(100deg,#8be3f1,#bca5ff);
+}
+.account-signup:hover:not(:disabled) { background: #b6e8ee; }
+.player-name {
+  color: #b6e8ee;
+  max-width: 165px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.account-loading { color: #b9bedb; font-size: 12px; letter-spacing: 0; }
+.stats-caption { padding-top: 12px; color: #a5b1d2; font-size: 12px; }
+.stats-warning { color: #ffd0ac; }
+.resume-note { color: #b6e8ee; }
+@media (max-width: 640px) {
+  .prototype { margin-inline-start: auto; }
+  .account-controls { width: 100%; justify-content: flex-start; }
+  .brand { gap: 7px; }
+  .account-button { padding: 8px 10px; }
+}
+
+/* UI language selection is completely independent of the question language. */
+.ui-language-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: #d6ddf7;
+}
+.ui-language-control select {
+  border: 1px solid #626988;
+  color: #f4f5ff;
+  background: #292c4c;
+  padding: 8px 10px;
+  border-radius: 9px;
+  max-width: 170px;
+  font-size: 12px;
+}
+.ui-language-control label { white-space: nowrap; }
+@media (max-width: 720px) {
+  .ui-language-control { width: 100%; }
+}
+
+
+/* Local-only translation cache controls, never shown by the public server. */
+.dev-reset-button {
+  font-size: 11px;
+  color: #e9d1b4;
+  border-color: #916d66;
+  background: #3b3045;
+  white-space: nowrap;
+}
+.dev-reset-button:hover:not(:disabled) { background: #57425a; border-color: #dab7a3; }
+
+/* Localizing overlay: fully hides transient text without discarding the
+   already rendered UI. It also prevents accidental clicks during loading. */
+.localization-overlay {
+  position: fixed;
+  z-index: 2400;
+  inset: 0;
+  background: rgba(9, 12, 33, .94);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+.localization-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 27px;
+  text-align: center;
+  max-width: min(440px, 100%);
+}
+.localization-orb {
+  width: 112px;
+  height: 112px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 0 15px rgba(140, 233, 239, .24));
+}
+.localization-orb::before, .localization-orb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 40deg, transparent 0 12%, #8ce9ef 23%, #bca5ff 48%,
+    transparent 60% 70%, #8ce9ef 85%, transparent 98%
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 8px), #000 calc(100% - 7px));
+  animation: locale-orbit 2.4s linear infinite;
+}
+.localization-orb::after {
+  inset: 18px;
+  background: conic-gradient(
+    from 150deg, #d0b9ff 0 16%, transparent 28% 52%,
+    #8ce9ef 75%, transparent 92%
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+  animation: locale-orbit 1.7s linear infinite reverse;
+}
+.localization-globe {
+  color: #c3dbff;
+  font-size: 42px;
+  line-height: 1;
+  text-shadow: 0 0 20px #8ce9ef;
+}
+.localization-status-line {
+  min-height: 65px;
+  width: min(380px, 80vw);
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+/* One live caption driven by the localization store. It is never hidden
+   between languages; only its text is replaced every two seconds. */
+.localization-phrase {
+  position: relative;
+  width: 100%;
+  min-height: 65px;
+  opacity: 1;
+  font-size: clamp(15px, 3.5vw, 20px);
+  font-weight: 600;
+  line-height: 1.5;
+  color: #ecf0ff;
+  text-wrap: balance;
+  display: grid;
+  place-items: center;
+}
+@keyframes locale-orbit { to { transform: rotate(360deg); } }
+/* Reduced-motion users still get visible (slower) spinner motion; caption
+   changes are instant, without opacity animation or empty frames. */
+@media (prefers-reduced-motion: reduce) {
+  .localization-orb::before { animation-duration: 6s; }
+  .localization-orb::after { animation-duration: 8s; }
+}
+@media (max-width: 640px) {
+  .dev-translation-tools { width: 100%; }
+  .dev-reset-button { max-width: 100%; }
+}
+
+
+/* A recoverable content failure, not an incorrect answer or a lost game. */
+.duplicate-recovery {
+  margin-top: 22px;
+  padding: 20px 22px;
+  border: 1px solid rgba(184, 181, 255, .4);
+  border-radius: 14px;
+  background: rgba(58, 52, 100, .34);
+}
+.duplicate-recovery p {
+  margin: 0 0 14px;
+  line-height: 1.6;
+  color: #e8e8ff;
+}
+.duplicate-recovery .primary { margin-top: 0; }
+.outline-button {
+  padding: 14px 20px;
+  border: 1px solid rgba(203, 206, 240, .65);
+  border-radius: 11px;
+  background: transparent;
+  color: #f0efff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.outline-button:hover:not(:disabled) { background: rgba(255, 255, 255, .09); }
+.outline-button:focus-visible { outline: 2px solid #c4b2ff; outline-offset: 3px; }
+.outline-button:disabled { opacity: .55; cursor: not-allowed; }
+
+
+/* Spendable stars are exchanged in-place between adjacent tiers. */
+.star-items-exchange {
+  /* Bronze → silver → gold remains left-to-right even in RTL UI. */
+  direction: ltr;
+  grid-template-columns: minmax(0,1fr) 40px minmax(0,1fr) 40px minmax(0,1fr) minmax(0,1fr);
+  gap: 4px;
+  align-items: stretch;
+}
+.star-items-exchange .star-item { padding: 8px 1px; }
+.exchange-pair {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 3px;
+}
+.exchange-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  min-height: 27px;
+  border: 1px solid #6b729d;
+  border-radius: 7px;
+  background: #2a3054;
+  color: #ccedfa;
+  cursor: pointer;
+  transition: background .16s, border-color .16s;
+  font: inherit;
+  line-height: 1;
+}
+.exchange-arrow span { font-size: 16px; line-height: 16px; }
+.exchange-arrow small { font-size: 8px; line-height: 10px; color: #aeb8d5; }
+.exchange-arrow:hover:not(:disabled) {
+  border-color: #8ce9ef;
+  background: #39436b;
+}
+.exchange-arrow:focus-visible { outline: 2px solid #c4b2ff; outline-offset: 2px; }
+.exchange-arrow:disabled { opacity: .36; cursor: not-allowed; }
+.category-pregame-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 4px 0 0;
+}
+.category-pregame-action .outline-button { padding: 11px 14px; font-size: 13px; }
+.perk-shop { border-top: 1px solid #ffffff22; margin-top: 22px; padding-top: 18px; }
+.perk-shop h3 { margin: 0 0 10px; font-size: 16px; }
+.perk-counter { font-size: 12px; color: #aeb5d4; margin: 8px 0; }
+.perk-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.perk-actions button {
+  border-radius: 9px;
+  padding: 9px 12px;
+  border: 1px solid #69749e;
+  color: #ecf3ff;
+  background: #292d50;
+}
+.perk-actions button:disabled { opacity: .46; cursor: not-allowed; }
+@media (max-width: 640px) {
+  .star-items-exchange {
+    grid-template-columns: minmax(0,1fr) 32px minmax(0,1fr) 32px minmax(0,1fr) minmax(0,1fr);
+    gap: 3px;
+  }
+  .star-items-exchange .star-item { flex-direction: column; }
+  .exchange-arrow span { font-size: 15px; }
+  .exchange-arrow small { font-size: 7px; }
+}
+
+/* Paid pre-game category exclusions and silver shop. */
+.category-preferences {
+  border: 1px solid #ffffff25;
+  border-radius: 12px;
+  padding: 14px;
+  background: #272b4a;
+  margin: 10px 0;
+}
+.category-preferences h3 { font-size: 15px; margin: 0 0 6px; }
+.category-preferences p { color: #b7c0e1; font-size: 12px; line-height: 1.5; }
+.category-exclusion-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #626988;
+  border-radius: 10px;
+  padding: 9px;
+  display: grid;
+  gap: 7px;
+}
+.category-exclusion-list label {
+  display: flex;
+  flex-direction: row;
+  gap: 9px;
+  align-items: center;
+  color: #dbe0f7;
+  font-size: 12px;
+  cursor: pointer;
+}
+.category-exclusion-list input { accent-color: #8ce9ef; }
+.category-preferences button { font-size: 12px; margin-top: 10px; }
+.perk-current-category { font-size: 12px; color: #b6e8ee; margin: 9px 0; }
+.perk-actions select {
+  min-width: 190px;
+  flex: 1;
+  max-width: 350px;
+  padding: 9px;
+  border-radius: 9px;
+  background: #292d50;
+  border: 1px solid #69749e;
+  color: #f0efff;
+  font-size: 12px;
+}
+
+/* Compact, collapsible in-question perks. Payment colors match the wallet tiers. */
+.round-summary { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px; font-size: 12px; color: #c9d4f1; }
+.shop-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; border: 1px solid #69749e; border-radius: 11px; padding: 11px 15px; background: #292d50; color: #f0efff; font: inherit; font-weight: 800; cursor: pointer; }
+.shop-toggle:hover { background: #353c67; }
+.shop-toggle:focus-visible { outline: 2px solid #8ce9ef; outline-offset: 3px; }
+.shop-content { margin-top: 15px; }
+.tier-price { font-weight: 800; white-space: nowrap; }
+.tier-price.bronze { color: #e4a377; }
+.tier-price.silver { color: #c2d3e8; }
+.tier-price.gold { color: #ffd26f; }
+.question-generation { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 140px; color: #c9d4f1; font-weight: 650; font-size: 17px; text-align: center; }
+.question-generation .gear-loader { --size: 1.4px; margin-top: 0; --gear-hole: #181a37; }
+@media (max-width: 640px) { .round-summary { flex-direction: column; gap: 5px; } .question-generation { min-height: 110px; } }
+
+/* Platinum helper uses the existing dark quiz palette. */
+.helper-tablet { margin: 0 0 18px; }
+.helper-tile { width: 100%; display: flex; align-items: center; gap: 14px; padding: 13px 18px; color: #f2efff; background: #2b2950; border: 1px solid #a79be4; border-radius: 13px; text-align: start; cursor: pointer; }
+.helper-tile > span:first-child { font-size: 26px; }
+.helper-tile strong, .helper-tile small { display: block; }
+.helper-tile small { color: #c7c0e8; margin-top: 3px; }
+.helper-open { margin-inline-start: auto; font-size: 22px; }
+.helper-modal-backdrop { position: fixed; inset: 0; z-index: 1100; background: #070918b8; display: grid; place-items: center; padding: 18px; }
+.helper-modal { background: #1b1e3e; border: 1px solid #9d8ed9; border-radius: 20px; color: #f1f3ff; padding: 28px; width: min(100%, 490px); max-height: 90vh; overflow: auto; position: relative; }
+.helper-modal h2 { margin: 0 0 6px; }
+.helper-modal h3 { font-size: 14px; margin: 19px 0 5px; color: #b9a9ff; }
+.helper-close { position: absolute; inset-inline-end: 15px; top: 12px; color: #f1f3ff; background: none; border: 0; font-size: 30px; cursor: pointer; }
+.helper-tagline { font-style: italic; line-height: 1.6; }
+.helper-shop { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+.helper-shop h2 { font-size: 20px; margin: 8px 0; }
+.helper-shop p { color: #c8c9e5; }
+.helper-shop label { font-size: 13px; }
+.helper-call { margin-top: 20px; }
+.helper-speech { background: #343159; padding: 15px 18px; border-radius: 12px; color: #e9e4ff; line-height: 1.5; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 18px; }
+.bonus-decision p { flex: 0 0 100%; color: #f1d18a; line-height: 1.5; }
+
+.helper-avatar { flex: none; width: 26px; height: 26px; display: block; }
+.helper-hire-options { display: flex; flex-direction: column; gap: 10px; width: min(100%, 430px); margin-top: 10px; }
+.helper-hire-options > button { text-align: center; }
+.helper-hire-toggle { max-width: 260px; }
+.helper-profession-picker { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #45476f; border-radius: 12px; }
+.helper-profession-picker select { width: 100%; }
+.helper-refund-note { font-size: 13px; line-height: 1.55; opacity: .88; margin: 6px 0 0; }
+
+.bonus-decision { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px; margin: 16px 0; border: 1px solid #77709f; border-radius: 12px; }
+.bonus-decision h2,.bonus-decision h3,.bonus-decision p { width: 100%; margin: 0 0 5px; }
+.bonus-decision p { line-height: 1.6; }
+
+
+.profile-controls { position: relative; }
+.profile-controls .player-name { max-width: 200px; cursor: pointer; }
+.profile-menu {
+  position: absolute; inset-block-start: calc(100% + 6px); inset-inline-end: 0;
+  min-width: 160px; padding: 8px; border: 1px solid #626988;
+  border-radius: 10px; background: #292d50; z-index: 25;
+  box-shadow: 0 8px 24px #0005;
+}
+.profile-menu .account-button { width: 100%; text-align: start; }

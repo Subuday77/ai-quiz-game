@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.angular/
+.idea/
+# Temporary offline component test modules
+.quiz-tests-*/

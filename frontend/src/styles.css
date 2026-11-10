@@ -1,0 +1,71 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: #11132b;
+  color: #f1f3ff;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+button, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+
+
+/* Global SweetAlert2 account modal. The form itself never embeds user input. */
+.quiz-auth-popup { border: 1px solid #666b96; border-radius: 18px; }
+.quiz-auth-fields { display: flex; flex-direction: column; align-items: stretch; gap: 8px; text-align: left; }
+.quiz-auth-fields label { font-size: 13px; font-weight: 700; color: #d2d7ef; }
+.quiz-auth-fields .swal2-input {
+  width: 100%;
+  margin: 0 0 9px;
+  padding: 10px 13px;
+  color: #f5f6ff;
+  background: #292d50;
+  border: 1px solid #6c739a;
+  border-radius: 9px;
+  font-size: 15px;
+}
+.quiz-auth-fields .swal2-input:focus { border-color: #8ce9ef; box-shadow: 0 0 0 2px #8ce9ef33; }
+.quiz-auth-popup .swal2-validation-message { border-radius: 10px; color: #701b25; }
+.quiz-auth-popup .swal2-actions { gap: 10px; }
+
+/* Chrome paints SweetAlert2 native select options using a light system palette,
+   while its popup inherits a light foreground. Keep both surfaces explicitly
+   dark; this dropdown is mounted outside Angular component style encapsulation. */
+.swal2-container .swal2-select,
+.swal2-container .swal2-select option {
+  color-scheme: dark;
+  color: #f1f3ff;
+  background-color: #292c4c;
+}
+.swal2-container .swal2-select option:checked {
+  color: #fff;
+  background-color: #2166d0;
+}
+
+
+/* SweetAlert is mounted outside Angular's component style scope. */
+.swal2-popup .appeal-form,
+.swal2-popup .appeal-history {
+  text-align: start;
+  max-height: min(66vh, 600px);
+  overflow-y: auto;
+  padding: 0.35rem 0.6rem;
+  line-height: 1.5;
+}
+.swal2-popup .appeal-options { margin: 1rem 0; padding-inline-start: 1.8rem; }
+.swal2-popup .appeal-options li { margin: 0.4rem 0; overflow-wrap: anywhere; }
+.swal2-popup .appeal-reasons { display: grid; gap: 0.55rem; margin: 1rem 0; }
+.swal2-popup .appeal-choice { display: flex; align-items: flex-start; gap: 0.55rem; }
+.swal2-popup .appeal-choice input { flex: 0 0 auto; margin-top: 0.4rem; }
+.swal2-popup .appeal-form textarea {
+  display: block; width: 100%; box-sizing: border-box;
+  margin: 0.35rem 0 0.85rem; padding: 0.65rem;
+  border: 1px solid #888; border-radius: 0.45rem;
+}
+.swal2-popup .appeal-warning { font-weight: 700; }
+.swal2-popup .appeal-history-item {
+  padding: 0.65rem 0.2rem; border-bottom: 1px solid #9995;
+}
+.swal2-popup .appeal-history-item summary { cursor: pointer; font-weight: 600; }
+.swal2-popup .appeal-history-item p,
+.swal2-popup .appeal-history-item li { overflow-wrap: anywhere; }
