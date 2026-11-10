@@ -1,7 +1,8 @@
-"""Offline votes, hidden tally, ownership, threshold and Caddy/Judge review."""
+"""Votes are provisional until answer; durable referrals and dual scores."""
 import json
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
@@ -12,45 +13,83 @@ from sqlalchemy.pool import StaticPool
 
 from api import app
 from persistence.database import get_db
+from persistence.gameplay import GameConflict, record_answer
 from persistence.models import (
     Base, GameRun, Question, QuestionAttempt, QuestionModeration,
-    QuestionReview, QuestionVote, QuestionVoteReview, Topic, WalletTransaction,
+    QuestionReview, QuestionVote, QuestionVoteReview, Topic, User,
+    WalletTransaction,
 )
 from persistence.question_source_policy import (
-    community_vote_threshold, question_source_order,
+    admission_probability, community_vote_threshold, first_acquittal_score,
+    max_referrals, question_source_order, rating_center, rating_scale,
+    second_acquittal_score,
 )
 from persistence.vote_worker import process_vote_review
 
 
-class VoteConfigTests(unittest.TestCase):
-    def test_source_order_and_negative_threshold_validation(self):
+class VotePolicyTests(unittest.TestCase):
+    def test_spec_settings(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(question_source_order(), "generate_first")
-            self.assertEqual(community_vote_threshold(), -12)
-        with patch.dict(os.environ, {"QUIZ_QUESTION_SOURCE_ORDER": "pool_first",
-                                    "QUIZ_COMMUNITY_VOTE_THRESHOLD": "-15"}):
-            self.assertEqual(question_source_order(), "pool_first")
             self.assertEqual(community_vote_threshold(), -15)
-        for text in ("none", "", "pool", "random"):
+            self.assertEqual(first_acquittal_score(), -5)
+            self.assertEqual(second_acquittal_score(), -10)
+            self.assertEqual(max_referrals(), 3)
+            self.assertEqual(rating_center(), 0)
+            self.assertEqual(rating_scale(), 10)
+        with patch.dict(os.environ, {
+            "QUIZ_DB_FIRST_GENERATION": "true",
+            "QUIZ_QUESTION_RATING_REVIEW_THRESHOLD": "-12",
+            "QUIZ_DB_FIRST_RATING_CENTER": "5",
+            "QUIZ_DB_FIRST_RATING_SCALE": "3",
+        }):
+            self.assertEqual(question_source_order(), "pool_first")
+            self.assertEqual(community_vote_threshold(), -12)
+            self.assertEqual(rating_center(), 5)
+            self.assertEqual(rating_scale(), 3)
+        for text in ("", "truee", "1", "pool_first"):
             with self.subTest(text=text), patch.dict(
-                    os.environ, {"QUIZ_QUESTION_SOURCE_ORDER": text}):
+                    os.environ, {"QUIZ_DB_FIRST_GENERATION": text}):
                 with self.assertRaises(ValueError):
                     question_source_order()
-        for text in ("0", "2", "abc", "-100001", "2.5"):
-            with self.subTest(text=text), patch.dict(
-                    os.environ, {"QUIZ_COMMUNITY_VOTE_THRESHOLD": text}):
+        for bad in ("0", "3", "abc", "-100001"):
+            with self.subTest(bad=bad), patch.dict(
+                    os.environ, {"QUIZ_QUESTION_RATING_REVIEW_THRESHOLD": bad}):
                 with self.assertRaises(ValueError):
                     community_vote_threshold()
+        for bad in ("0", "-2", "nan", "inf", "hello"):
+            with self.subTest(bad=bad), patch.dict(
+                    os.environ, {"QUIZ_DB_FIRST_RATING_SCALE": bad}):
+                with self.assertRaises(ValueError):
+                    rating_scale()
+
+    def test_logistic_admission_is_not_a_selection_probability(self):
+        import random
+        expected = { -10: .26894, -5: .37754, 0: .5, 5: .62246, 10: .73106 }
+        for rating, target in expected.items():
+            self.assertAlmostEqual(
+                admission_probability(rating, center=0, scale=10),
+                target, delta=.0001,
+            )
+        self.assertLess(admission_probability(-10, center=5, scale=10),
+                        admission_probability(-10, center=0, scale=10))
+        self.assertGreater(admission_probability(-10, center=-5, scale=10),
+                           admission_probability(-10, center=0, scale=10))
+        rng = random.Random(42)
+        for rating in (-10, -5, 0, 5, 10):
+            threshold = admission_probability(rating, center=0, scale=10)
+            successes = sum(rng.random() < threshold for _ in range(20000))
+            self.assertAlmostEqual(successes / 20000, threshold, delta=.015)
 
 
-class QuestionVotesTests(unittest.TestCase):
+class AnswerCommittedVotesTests(unittest.TestCase):
     def setUp(self):
         self.eng = create_engine(
             "sqlite+pysqlite:///:memory:", poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
         @event.listens_for(self.eng, "connect")
-        def enable_fks(conn, _):
+        def enable_foreign_keys(conn, _):
             conn.execute("PRAGMA foreign_keys=ON")
         Base.metadata.create_all(self.eng)
         self.addCleanup(self.eng.dispose)
@@ -62,21 +101,24 @@ class QuestionVotesTests(unittest.TestCase):
         self.addCleanup(app.dependency_overrides.pop, get_db, None)
         self.enterContext(patch.dict(os.environ, {
             "AUTH_COOKIE_SECURE": "false",
-            "QUIZ_COMMUNITY_VOTE_THRESHOLD": "-2",
+            "QUIZ_QUESTION_RATING_REVIEW_THRESHOLD": "-15",
             "QUIZ_COMPLAINT_JUDGE_MODEL_ID": "gpt-6.1-sol",
         }))
-        self.review_task = self.enterContext(
-            patch("persistence.vote_routes.process_vote_review"))
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
-        self.user1 = self.register(self.client, "VotingAlice")
+        registered = self.client.post("/api/auth/register", json={
+            "username": "VotingAlice",
+            "password": "offline-test-password-2026!",
+        })
+        self.assertEqual(registered.status_code, 201, registered.text)
+        self.alice = UUID(registered.json()["id"])
         with Session(self.eng, expire_on_commit=False) as db:
             topic = Topic(slug="vote-fixture-science", labels={"en": "Science"})
             db.add(topic)
             db.flush()
-            q = Question(
+            question = Question(
                 topic_id=topic.id, language="English", requested_difficulty=0,
-                text="Which organ produces adrenaline?",
+                text="Which human organ produces adrenaline?",
                 choices={"A": "Thyroid", "B": "Adrenal gland",
                          "C": "Liver", "D": "Pancreas"},
                 correct_key="B", fingerprint=uuid4().hex + uuid4().hex,
@@ -84,18 +126,10 @@ class QuestionVotesTests(unittest.TestCase):
                 generator_model="gpt-5.4", prompt_version="qa",
                 schema_version="question_tagged_v3",
             )
-            db.add(q)
+            db.add(question)
             db.commit()
-            self.qid = q.id
-        self.run1 = self.add_attempt(self.user1)
-
-    @staticmethod
-    def register(client, username):
-        result = client.post("/api/auth/register", json={
-            "username": username, "password": "offline-test-password-2026!",
-        })
-        assert result.status_code == 201, result.text
-        return UUID(result.json()["id"])
+            self.qid = question.id
+        self.run1 = self.add_attempt(self.alice)
 
     def add_attempt(self, user_id):
         with Session(self.eng, expire_on_commit=False) as db:
@@ -109,148 +143,181 @@ class QuestionVotesTests(unittest.TestCase):
             db.commit()
             return run.id
 
-    def url(self, run):
-        return f"/api/v2/games/{run}/questions/{self.qid}/vote"
+    def answer_url(self, run):
+        return f"/api/v2/games/{run}/answer"
 
-    def test_toggle_change_and_f5_return_own_ballot_only(self):
-        url = self.url(self.run1)
-        self.assertEqual(self.client.put(url, json={"value": 1}).json(), {"my_vote": 1})
-        self.assertEqual(self.client.put(url, json={"value": 1}).json(), {"my_vote": 1})
-        self.assertEqual(self.client.put(url, json={"value": -1}).json(), {"my_vote": -1})
-        view = self.client.get(f"/api/v2/games/{self.run1}/question")
-        self.assertEqual(view.status_code, 200, view.text)
-        self.assertEqual(view.json()["my_vote"], -1)
-        self.assertNotIn("vote_score", view.json())
-        self.assertNotIn("correct_answer", view.json())
-        self.assertEqual(self.client.put(url, json={"value": 0}).json(), {"my_vote": 0})
+    def answer(self, run, *, vote=None, answer="A"):
+        payload = {"question_id": str(self.qid), "answer": answer}
+        if vote is not None:
+            payload["vote"] = vote
+        return self.client.post(self.answer_url(run), json=payload)
+
+    def direct_player(self, index):
+        with Session(self.eng, expire_on_commit=False) as db:
+            account = User(
+                username=f"Vote{index:03d}",
+                username_key=f"vote{index:03d}",
+            )
+            db.add(account)
+            db.flush()
+            uid = account.id
+            db.commit()
+        return uid
+
+    def direct_answer(self, uid, *, value=-1, run_id=None):
+        run_id = run_id or self.add_attempt(uid)
         with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).vote_score, 0)
-            self.assertEqual(db.scalar(select(func.count(QuestionVote.question_id))), 0)
-            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
-        self.review_task.assert_not_called()
+            return record_answer(
+                db, run_id=run_id, user_id=uid,
+                question_id=self.qid, selected="A", vote=value,
+            )
 
-    def test_threshold_once_and_independent_player_votes(self):
-        self.assertEqual(self.client.put(self.url(self.run1), json={"value": -1}).status_code, 200)
-        other = TestClient(app)
-        self.addCleanup(other.close)
-        bob = self.register(other, "VotingBob")
-        run2 = self.add_attempt(bob)
-        self.assertEqual(other.put(self.url(run2), json={"value": -1}).status_code, 200)
-        self.review_task.assert_called_once_with(self.qid)
-        # No repeated queue entries, nor a second debit, if a ballot is changed.
-        self.assertEqual(other.put(self.url(run2), json={"value": -1}).status_code, 200)
+    def score(self):
         with Session(self.eng) as db:
             q = db.get(Question, self.qid)
-            review = db.get(QuestionVoteReview, self.qid)
-            self.assertEqual(q.vote_score, -2)
-            self.assertEqual(review.score_at_trigger, -2)
-            self.assertEqual(review.status, "pending")
-            self.assertEqual(db.scalar(select(func.count(QuestionVote.question_id))), 2)
+            return q.vote_score, q.working_vote_score, q.community_referrals, q.status
+
+    def test_unanswered_has_no_ballot_or_leaked_counts(self):
+        get = self.client.get(f"/api/v2/games/{self.run1}/question")
+        self.assertEqual(get.status_code, 200, get.text)
+        for field in ("correct_answer", "vote_score", "working_vote_score",
+                      "my_vote", "community_referrals"):
+            self.assertNotIn(field, get.json())
+        self.assertEqual(self.score(), (0, 0, 0, "approved"))
+        self.assertEqual(self.client.put(
+            f"/api/v2/games/{self.run1}/questions/{self.qid}/vote",
+            json={"value": -1}).status_code, 404)
+        self.assertEqual(self.score(), (0, 0, 0, "approved"))
+
+    def test_answer_commits_once_and_repeat_is_nonmutating(self):
+        first = self.answer(self.run1, vote=-1)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(self.score(), (-1, -1, 0, "approved"))
+        with Session(self.eng) as db:
+            ballot = db.get(QuestionVote, (self.qid, self.alice))
+            self.assertEqual(ballot.run_id, self.run1)
+            self.assertEqual(ballot.value, -1)
+        retry = self.answer(self.run1, vote=1)
+        self.assertEqual(retry.status_code, 409)
+        self.assertEqual(self.score(), (-1, -1, 0, "approved"))
+        second = self.add_attempt(self.alice)
+        with Session(self.eng) as db:
+            record_answer(
+                db, run_id=second, user_id=self.alice,
+                question_id=self.qid, selected="A", vote=1,
+            )
+        self.assertEqual(self.score(), (-1, -1, 0, "approved"))
+        with Session(self.eng) as db:
+            self.assertEqual(db.scalar(select(func.count(QuestionVote.question_id))), 1)
             self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
-        self.assertEqual(self.review_task.call_count, 1)
 
-    def test_rejects_unshown_answered_crossuser_and_invalid_votes(self):
-        other = TestClient(app)
-        self.addCleanup(other.close)
-        bob = self.register(other, "VotingBob")
-        self.assertEqual(other.put(self.url(self.run1), json={"value": 1}).status_code, 404)
-        self.assertEqual(self.client.put(self.url(self.run1), json={"value": 9}).status_code, 422)
-        self.assertEqual(self.client.put(self.url(self.run1), json={"value": True}).status_code, 422)
+    def test_none_vote_and_invalid_inputs_do_not_change_db(self):
+        for bad in (True, 2, -2, "1"):
+            with self.subTest(bad=bad):
+                response = self.answer(self.run1, vote=bad)
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(self.score(), (0, 0, 0, "approved"))
+        self.assertEqual(self.answer(self.run1).status_code, 200)
+        self.assertEqual(self.score(), (0, 0, 0, "approved"))
         with Session(self.eng) as db:
-            item = db.scalar(select(QuestionAttempt).where(
-                QuestionAttempt.run_id == self.run1))
-            from datetime import datetime, timezone
-            item.answered_at = datetime.now(timezone.utc)
-            db.commit()
-        self.assertEqual(self.client.put(self.url(self.run1), json={"value": 1}).status_code, 409)
-        with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).vote_score, 0)
+            self.assertEqual(db.scalar(select(func.count(QuestionVote.question_id))), 0)
 
-    def test_real_worker_upholds_only_after_independent_models(self):
-        self.client.put(self.url(self.run1), json={"value": -1})
-        other = TestClient(app)
-        self.addCleanup(other.close)
-        bob = self.register(other, "VotingBob")
-        run2 = self.add_attempt(bob)
-        other.put(self.url(run2), json={"value": -1})
-
-        def completion(messages, role, **kwargs):
-            if role == "CADDY":
-                return json.dumps({
-                    "summary_en": "Assess whether the key is defensible.",
-                    "claims_to_check": ["Key is accurate"],
-                    "identified_issues": ["incorrect_key"],
-                    "needs_external_fact_check": False,
-                })
-            return json.dumps({
-                "decision": "upheld",
-                "explanation_en": "A verified defect was found.",
-                "explanation_player_language": "Вопрос содержит ошибку.",
-                "rationale_facts": ["The stored answer is wrong."],
+    def test_cross_user_wrong_run_is_rejected(self):
+        with TestClient(app) as other:
+            result = other.post("/api/auth/register", json={
+                "username": "VotingBob",
+                "password": "offline-test-password-2026!",
             })
-        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
-            "persistence.vote_worker._completion", side_effect=completion
-        ) as model, patch(
-            "persistence.vote_worker._config", return_value=("gpt-6.1-sol", "low", 800, 40)
-        ):
-            self.assertEqual(process_vote_review(self.qid), "upheld")
-            self.assertEqual(process_vote_review(self.qid), "upheld")
-            self.assertEqual(model.call_count, 2)
-        with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).status, "rejected")
-            moderation = db.get(QuestionModeration, self.qid)
-            self.assertTrue(moderation.permanently_blocked)
-            self.assertEqual(moderation.block_reason, "community_judge")
-            self.assertEqual(db.scalar(select(func.count(QuestionReview.id))), 1)
-            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+            self.assertEqual(result.status_code, 201, result.text)
+            res = other.post(self.answer_url(self.run1), json={
+                "question_id": str(self.qid), "answer": "A", "vote": -1,
+            })
+            self.assertEqual(res.status_code, 404)
+        self.assertEqual(self.score(), (0, 0, 0, "approved"))
 
-    def test_rejected_review_does_not_block_question(self):
-        self.client.put(self.url(self.run1), json={"value": -1})
-        other = TestClient(app)
-        self.addCleanup(other.close)
-        bob = self.register(other, "VotingBob")
-        other.put(self.url(self.add_attempt(bob)), json={"value": -1})
-        caddy = json.dumps({"summary_en": "Subjective feedback only",
-                            "claims_to_check": [], "identified_issues": [],
-                            "needs_external_fact_check": False})
-        judge = json.dumps({"decision": "rejected",
-                            "explanation_en": "No objective defect.",
-                            "explanation_player_language": "Вопрос корректен.",
-                            "rationale_facts": []})
+    def test_referral_quarantine_and_two_acquittals_then_auto_ban(self):
+        # First 15 permanent dislikes hit the threshold exactly.
+        for index in range(1, 16):
+            self.direct_answer(self.direct_player(index))
+        self.assertEqual(self.score(), (-15, -15, 1, "quarantined"))
+        with Session(self.eng) as db:
+            self.assertEqual(db.get(QuestionVoteReview, (self.qid, 1)).status, "pending")
+
+        caddy = json.dumps({
+            "summary_en": "Subjective negative rating, check facts independently.",
+            "claims_to_check": [], "identified_issues": [],
+            "needs_external_fact_check": False,
+        })
+        acquit = json.dumps({
+            "decision": "rejected", "explanation_en": "Valid question.",
+            "explanation_player_language": "Вопрос корректен.",
+            "rationale_facts": [],
+        })
         with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
-            "persistence.vote_worker._completion", side_effect=[caddy, judge]
+            "persistence.vote_worker._completion", side_effect=[caddy, acquit]
         ), patch("persistence.vote_worker._config",
                  return_value=("gpt-6.1-sol", "low", 800, 40)):
             self.assertEqual(process_vote_review(self.qid), "rejected")
-        with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).status, "approved")
-            self.assertEqual(db.get(QuestionVoteReview, self.qid).status, "rejected")
-            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+        self.assertEqual(self.score(), (-15, -5, 1, "approved"))
 
-    def test_model_failure_is_retried_without_removing_good_question(self):
-        self.client.put(self.url(self.run1), json={"value": -1})
-        with TestClient(app) as other:
-            bob = self.register(other, "VotingBob")
-            other.put(self.url(self.add_attempt(bob)), json={"value": -1})
+        # Ten additional players lower working score from -5 to -15.
+        for index in range(16, 26):
+            self.direct_answer(self.direct_player(index))
+        self.assertEqual(self.score(), (-25, -15, 2, "quarantined"))
         with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
-            "persistence.vote_worker._completion", side_effect=RuntimeError("offline")
-        ) as model:
-            self.assertEqual(process_vote_review(self.qid), "retry_pending")
-            self.assertEqual(process_vote_review(self.qid), "not_due")
-            self.assertEqual(model.call_count, 1)
+            "persistence.vote_worker._completion", side_effect=[caddy, acquit]
+        ), patch("persistence.vote_worker._config",
+                 return_value=("gpt-6.1-sol", "low", 800, 40)):
+            self.assertEqual(process_vote_review(self.qid), "rejected")
+        self.assertEqual(self.score(), (-25, -10, 2, "approved"))
+
+        # Third crossing: permanent ban *without* another model request.
+        for index in range(26, 31):
+            self.direct_answer(self.direct_player(index))
+        self.assertEqual(self.score(), (-30, -15, 3, "rejected"))
         with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).status, "approved")
-            review = db.get(QuestionVoteReview, self.qid)
-            self.assertEqual(review.status, "retry_pending")
-            self.assertEqual(review.attempts, 1)
-            self.assertIsNotNone(review.next_retry_at)
+            review = db.get(QuestionVoteReview, (self.qid, 3))
+            self.assertEqual(review.status, "auto_banned")
+            self.assertEqual(db.get(QuestionModeration, self.qid).block_reason,
+                             "community_third_referral")
+            self.assertEqual(db.scalar(select(func.count(QuestionVote.question_id))), 30)
+            self.assertEqual(db.scalar(select(func.count(QuestionVoteReview.question_id))), 3)
+            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
+            "persistence.vote_worker._completion"
+        ) as no_ai:
+            self.assertEqual(process_vote_review(self.qid), "auto_banned")
+            no_ai.assert_not_called()
+
+    def test_judge_upheld_permanently_bans_at_first_referral(self):
+        for index in range(1, 16):
+            self.direct_answer(self.direct_player(index))
+        caddy = json.dumps({
+            "summary_en": "Question fact wrong.", "claims_to_check": ["Answer key"],
+            "identified_issues": ["incorrect_key"], "needs_external_fact_check": False,
+        })
+        judge = json.dumps({
+            "decision": "upheld", "explanation_en": "Incorrect key.",
+            "explanation_player_language": "Неверный ответ.",
+            "rationale_facts": ["Incorrect key"],
+        })
+        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
+            "persistence.vote_worker._completion", side_effect=[caddy, judge]
+        ) as model, patch("persistence.vote_worker._config",
+                 return_value=("gpt-6.1-sol", "low", 800, 40)):
+            self.assertEqual(process_vote_review(self.qid), "upheld")
+            self.assertEqual(process_vote_review(self.qid), "upheld")
+            self.assertEqual(model.call_count, 2)
+        self.assertEqual(self.score(), (-15, -15, 1, "rejected"))
+        with Session(self.eng) as db:
+            self.assertEqual(db.get(QuestionModeration, self.qid).block_reason,
+                             "community_judge")
+            self.assertEqual(db.scalar(select(func.count(QuestionReview.id))), 1)
             self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
 
-    def test_same_generator_and_judge_never_adjudicate(self):
-        self.client.put(self.url(self.run1), json={"value": -1})
-        with TestClient(app) as other:
-            bob = self.register(other, "VotingBob")
-            other.put(self.url(self.add_attempt(bob)), json={"value": -1})
+    def test_model_conflict_never_self_judges(self):
+        for index in range(1, 16):
+            self.direct_answer(self.direct_player(index))
         with Session(self.eng) as db:
             db.get(Question, self.qid).generator_model = "gpt-6.1-sol"
             db.commit()
@@ -259,12 +326,22 @@ class QuestionVotesTests(unittest.TestCase):
         ) as model:
             self.assertEqual(process_vote_review(self.qid), "model_conflict")
             model.assert_not_called()
+        self.assertEqual(self.score(), (-15, -15, 1, "quarantined"))
+
+    def test_provider_failure_schedules_retry_and_keeps_quarantine(self):
+        for index in range(1, 16):
+            self.direct_answer(self.direct_player(index))
+        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
+            "persistence.vote_worker._completion", side_effect=RuntimeError("offline")
+        ) as model:
+            self.assertEqual(process_vote_review(self.qid), "retry_pending")
+            self.assertEqual(process_vote_review(self.qid), "not_due")
+            self.assertEqual(model.call_count, 1)
+        self.assertEqual(self.score(), (-15, -15, 1, "quarantined"))
         with Session(self.eng) as db:
-            self.assertEqual(db.get(Question, self.qid).status, "approved")
-            self.assertEqual(db.get(QuestionVoteReview, self.qid).status,
-                             "retry_pending")
-
-
+            review = db.get(QuestionVoteReview, (self.qid, 1))
+            self.assertEqual(review.attempts, 1)
+            self.assertIsNotNone(review.next_retry_at)
 
 if __name__ == "__main__":
     unittest.main()
