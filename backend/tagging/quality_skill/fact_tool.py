@@ -22,6 +22,48 @@ _KNOWN_FALSE_FACTS = {
     },
 }
 
+# A directional comparison is independent of the main fact:
+# "Ural flows into Caspian" does not prove "Ural is south of Volga".
+# Match only geographic comparative wording with a named reference token;
+# a bare word ("southern", "южный") is NOT itself a comparison.
+_SPATIAL_DIRECTION = re.compile(
+    r"(?<!\\w)(?:"
+    r"северо-восточнее|северо-западнее|юго-восточнее|юго-западнее|"
+    r"севернее|южнее|восточнее|западнее|"
+    r"к\\s+(?:северу|югу|востоку|западу)\\s+от|"
+    r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\\s+of|"
+    r"(?:to\\s+the\\s+)?(?:north|south|east|west)\\s+of|"
+    r"(?:nördlich|südlich|östlich|westlich)\\s+von|"
+    r"(?:au\\s+nord|au\\s+sud|à\\s+l.est|à\\s+l.ouest)\\s+de|"
+    r"(?:al\\s+norte|al\\s+sur|al\\s+este|al\\s+oeste)\\s+de"
+    r")(?=\\s)",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+_SPATIAL_REFERENCE = re.compile(
+    r"\\s+(?:(?:the|реки|река|города|город|от|de|del|der|des|la|le|du)\\s+)?"
+    r"([\\wЁё][\\wЁё-]*)",
+    flags=re.IGNORECASE | re.UNICODE,
+)
+
+
+def spatial_constraints(stem: str) -> list[str]:
+    """Extract short exact direction+reference spans for independent review.
+
+    No geolocation or claim of truth is made. A long/ambiguous stem may have
+    multiple constraints; the independent checker must explicitly assess all.
+    """
+    result = []
+    for direction in _SPATIAL_DIRECTION.finditer(stem):
+        match = _SPATIAL_REFERENCE.match(stem, direction.end())
+        if match is None:
+            continue
+        # Keep the exact original text/diacritics for anchor validation.
+        anchor = stem[direction.start():match.end()].strip()
+        if anchor.casefold() not in {x.casefold() for x in result}:
+            result.append(anchor)
+    return result[:8]
+
+
 _PATTERNS = (
     ("superlative_comparison", 3, 0.68, (
         r"\b(?:меньше\s+всего|больше\s+всего|среди\s+всех|наименьш\w*|"
@@ -78,6 +120,19 @@ def known_false_fact(question) -> dict | None:
 def inspect(question, settings) -> list[Finding]:
     stem = _normalized(question.question)
     findings: list[Finding] = []
+    for constraint in spatial_constraints(question.question):
+        findings.append(Finding(
+            tool="fact",
+            code="needs_source_verification:spatial_direction_comparison",
+            severity=3,
+            confidence=0.88,
+            evidence={
+                "constraint": constraint,
+                "verification": "not_performed",
+                "claim_truth": "unknown",
+                "note": "verify candidate position relative to named reference",
+            },
+        ))
     for code, severity, confidence, pattern in _PATTERNS:
         match = re.search(pattern, stem, flags=re.UNICODE)
         if match:
