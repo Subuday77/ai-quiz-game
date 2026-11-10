@@ -236,6 +236,52 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(self._silver_balance(), 0)
         ai.assert_not_called()
 
+    def test_pool_first_does_not_revisit_answered_category_on_q2(self):
+        first_candidate = candidate()
+        first_candidate._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=first_candidate):
+            first = self.request()
+        self.assertEqual(first.status_code, 200, first.text)
+        answer = self.client.post(f"/api/v2/games/{self.run_id}/answer", json={
+            "question_id": first.json()["question_id"], "answer": "B",
+        })
+        self.assertEqual(answer.status_code, 200, answer.text)
+        with Session(self.engine) as db:
+            first_stored = db.get(Question, UUID(first.json()["question_id"]))
+            used = db.get(Topic, first_stored.topic_id).labels["en"]
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.correct_main_answers, 1)
+            primary = _category_for_round(self.run_id, 2, db=db)
+            self.assertNotIn(used, _main_pool_search_categories(db, run, 2, primary))
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 1
+            db.commit()
+            other_question = candidate(
+                difficulty=1, relation="nobel-prize-reason",
+                concept="photoelectric-effect", answer="photoelectric-effect",
+            )
+            other_question._review_report = review_report()
+            offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=other_question,
+                category=used, provider="test", model="stub", dedup_enforce=True,
+            )
+        generated = candidate(
+            difficulty=1, relation="nobel-prize-reason",
+            concept="photoelectric-effect", answer="photoelectric-effect",
+        )
+        generated._review_report = review_report()
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question", return_value=generated) as ai:
+            second = self.request()
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["number"], 2)
+        ai.assert_called_once()
+        self.assertNotEqual(ai.call_args.args[2], used)
+        with Session(self.engine) as db:
+            second_stored = db.get(Question, UUID(second.json()["question_id"]))
+            self.assertNotEqual(db.get(Topic, second_stored.topic_id).labels["en"], used)
+
     def test_pool_first_main_q14_uses_other_topic_before_any_ai(self):
         with Session(self.engine) as db:
             run = db.get(GameRun, self.run_id)
