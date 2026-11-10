@@ -62,7 +62,7 @@ question currently awaiting low-score review is not offered from the pool.
 
 1. Run `python -m alembic upgrade head` from `backend` **before** restarting
    FastAPI on an existing PostgreSQL database. Migration
-   `0013_question_votes_pool_priority` adds the tables, index and net score.
+   `0013_votes_pool` adds the tables, index and net score.
 2. Configure `QUIZ_QUESTION_SOURCE_ORDER=generate_first` initially.
 3. Configure `QUIZ_COMMUNITY_VOTE_THRESHOLD=-12` (must be negative).
 4. Ensure Caddy, independent Judge, and `OPENAI_API_KEY` are configured,
