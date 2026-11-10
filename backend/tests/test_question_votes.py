@@ -227,6 +227,44 @@ class QuestionVotesTests(unittest.TestCase):
             self.assertEqual(db.get(QuestionVoteReview, self.qid).status, "rejected")
             self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
 
+    def test_model_failure_is_retried_without_removing_good_question(self):
+        self.client.put(self.url(self.run1), json={"value": -1})
+        with TestClient(app) as other:
+            bob = self.register(other, "VotingBob")
+            other.put(self.url(self.add_attempt(bob)), json={"value": -1})
+        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
+            "persistence.vote_worker._completion", side_effect=RuntimeError("offline")
+        ) as model:
+            self.assertEqual(process_vote_review(self.qid), "retry_pending")
+            self.assertEqual(process_vote_review(self.qid), "not_due")
+            self.assertEqual(model.call_count, 1)
+        with Session(self.eng) as db:
+            self.assertEqual(db.get(Question, self.qid).status, "approved")
+            review = db.get(QuestionVoteReview, self.qid)
+            self.assertEqual(review.status, "retry_pending")
+            self.assertEqual(review.attempts, 1)
+            self.assertIsNotNone(review.next_retry_at)
+            self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 0)
+
+    def test_same_generator_and_judge_never_adjudicate(self):
+        self.client.put(self.url(self.run1), json={"value": -1})
+        with TestClient(app) as other:
+            bob = self.register(other, "VotingBob")
+            other.put(self.url(self.add_attempt(bob)), json={"value": -1})
+        with Session(self.eng) as db:
+            db.get(Question, self.qid).generator_model = "gpt-6.1-sol"
+            db.commit()
+        with patch("persistence.vote_worker.engine", return_value=self.eng), patch(
+            "persistence.vote_worker._completion"
+        ) as model:
+            self.assertEqual(process_vote_review(self.qid), "model_conflict")
+            model.assert_not_called()
+        with Session(self.eng) as db:
+            self.assertEqual(db.get(Question, self.qid).status, "approved")
+            self.assertEqual(db.get(QuestionVoteReview, self.qid).status,
+                             "retry_pending")
+
+
 
 if __name__ == "__main__":
     unittest.main()
