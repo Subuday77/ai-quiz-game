@@ -284,6 +284,15 @@ def offer_approved_pool_question(
             event("db_admitted", count=len(admitted), center=center, scale=scale)
         if admitted:
             saved = random.choice(admitted) if rating_filter else admitted[0]
+            # The community threshold can be crossed by another player while
+            # the pool is scanning. Lock and re-read before assigning the ID.
+            saved = db.scalar(select(Question).where(
+                Question.id == saved.id,
+            ).with_for_update().execution_options(populate_existing=True))
+            if saved is None or saved.status != "approved":
+                db.rollback()
+                event("question_pool_fallback", outcome="withdrawn_during_scan")
+                return None
             attempt = QuestionAttempt(
                 run_id=run.id, question_id=saved.id,
                 number=16 if run.status == "bonus" else game_progress.main_question_index + 1,
