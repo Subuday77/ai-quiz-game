@@ -38,7 +38,8 @@ const componentSource = source
   .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
-const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
+  appealHistoryRefundRows } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -2475,6 +2476,49 @@ test('complaint history filter toolbar and premium cards provide accessible cont
   assert.match(css, /\.appeal-history-status-upheld/);
   assert.match(css, /\.appeal-history-status-rejected/);
   assert.match(css, /@media \(max-width: 590px\)/);
+});
+
+test('appeal history separates 3 bronze hint refund, 1 gold helper reward and 0 loss reward', () => {
+  const items = appealHistoryRefundRows([
+    { tier: 'bronze', amount: 3, reason: 'hints' },
+    { tier: 'gold', amount: 1, reason: 'helper' },
+  ]);
+  assert.deepEqual(items, [
+    { labelKey: 'appeals.hintRefunds', tier: 'bronze', amount: 3 },
+    { labelKey: 'appeals.helperCompensation', tier: 'gold', amount: 1 },
+  ]);
+  assert.equal(english[items[0].labelKey], 'Hint costs refunded');
+  assert.equal(english[items[1].labelKey], 'Helper consultation compensation');
+  assert.equal(english['appeals.lossCompensation'],
+    'Compensation for losing on this question');
+
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /appealHistoryRefundRows\(item\.expenses_refunded\)/);
+  assert.match(history, /field\('appeals\.lossCompensation',/);
+  assert.match(history, /refundFields \+/);
+  assert.doesNotMatch(history, /field\('appeals\.compensation',/);
+  assert.doesNotMatch(history, /' \(' \+ v\.reason \+ '\)'/);
+  assert.doesNotMatch(history, /field\('appeals\.hintRefunds', costs \|\| '0'\)/);
+});
+
+test('appeal history labels unused helper platinum refund and handles repeated or novel entries', () => {
+  assert.deepEqual(appealHistoryRefundRows(null), []);
+  assert.deepEqual(appealHistoryRefundRows([
+    { tier: 'platinum', amount: 2, reason: 'unused_helper' },
+  ]), [{ labelKey: 'appeals.unusedHelperRefund', tier: 'platinum', amount: 2 }]);
+  assert.deepEqual(appealHistoryRefundRows([
+    { tier: 'gold', amount: 1, reason: 'helper' },
+    { tier: 'gold', amount: 1, reason: 'helper' },
+    { tier: 'silver', amount: 1, reason: 'new_backend_reason' },
+    { tier: 'bronze', amount: 0, reason: 'hints' },
+  ]), [
+    { labelKey: 'appeals.helperCompensation', tier: 'gold', amount: 2 },
+    { labelKey: 'appeals.otherRefunds', tier: 'silver', amount: 1 },
+  ]);
+  for (const key of ['appeals.unusedHelperRefund', 'appeals.otherRefunds']) {
+    assert.ok(english[key], key + ' must have an English source for localization');
+  }
 });
 
 test('complaint history clear button resets search, dates, status and ordering together', () => {
