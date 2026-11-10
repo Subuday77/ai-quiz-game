@@ -90,9 +90,11 @@ class ShadowSkillTests(unittest.TestCase):
              "C": "Локтевая кость", "D": "Ключица"},
             correct="B", difficulty=2,
         )
-        # No stem root appears inside the uniquely keyed answer.
+        # A generic literal "кость" in the C distractor is a preexisting
+        # lexical finding, not a new prefixed-root match.
         self.assertFalse([f for f in evaluate_shadow(
-            unrelated, requested_difficulty=2)["findings"] if f["tool"] == "lexical"])
+            unrelated, requested_difficulty=2)["findings"]
+            if f["code"] == "unique_prefixed_root_shortcut"])
 
     def test_morphological_no_match_or_nonunique_match(self):
         clean = self.zircon.model_copy(update={
