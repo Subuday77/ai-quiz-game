@@ -17,7 +17,7 @@ from persistence.gameplay import (
 )
 from persistence.models import (
     GameRun, Question, QuestionAttempt, QuestionFact, QuestionReport,
-    QuestionReview, QuestionTag, Tag, Topic, User,
+    QuestionReview, QuestionTag, QuestionVoteReview, Tag, Topic, User,
 )
 from persistence.seed_topics import category_slug
 from tagging.contract import Fact, TagCloud, TaggedQuestion
@@ -207,6 +207,12 @@ def offer_approved_pool_question(
             select(QuestionReport.id)
             .where(QuestionReport.question_id == Question.id)
         )
+        pending_community_review = exists(
+            select(QuestionVoteReview.question_id).where(
+                QuestionVoteReview.question_id == Question.id,
+                QuestionVoteReview.status.in_(("pending", "retry_pending")),
+            )
+        )
         ids = db.scalars(
             select(Question.id)
             .join(Topic, Topic.id == Question.topic_id)
@@ -219,8 +225,11 @@ def offer_approved_pool_question(
                 fact_exists,
                 ~seen_by_user,
                 ~reported,
+                ~pending_community_review,
             )
-            .order_by(func.random())
+            # When an eligible question has positive feedback, offer it
+            # earlier; never let popularity bypass approval or dedup.
+            .order_by(Question.vote_score.desc(), func.random())
             .limit(max_candidates)
         ).all()
         if not ids:
