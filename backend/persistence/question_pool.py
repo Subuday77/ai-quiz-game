@@ -192,9 +192,12 @@ def offer_approved_pool_question(
                 and run.bonus_topic_index != expected_bonus_topic_index):
             raise GameConflict("Bonus category changed during pool lookup")
         cached = pending_question(db, run_id=run_id)
-        if category not in allowed_categories(run):
-            raise GameConflict("Category excluded from this game")
         replacing = replace_question_id is not None
+        if category not in allowed_categories(run):
+            if replacing:
+                raise GameConflict("Category excluded from this game")
+            db.rollback()
+            return None
         old_attempt = None
         switch_price = None
         if replacing:
@@ -331,7 +334,7 @@ def offer_approved_pool_question(
                     or saved.working_vote_score <= community_vote_threshold()
                     or db.scalar(select(QuestionReport.id).where(
                         QuestionReport.question_id == saved.id).limit(1)) is not None
-                    or db.scalar(select(QuestionVoteReview.id).where(
+                    or db.scalar(select(QuestionVoteReview.question_id).where(
                         QuestionVoteReview.question_id == saved.id,
                         QuestionVoteReview.status.in_(("pending", "retry_pending")),
                     ).limit(1)) is not None):
