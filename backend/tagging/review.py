@@ -135,6 +135,13 @@ MANDATORY SHORTCUT AUDIT, independent of the factual option verdict:
   the question and "Xerox PARC" as the only Xerox-named research center
   in the answers is a direct one-choice lexical clue. Mark leakage=fail,
   issue_codes include answer_leak, even if the keyed fact is true.
+- Also audit short exact noun/adjective pairs that the long-prefix rule may
+  miss: `acidic` in the stem versus a uniquely `acid`-named choice
+  (for example, "Hydrochloric acid"), `basic`/`base`, and
+  `magnetic`/`magnet`. If the one related answer can be singled out
+  by WORDING ALONE, report answer_leak. Being factually correct does not
+  make an answer option a good distractor. Do not treat the mere existence
+  of a morphological relation as proof of leakage.
 - A shared generic word (center, institute, program, university), or
   a name appearing in multiple options, is NOT sufficient for a leak.
   Don't confuse legitimate external knowledge with literal shortcuts.
