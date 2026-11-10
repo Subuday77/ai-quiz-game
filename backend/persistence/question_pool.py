@@ -6,6 +6,7 @@ Selection and the final uniqueness check happen under the existing user/run
 row locks, matching normal tagged-question persistence.
 """
 import os
+import random
 from uuid import UUID
 
 from sqlalchemy import exists, func, select
@@ -20,6 +21,10 @@ from persistence.models import (
     QuestionReview, QuestionTag, QuestionVoteReview, Tag, Topic, User,
 )
 from persistence.seed_topics import category_slug
+from persistence.question_source_policy import (
+    admission_probability, community_vote_threshold,
+    rating_center, rating_scale,
+)
 from tagging.contract import Fact, TagCloud, TaggedQuestion
 from tagging.core import DuplicateQuestionError, require_unique
 from tagging.quality_skill.fact_tool import known_false_fact
@@ -149,6 +154,7 @@ def offer_approved_pool_question(
     db: Session, *, run_id: UUID, user_id: UUID,
     category: str, max_candidates: int | None = None,
     expected_bonus_topic_index: int | None = None,
+    rating_filter: bool = False,
 ) -> tuple[QuestionAttempt, Question] | None:
     """Find an already reviewed question and atomically offer it to this user.
 
@@ -165,6 +171,7 @@ def offer_approved_pool_question(
         raise ValueError("Pool scan limit must be in 1..1000")
     checked = 0
     duplicate = 0
+    admitted = []
     bonus_unverified = 0
     try:
         # Serialize concurrent assignments, including other game runs owned
@@ -213,6 +220,8 @@ def offer_approved_pool_question(
                 QuestionVoteReview.status.in_(("pending", "retry_pending")),
             )
         )
+        center = rating_center() if rating_filter else 0.0
+        scale = rating_scale() if rating_filter else 1.0
         ids = db.scalars(
             select(Question.id)
             .join(Topic, Topic.id == Question.topic_id)
@@ -226,10 +235,11 @@ def offer_approved_pool_question(
                 ~seen_by_user,
                 ~reported,
                 ~pending_community_review,
+                Question.working_vote_score > community_vote_threshold(),
             )
-            # When an eligible question has positive feedback, offer it
-            # earlier; never let popularity bypass approval or dedup.
-            .order_by(Question.vote_score.desc(), func.random())
+            # Candidate order remains random in Model First. In DB First,
+            # each verified eligible candidate is admitted independently.
+            .order_by(func.random())
             .limit(max_candidates)
         ).all()
         if not ids:
@@ -257,6 +267,23 @@ def offer_approved_pool_question(
             except DuplicateQuestionError:
                 duplicate += 1
                 continue
+            if rating_filter:
+                probability = admission_probability(
+                    saved.working_vote_score, center=center, scale=scale,
+                )
+                if random.random() >= probability:
+                    continue
+                admitted.append(saved)
+            else:
+                admitted = [saved]
+                break
+
+        event("db_pool_candidates", count=len(ids), checked=checked,
+              passed_quality=len(admitted) if not rating_filter else None)
+        if rating_filter:
+            event("db_admitted", count=len(admitted), center=center, scale=scale)
+        if admitted:
+            saved = random.choice(admitted) if rating_filter else admitted[0]
             attempt = QuestionAttempt(
                 run_id=run.id, question_id=saved.id,
                 number=16 if run.status == "bonus" else game_progress.main_question_index + 1,
@@ -268,11 +295,15 @@ def offer_approved_pool_question(
             event("question_pool_fallback", outcome="hit", examined=checked,
                   duplicate_skips=duplicate, unverified_bonus_skips=bonus_unverified,
                   requested_difficulty=difficulty)
+            if rating_filter:
+                event("db_first_hit", question_id=str(saved.id),
+                      requested_difficulty=difficulty)
             return attempt, saved
 
         db.rollback()
         event("question_pool_fallback",
-              outcome="no_verified_bonus" if bonus_unverified and run.status == "bonus"
+              outcome="no_admitted" if rating_filter else
+              "no_verified_bonus" if bonus_unverified and run.status == "bonus"
               else "no_unique_match",
               examined=checked, duplicate_skips=duplicate,
               unverified_bonus_skips=bonus_unverified,
