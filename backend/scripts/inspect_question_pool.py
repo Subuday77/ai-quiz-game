@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 from persistence.database import engine  # noqa: E402
 from persistence.game_routes import _category_for_round  # noqa: E402
+from persistence.categories import allowed_categories  # noqa: E402
 from persistence.models import (  # noqa: E402
     GameRun, Question, QuestionAttempt, QuestionFact, QuestionReport,
     QuestionReview, QuestionVoteReview, Topic,
@@ -38,13 +40,41 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
     if not 1 <= question_number <= 16:
         raise ValueError("Question number must be 1..16")
 
-    # The category order is deterministic for the current allowlist.
-    # For a historical run whose category allowlist/round state changed,
-    # this is a current reconstruction, not a guaranteed past category.
-    selected_category = _category_for_round(
+    # IMPORTANT: _category_for_round() consumes answered categories. Calling
+    # it AFTER a failed Q1 was eventually issued and answered can return a
+    # completely different category. It must NOT be used as the historic Q1
+    # pool lookup category. Reconstruct that first slot from the seeded
+    # allowed-category shuffle, independent of completed attempts.
+    current_category = _category_for_round(
         run_id, question_number,
         run.bonus_topic_index if question_number == 16 else 0,
         db=db,
+    )
+    selected_allowlist = list(allowed_categories(run))
+    initial_q1_category = random.Random(run_id.int).sample(
+        selected_allowlist, k=len(selected_allowlist)
+    )[0] if question_number == 1 else None
+    first_issued_labels = db.scalar(
+        select(Topic.labels)
+        .join(Question, Topic.id == Question.topic_id)
+        .join(QuestionAttempt, Question.id == QuestionAttempt.question_id)
+        .where(QuestionAttempt.run_id == run_id,
+               QuestionAttempt.number == question_number)
+        .order_by(QuestionAttempt.revision.asc(),
+                  QuestionAttempt.shown_at.asc())
+        .limit(1)
+    )
+    first_issued_category = (
+        first_issued_labels.get("en")
+        if isinstance(first_issued_labels, dict) else None
+    )
+    selected_category = (
+        initial_q1_category or first_issued_category or current_category
+    )
+    category_basis = (
+        "pre-issuance seeded Q1 rotation" if initial_q1_category is not None
+        else "first issued question" if first_issued_category
+        else "current category reconstruction (not historical)"
     )
     difficulty = 15 if question_number == 16 else question_number - 1
     topic_key = category_slug(selected_category)
@@ -138,7 +168,16 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
         "question_number": question_number,
         "requested_difficulty": difficulty,
         "game_language": run.language,
-        "selected_category_now": selected_category,
+        "initial_q1_category": initial_q1_category,
+        "first_issued_category": first_issued_category,
+        "selected_category_now": current_category,
+        "category_used_for_filter_counts": selected_category,
+        "category_basis": category_basis,
+        "initial_category_matches_first_issued": (
+            initial_q1_category == first_issued_category
+            if initial_q1_category is not None and first_issued_category is not None
+            else None
+        ),
         "run_status_now": run.status,
         "question_attempts_in_run_now": int(issued),
         "vote_threshold_strictly_greater_than": cutoff,
@@ -148,10 +187,13 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
              "count": int(n)} for labels, n in other_categories
         ],
         "note": (
-            "Read-only CURRENT inventory. If game state, allowed categories, "
-            "moderation or vote scores changed since the failed request, "
-            "counts are not the exact historical snapshot. DB First additionally "
-            "applies probabilistic admission ONLY after these SQL filters."
+            "Read-only CURRENT inventory. Q1 counts are now scoped to the "
+            "original seeded first category, not the category after Q1 was "
+            "answered. The first issued topic is shown separately. If saved "
+            "allowlists, moderation, vote scores or pool inventory changed "
+            "since the failed request, counts remain a current snapshot, NOT "
+            "historical proof. DB First probabilistic admission happens only "
+            "AFTER these SQL filters."
         ),
     }
 
