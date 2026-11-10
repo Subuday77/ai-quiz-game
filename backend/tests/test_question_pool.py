@@ -215,9 +215,9 @@ class GlobalPoolTests(unittest.TestCase):
 
     def test_pool_selects_highest_net_rating_only_after_quality_gates(self):
         older_id = self.seed_other_user_question()
+        with TestClient(app) as third:
+            charlie = self._register(third, "Charlie")
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
-            from persistence.models import QuestionVoteReview
-            charlie = self._register(TestClient(app), "Charlie")
             charlie_run = create_game(db, user_id=charlie, language="English")
             new = candidate(
                 relation="nobel-prize-reason",
