@@ -310,6 +310,40 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(result.json()["question_id"], str(expected_id))
         ai.assert_not_called()
 
+    def test_pool_first_reissue_after_quarantine_increments_revision(self):
+        original = candidate()
+        original._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=original):
+            first = self.request()
+        self.assertEqual(first.status_code, 200, first.text)
+        with Session(self.engine) as db:
+            old = db.get(Question, UUID(first.json()["question_id"]))
+            old.status = "quarantined"
+            run = db.get(GameRun, self.run_id)
+            primary = _category_for_round(self.run_id, 1, db=db)
+            alternative = _main_pool_search_categories(db, run, 1, primary)[-1]
+            db.commit()
+        pool_id = self.seed_other_user_question(
+            category=alternative,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            issued = self.request()
+        self.assertEqual(issued.status_code, 200, issued.text)
+        self.assertEqual(issued.json()["question_id"], str(pool_id))
+        ai.assert_not_called()
+        with Session(self.engine) as db:
+            revisions = db.scalars(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == self.run_id
+            ).order_by(QuestionAttempt.revision)).all()
+            self.assertEqual([x.revision for x in revisions], [0, 1])
+            self.assertIsNotNone(revisions[0].superseded_at)
+            self.assertIsNone(revisions[1].superseded_at)
+
     def test_paid_manual_pool_hit_keeps_exact_category_and_charges_once(self):
         original = candidate()
         original._review_report = review_report()
