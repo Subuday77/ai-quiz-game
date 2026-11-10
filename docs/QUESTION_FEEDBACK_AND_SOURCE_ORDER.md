@@ -95,6 +95,18 @@ QUIZ_DB_FIRST_RATING_CENTER=0
 QUIZ_DB_FIRST_RATING_SCALE=10
 ```
 
+## Included shadow morphology regression
+
+Merged `fix/shadow-prefixed-morphology-20261110` into this feature branch
+through PR #25. The lexical tool now recognizes the uniquely prefixed Russian
+root case (e.g. `коленн-` inside `надколенник`) in addition to existing long
+shared-prefix detection. The signal `unique_prefixed_root_shortcut` remains
+**shadow-only**: it is diagnostic evidence, not a new automatic question
+rejection rule. Regression tests in
+`backend/tests/test_quality_skill_shadow.py` verify the prefix case, short
+roots and nonunique options. The unified branch's CI must check these tests
+together with DB-first and vote regressions before local QA.
+
 ## Deployment and QA
 
 1. Review the Draft PR and CI; do **not** deploy to live data until successful.
