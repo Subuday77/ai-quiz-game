@@ -2396,6 +2396,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private resetGameView(): void {
+    this.voteError = false;
+    this.voteBusy = false;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.longWait = false;
