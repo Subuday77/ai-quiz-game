@@ -139,6 +139,29 @@ interface AppealHistoryFilters {
   sort: AppealHistorySort;
 }
 
+/** Preserve the wallet's distinct refund purposes in the complaint history.
+ *  The API sends machine-readable reason codes, not user-facing labels.
+ */
+export function appealHistoryRefundRows(
+  expenses: AppealRecord['expenses_refunded'] | null | undefined,
+): { labelKey: string; tier: StarTier; amount: number }[] {
+  const reasonLabels: Record<string, string> = {
+    hints: 'appeals.hintRefunds',
+    helper: 'appeals.helperCompensation',
+    unused_helper: 'appeals.unusedHelperRefund',
+  };
+  const rows: { labelKey: string; tier: StarTier; amount: number }[] = [];
+  for (const expense of expenses ?? []) {
+    if (!Number.isInteger(expense.amount) || expense.amount <= 0 ||
+        !['bronze', 'silver', 'gold', 'platinum'].includes(expense.tier)) continue;
+    const labelKey = reasonLabels[expense.reason] ?? 'appeals.otherRefunds';
+    const existing = rows.find(row => row.labelKey === labelKey && row.tier === expense.tier);
+    if (existing) existing.amount += expense.amount;
+    else rows.push({ labelKey, tier: expense.tier, amount: expense.amount });
+  }
+  return rows;
+}
+
 /** Dates in this browser's local timezone; both date endpoints are inclusive. */
 function appealLocalDate(value: string): string {
   const time = new Date(value);
@@ -966,8 +989,8 @@ export class AppComponent implements OnInit, OnDestroy {
             (marker ? ' <span class="appeal-answer-tag">(' + safe(marker) + ')</span>' : '') +
             '</li>';
         }).join('');
-        const costs = item.expenses_refunded.map(v =>
-          safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
+        const refundFields = appealHistoryRefundRows(item.expenses_refunded).map(row =>
+          fieldRefund(row.labelKey, row.tier, row.amount)).join('');
         const displayedStatus = item.display_status || item.status;
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
           'technical_unresolved'].includes(displayedStatus) ? displayedStatus : 'unknown';
@@ -976,6 +999,8 @@ export class AppComponent implements OnInit, OnDestroy {
         const field = (labelKey: string, value: string) =>
           '<p class="appeal-history-field"><span class="appeal-history-field-name">' +
           localized(labelKey) + ':</span> ' + value + '</p>';
+        const fieldRefund = (labelKey: string, tier: StarTier, amount: number) =>
+          field(labelKey, safe('+' + amount + ' ' + this.locale.t('stars.' + tier)));
         return '<details class="appeal-history-item" data-history-index="' + index + '">' +
           '<summary title="' + safe(question) + '">' +
             '<span class="appeal-history-heading">' +
@@ -1017,14 +1042,14 @@ export class AppComponent implements OnInit, OnDestroy {
                   'appeals.depositPending')) + ')') +
               field('appeals.fee',
                 safe(item.filing_fee_bronze + ' ' + this.locale.t('stars.bronze'))) +
-              field('appeals.compensation',
+              field('appeals.lossCompensation',
                 safe(item.compensation.amount + ' ' +
                   this.locale.t('stars.' + item.compensation.tier))) +
               (item.question_number === 16
                 ? field('appeals.wagerRefunded',
                   safe(this.locale.t(item.bonus_wager_refunded ? 'appeals.yes' : 'appeals.no')))
                 : '') +
-              field('appeals.hintRefunds', costs || '0') +
+              refundFields +
             '</div>' +
           '</div></details>';
       }).join('');
