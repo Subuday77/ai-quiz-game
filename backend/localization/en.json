@@ -369,5 +369,10 @@
   "appeals.notAnswered": "You did not select an answer",
   "appeals.keyHidden": "The answer key is hidden until the game ends",
   "appeals.freeQuota": "Free complaints: {{remaining}}/{{total}}",
-  "appeals.freeReset": "Refresh {{date}}"
+  "appeals.freeReset": "Refresh {{date}}",
+  "questionFeedback.title": "Rate this question",
+  "questionFeedback.like": "I like this question",
+  "questionFeedback.dislike": "I don't like this question",
+  "questionFeedback.error": "Could not save your vote. Please try again."
 }
+
