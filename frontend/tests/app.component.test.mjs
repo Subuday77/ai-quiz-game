@@ -2497,11 +2497,30 @@ test('complaint history shows judge outcome pill in the decision card heading', 
   assert.match(history, /'<div class="appeal-history-verdict">' \+\s*'<div class="appeal-history-verdict-header"><strong>' \+/);
   assert.match(history, /localized\(decision\.headingKey\) \+ '<\/strong>' \+/);
   assert.match(history, /'<span class="appeal-history-status appeal-history-status-' \+ allowedStatus \+ '\">' \+/);
-  assert.match(history, /localized\('appeals\.status\.' \+ item\.status\) \+ '<\/span>' \+/);
+  assert.match(history, /localized\('appeals\.status\.' \+ allowedStatus\) \+ '<\/span>' \+/);
   assert.match(history, /safe\(decision\.message\)/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-verdict-header/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-upheld/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-rejected/);
+});
+
+test('an active appeal lease displays In review, not a technical retry, and wallet catches up', () => {
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /item\.display_status \|\| item\.status/);
+  assert.match(history, /localized\('appeals\.status\.' \+ allowedStatus\)/);
+  assert.match(history, /this\.refreshSpendableStars\(\)/,
+    'history fetch must refresh the post-settlement wallet');
+
+  const submit = source.slice(source.indexOf('async submitQuestionAppeal('),
+    source.indexOf('async openAppealRules('));
+  assert.match(submit, /this\.watchAppealSettlement\(submittedAppeal\.id, accountId, runId\)/);
+  const watcher = source.slice(source.indexOf('private watchAppealSettlement('),
+    source.indexOf('private refreshAppealAllowance('));
+  assert.match(watcher, /\/api\/v2\/appeals\//);
+  assert.match(watcher, /this\.refreshSpendableStars\(\)/);
+  assert.match(watcher, /watch\.unsubscribe\(\)/);
+  assert.match(watcher, /polls > 24/);
 });
 
 test('history status heading is not mistaken for a judge verdict before adjudication', () => {
