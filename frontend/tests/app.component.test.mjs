@@ -2535,3 +2535,13 @@ test('history status heading is not mistaken for a judge verdict before adjudica
   assert.match(history, /localized\(decision\.headingKey\)/);
   assert.match(history, /safe\(decision\.message\)/);
 });
+
+test('intro explicitly exempts pregame category exclusions and helper consultations from Q16 hints', () => {
+  const intro = english['hero.intro'];
+  assert.match(intro, /secret 16th question/);
+  assert.match(intro, /all 15 correctly/);
+  assert.match(intro, /without using in-game hints/);
+  assert.match(intro, /Excluding categories before the game/);
+  assert.match(intro, /consulting your helper during the game/);
+  assert.match(intro, /do not count as hints/);
+});
