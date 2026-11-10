@@ -339,9 +339,14 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                         data.setdefault("expenses_refunded", []).append(
                             {"tier": "gold", "amount": 1, "reason": "helper"})
                         appeal.verdict_data = data
-                elif purchase.consultations_used == 0 and not purchase.refunded:
-                    # Never refund a helper that was subsequently used, or
-                    # one already refunded for a successful Q15 run.
+                elif (caused_loss and purchase.consultations_used == 0
+                      and not purchase.refunded):
+                    # An upheld appeal must NOT cancel a still-usable helper
+                    # during an ongoing run. Refund the never-consulted
+                    # purchase only when this exact wrong question ended
+                    # the game; the Q15 earned refund remains independent.
+                    # Shared helper:{id}:refund idempotency also prevents
+                    # double refunds across multiple upheld appeals.
                     key = f"helper:{purchase.id}:refund"
                     if db.scalar(select(WalletTransaction.id).where(
                             WalletTransaction.idempotency_key == key)) is None:
