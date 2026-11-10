@@ -20,6 +20,7 @@ from persistence.appeal_policy import (
 from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import (
     GameRun, Question, QuestionAppeal, QuestionAttempt, QuestionModeration,
+    QuestionVoteReview,
     PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
@@ -368,14 +369,22 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
     reason = permanent_block_reason(
         distinct_players=moderation.distinct_complainants,
         upheld=moderation.upheld_count)
-    if reason is not None:
+    if reason is not None or moderation.permanently_blocked:
         moderation.permanently_blocked = True
-        moderation.block_reason = moderation.block_reason or reason
+        moderation.block_reason = moderation.block_reason or reason or "previously_blocked"
         question.status = "rejected"
-    elif db.scalar(select(func.count(QuestionAppeal.id)).where(
-        QuestionAppeal.question_id == appeal.question_id,
-        QuestionAppeal.id != appeal.id,
-        QuestionAppeal.status.in_(("pending", "retry_pending")),
-    )) == 0:
-        question.status = "approved"
+    else:
+        other_appeal_pending = db.scalar(select(func.count(QuestionAppeal.id)).where(
+            QuestionAppeal.question_id == appeal.question_id,
+            QuestionAppeal.id != appeal.id,
+            QuestionAppeal.status.in_(("pending", "retry_pending")),
+        )) != 0
+        community_hold = db.scalar(select(QuestionVoteReview.question_id).where(
+            QuestionVoteReview.question_id == appeal.question_id,
+            QuestionVoteReview.status.in_((
+                "pending", "retry_pending", "inconclusive", "technical_unresolved",
+            )),
+        ).limit(1)) is not None
+        if not other_appeal_pending and not community_hold and question.status != "rejected":
+            question.status = "approved"
     return appeal
