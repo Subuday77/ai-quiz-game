@@ -2635,3 +2635,20 @@ test('abandoned unanswered question creates no finalized vote and failed answer 
     else globalThis.localStorage = previous;
   }
 });
+
+
+test('thumb controls share the question-number row and use neutral SVG icons', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const start = html.indexOf('<div class="question-heading-row">');
+  const end = html.indexOf('<h2>{{ question.question }}</h2>', start);
+  assert.ok(start >= 0 && end > start, 'heading row must precede question text');
+  const row = html.slice(start, end);
+  assert.match(row, /class="question-label"/);
+  assert.match(row, /class="question-votes"/);
+  assert.equal((row.match(/class="question-vote"/g) ?? []).length, 2);
+  assert.equal((row.match(/<svg class="vote-icon"/g) ?? []).length, 2);
+  assert.doesNotMatch(row, /👍|👎/, 'OS emoji skin/color must not be used');
+  assert.match(css, /\.question-heading-row\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.question-heading-row\s*\{[^}]*align-items:\s*center/);
+});
