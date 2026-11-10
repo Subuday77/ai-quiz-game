@@ -559,6 +559,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     # Deferred import avoids coupling the persistence layer to AI provider
     # SDKs and reuses the same retry/quality/leak policy as legacy games.
     from api import generate_valid_question
+    from persistence.question_source_policy import question_source_order
+    try:
+        source_order = question_source_order()
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Invalid question source configuration") from None
 
     # Keep the original v2 path for legacy clients; tagged games have
     # strict quality gates, emergency pool reuse and late-game recovery.
@@ -591,6 +596,20 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         db.rollback()  # Never hold a DB connection while calling AI.
 
         pool_settings = None
+        if source_order == "pool_first":
+            try:
+                # Explicit pool-first mode overrides the emergency-fallback
+                # toggle; it does NOT relax any question verification gate.
+                pool_settings = (
+                    True,
+                    question_number != 16
+                    and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED"),
+                    scan_limit(),
+                )
+            except ValueError:
+                raise HTTPException(
+                    status_code=503, detail="Invalid question pool configuration"
+                ) from None
         reserves = []
         last_generation_error = None
 
@@ -630,6 +649,15 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 )
                 db.rollback()
             selected_category = proposed_category
+            if category_attempt == 0 and source_order == "pool_first":
+                pooled = offer_pool(selected_category)
+                if pooled is not None:
+                    event("question_source_selected", source="pool",
+                          order=source_order, number=question_number)
+                    return _public(
+                        *pooled, phase="bonus" if pooled[0].number == 16 else "main",
+                        db=db,
+                    )
             if category_attempt:
                 if selected_category == category:
                     # No actual alternative was available; avoid a duplicate
@@ -647,6 +675,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                         db=db,
                     )
             exclusions = generator_context(history, category_slug(selected_category))
+            event("question_source_selected", source="generator",
+                  order=source_order, number=question_number)
             db.rollback()
             too_easy_reserve = []
             try:
