@@ -527,16 +527,45 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .appeal-allowance-inline { margin-inline-start: 0; }
 }
 
-/* Question feedback is intentionally private: never show counts or net score. */
-.question-votes { display: flex; align-items: center; gap: 10px;
-  margin: -9px 0 19px; min-height: 43px; flex-wrap: wrap; }
-.question-vote { width: 46px; height: 43px; border-radius: 12px;
-  display: inline-grid; place-items: center; font-size: 23px;
-  border: 1px solid #6a719f; background: #282c50; color: #f2f2ff;
-  cursor: pointer; transition: background .14s, border-color .14s; }
-.question-vote:hover:not(:disabled), .question-vote:focus-visible {
-  border-color: #8ce9ef; background: #373d6a; outline: none; }
-.question-vote.selected { border: 2px solid #8ce9ef;
-  background: #35566b; box-shadow: 0 0 0 2px #8ce9ef26; }
+/* Private question feedback shares the line with the question number. */
+.question-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.question-heading-row .question-label { flex: 0 1 auto; }
+.question-votes {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.question-vote {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid #6a719f;
+  display: inline-grid;
+  place-items: center;
+  background: #282c50;
+  color: #dce7f8;
+  cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s;
+}
+.vote-icon { width: 20px; height: 20px; display: block; }
+.question-vote:hover:not(:disabled) { border-color: #8ce9ef; background: #373d6a; }
+.question-vote:focus-visible { outline: 2px solid #8ce9ef; outline-offset: 2px; }
+.question-vote.selected {
+  border-color: #8ce9ef;
+  background: #35566b;
+  color: #8ce9ef;
+  box-shadow: 0 0 0 2px #8ce9ef26;
+}
 .question-vote:disabled { opacity: .55; cursor: not-allowed; }
-.question-vote-error { color: #ffb9bb; font-size: 12px; }
+@media (max-width: 420px) {
+  .question-heading-row { gap: 9px; }
+  .question-votes { gap: 5px; }
+  .question-vote { width: 33px; height: 33px; }
+}
