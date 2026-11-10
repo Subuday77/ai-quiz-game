@@ -307,7 +307,7 @@ def offer_question(
 
 def record_answer(
     db: Session, *, run_id: UUID, user_id: UUID,
-    question_id: UUID, selected: Choice,
+    question_id: UUID, selected: Choice, vote: int = 0,
 ) -> tuple[AnswerResult, str]:
     """Accept a single answer, commit progress and star award atomically.
 
@@ -329,6 +329,13 @@ def record_answer(
         attempt, question = cached
         if question.id != question_id or question.status != "approved":
             raise GameConflict("No matching approved unanswered question")
+        # A concurrent player's accepted vote may have just quarantined this
+        # shared question. Recheck under the question lock before answering.
+        question = db.scalar(select(Question).where(
+            Question.id == question_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if question is None or question.status != "approved":
+            raise GameConflict("Question has been withdrawn")
 
         now = _now()
         state = game_state(run, db)
@@ -357,6 +364,11 @@ def record_answer(
         if was_bonus and is_correct:
             from persistence.bonus_wager import credit_won_gold
             credit_won_gold(db, run=run)
+        # Answer, final immutable vote, both ratings and a possible
+        # moderation trigger are one ACID transaction. Never count a draft.
+        from persistence.question_votes import record_final_vote
+        record_final_vote(db, question=question, user_id=user_id,
+                          run_id=run.id, value=vote)
         # If the wager is lost, its earlier debit remains and the earned
         # gold award stays untouched as an immutable achievement.
         db.commit()
