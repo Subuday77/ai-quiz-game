@@ -336,8 +336,15 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                             idempotency_key=key, amount=1,
                             reason="star/gold/helper-appeal-compensation"))
                         data = dict(appeal.verdict_data or {})
-                        data.setdefault("expenses_refunded", []).append(
-                            {"tier": "gold", "amount": 1, "reason": "helper"})
+                        # JSON columns are not deep-mutable: setdefault()
+                        # reuses the previously assigned list and mutates
+                        # both the ORM's old and new value. SQLAlchemy then
+                        # sees equal JSON and skips the UPDATE, even though
+                        # the gold wallet transaction is committed.
+                        data["expenses_refunded"] = [
+                            *(data.get("expenses_refunded") or []),
+                            {"tier": "gold", "amount": 1, "reason": "helper"},
+                        ]
                         appeal.verdict_data = data
                 elif (caused_loss and purchase.consultations_used == 0
                       and not purchase.refunded):
@@ -356,9 +363,13 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                             reason="star/platinum/helper-refund"))
                         purchase.refunded = True
                         data = dict(appeal.verdict_data or {})
-                        data.setdefault("expenses_refunded", []).append(
+                        # Assign a *new* list so the JSON mutation persists
+                        # even if a hint refund was recorded earlier.
+                        data["expenses_refunded"] = [
+                            *(data.get("expenses_refunded") or []),
                             {"tier": "platinum", "amount": purchase.price,
-                             "reason": "unused_helper"})
+                             "reason": "unused_helper"},
+                        ]
                         appeal.verdict_data = data
     if decision == "upheld" and caused_loss:
         _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
