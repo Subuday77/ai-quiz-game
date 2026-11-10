@@ -231,15 +231,7 @@ def _public(attempt, stored, phase: str, *, db: Session | None = None) -> Public
             raise GameConflict("Database needed for persisted question hints")
         hidden = set(hidden_choices(db, attempt, stored))
     options = {key: stored.choices[key] for key in "ABCD" if key not in hidden}
-    from persistence.question_votes import my_vote
-    own_ballot = 0
-    if db is not None:
-        own_ballot = my_vote(
-            db, user_id=db.get(GameRun, attempt.run_id).user_id,
-            question_id=attempt.question_id,
-        )
     return PublicQuestion(
-        my_vote=own_ballot,
         question_id=str(attempt.question_id),
         number=attempt.number,
         difficulty=attempt.requested_difficulty,
