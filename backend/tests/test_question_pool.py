@@ -190,6 +190,72 @@ class GlobalPoolTests(unittest.TestCase):
             self.assertEqual(db.scalar(select(func.count(QuestionReview.id))), 1)
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
 
+    def test_pool_first_uses_approved_question_without_model_call(self):
+        existing_id = self.seed_other_user_question()
+        with patch.dict(os.environ, {
+            "QUIZ_QUESTION_SOURCE_ORDER": "pool_first",
+            "QUIZ_QUESTION_POOL_FALLBACK_ENABLED": "false",
+        }), patch("api.generate_valid_question") as generate:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(existing_id))
+        generate.assert_not_called()
+        self.assertNotIn("correct_answer", response.json())
+
+    def test_pool_first_generates_when_verified_pool_is_empty(self):
+        proposed = candidate()
+        proposed._review_report = review_report()
+        with patch.dict(os.environ, {
+            "QUIZ_QUESTION_SOURCE_ORDER": "pool_first",
+        }), patch("api.generate_valid_question", return_value=proposed) as generate:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question"], proposed.question)
+        generate.assert_called_once()
+
+    def test_pool_selects_highest_net_rating_only_after_quality_gates(self):
+        older_id = self.seed_other_user_question()
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            from persistence.models import QuestionVoteReview
+            charlie = self._register(TestClient(app), "Charlie")
+            charlie_run = create_game(db, user_id=charlie, language="English")
+            new = candidate(
+                relation="nobel-prize-reason",
+                concept="photoelectric-effect",
+                answer="photoelectric-effect",
+            )
+            new._review_report = review_report()
+            _, high = offer_question(
+                db, run_id=charlie_run.id, user_id=charlie,
+                question=new, category=self.category,
+                provider="test", model="stub", dedup_enforce=True,
+            )
+            db.get(Question, older_id).vote_score = -2
+            high.vote_score = 7
+            db.commit()
+            chosen_id = high.id
+        with Session(self.engine) as db:
+            result = offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category,
+            )
+            self.assertEqual(result[1].id, chosen_id)
+
+    def test_pool_excludes_queued_community_review(self):
+        existing_id = self.seed_other_user_question()
+        from persistence.models import QuestionVoteReview
+        with Session(self.engine) as db:
+            db.add(QuestionVoteReview(
+                question_id=existing_id, score_at_trigger=-12,
+                status="pending",
+            ))
+            db.commit()
+        with Session(self.engine) as db:
+            self.assertIsNone(offer_approved_pool_question(
+                db, run_id=self.run_id, user_id=self.alice,
+                category=self.category,
+            ))
+
     def test_pool_does_not_reissue_to_same_user(self):
         existing_id = self.seed_other_user_question()
         with Session(self.engine) as db:
