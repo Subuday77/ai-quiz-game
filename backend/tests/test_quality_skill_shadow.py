@@ -52,6 +52,50 @@ class ShadowSkillTests(unittest.TestCase):
         self.assertEqual(r["decision"], "observe_only")
         self.assertEqual(debug.call_count, 4)  # Three tools plus summary.
 
+    def test_prefixed_root_shortcut_is_shadow_only(self):
+        # The actual Q3 incident: a root inside a prefixed answer, rather
+        # than at the start of both tokens, escaped the previous detector.
+        q = candidate(
+            "Какая часть человеческого тела обычно называется коленной чашечкой?",
+            {"A": "Лопатка", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        report = evaluate_shadow(q, requested_difficulty=2)
+        signals = [f for f in report["findings"] if f["tool"] == "lexical"]
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["code"], "unique_prefixed_root_shortcut")
+        self.assertEqual(signals[0]["evidence"]["common_prefix"], "коленн")
+        self.assertEqual(signals[0]["evidence"]["prefix_in_option"], "над")
+        self.assertEqual(signals[0]["evidence"]["option"], "B")
+        self.assertTrue(report["would_arbitrate"])
+        self.assertFalse(report["arbiter_called"])
+        self.assertEqual(report["decision"], "observe_only")
+        # No changes to the independent, high-confidence publication veto.
+        from local_leak_filter import exact_answer_leak
+        self.assertFalse(exact_answer_leak(q))
+
+    def test_prefixed_root_requires_one_option_and_long_root(self):
+        q = candidate(
+            "Какая часть человеческого тела обычно называется коленной чашечкой?",
+            {"A": "Подколенная область", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        self.assertFalse([f for f in evaluate_shadow(
+            q, requested_difficulty=2)["findings"] if f["tool"] == "lexical"])
+        unrelated = candidate(
+            "Какая кость защищает сустав при прыжке?",
+            {"A": "Лопатка", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        # A generic literal "кость" in the C distractor is a preexisting
+        # lexical finding, not a new prefixed-root match.
+        self.assertFalse([f for f in evaluate_shadow(
+            unrelated, requested_difficulty=2)["findings"]
+            if f["code"] == "unique_prefixed_root_shortcut"])
+
     def test_morphological_no_match_or_nonunique_match(self):
         clean = self.zircon.model_copy(update={
             "question": "Какой минерал сохраняет уран в кристаллической решетке?"
