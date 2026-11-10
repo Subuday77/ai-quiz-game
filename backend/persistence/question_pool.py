@@ -7,12 +7,14 @@ row locks, matching normal tagged-question persistence.
 """
 import os
 import random
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from diagnostics import event
+from persistence.categories import allowed_categories, available_categories
 from persistence.gameplay import (
     GameConflict, GameNotFound, game_state, owned_game, pending_question,
 )
@@ -155,13 +157,19 @@ def offer_approved_pool_question(
     category: str, max_candidates: int | None = None,
     expected_bonus_topic_index: int | None = None,
     rating_filter: bool = False,
+    replace_question_id: UUID | None = None,
+    replace_attempt_id: UUID | None = None,
+    replace_manual: bool = False,
+    category_operation_key: str | None = None,
 ) -> tuple[QuestionAttempt, Question] | None:
     """Find an already reviewed question and atomically offer it to this user.
 
     Only tagged v5 critic-accepted, currently approved, unreported questions
     enter the pool. Bonus reuse additionally requires Terra v2 accepted
     evidence and the new strict difficulty gate. Old reviews cannot bypass it.
-    Exact-language/category/difficulty matches are mandatory.
+    Exact-language/category/difficulty matches are mandatory. Paid manual
+    replacement searches only the requested category and spends silver in the
+    same transaction as the new attempt, never on a pool miss.
     The SQL anti-join prevents exact repeats; require_unique also prevents
     fact/tag/semantic repeats, including those across the user's languages.
     """
@@ -184,10 +192,40 @@ def offer_approved_pool_question(
                 and run.bonus_topic_index != expected_bonus_topic_index):
             raise GameConflict("Bonus category changed during pool lookup")
         cached = pending_question(db, run_id=run_id)
-        if cached is not None:
+        if category not in allowed_categories(run):
+            raise GameConflict("Category excluded from this game")
+        replacing = replace_question_id is not None
+        old_attempt = None
+        switch_price = None
+        if replacing:
+            from star_perks import category_change_price
+            if run.status != "main" or not category_operation_key or replace_attempt_id is None:
+                raise GameConflict("Invalid paid category replacement")
+            if (cached is None or cached[0].id != replace_attempt_id
+                    or cached[0].question_id != replace_question_id):
+                raise GameConflict("Question changed during category selection")
+            old_attempt, old_question = cached
+            if category not in available_categories(
+                db, run, old_attempt.number, changing=True,
+            ):
+                raise GameConflict("Category is not available")
+            if category == db.get(Topic, old_question.topic_id).labels.get("en"):
+                raise GameConflict("New category matches current category")
+            switch_price = category_change_price(
+                allowed_count=len(allowed_categories(run)),
+                changes_used=old_attempt.category_change_count,
+                manual_used=old_attempt.manual_category_used,
+                manual=replace_manual,
+            )
+        elif cached is not None:
             db.commit()
             event("question_pool_fallback", outcome="cached_pending")
             return cached
+        elif (run.status == "main"
+              and category not in available_categories(
+                  db, run, game_state(run, db).main_question_index + 1,
+              )):
+            raise GameConflict("Category already played in this game")
 
         game_progress = game_state(run, db)
         difficulty = game_progress.current_difficulty
@@ -289,14 +327,37 @@ def offer_approved_pool_question(
             saved = db.scalar(select(Question).where(
                 Question.id == saved.id,
             ).with_for_update().execution_options(populate_existing=True))
-            if saved is None or saved.status != "approved":
+            if (saved is None or saved.status != "approved"
+                    or saved.working_vote_score <= community_vote_threshold()
+                    or db.scalar(select(QuestionReport.id).where(
+                        QuestionReport.question_id == saved.id).limit(1)) is not None
+                    or db.scalar(select(QuestionVoteReview.id).where(
+                        QuestionVoteReview.question_id == saved.id,
+                        QuestionVoteReview.status.in_(("pending", "retry_pending")),
+                    ).limit(1)) is not None):
                 db.rollback()
                 event("question_pool_fallback", outcome="withdrawn_during_scan")
                 return None
+            if replacing:
+                from persistence.star_economy import spend_star
+                spend_star(
+                    db, user_id=user_id, run_id=run.id, tier="silver",
+                    amount=switch_price,
+                    action="choose-category" if replace_manual else "random-category",
+                    operation_key=category_operation_key,
+                )
+                old_attempt.superseded_at = datetime.now(timezone.utc)
+                run.hints_used += 1
             attempt = QuestionAttempt(
                 run_id=run.id, question_id=saved.id,
-                number=16 if run.status == "bonus" else game_progress.main_question_index + 1,
+                number=(old_attempt.number if replacing else
+                        16 if run.status == "bonus" else game_progress.main_question_index + 1),
                 requested_difficulty=difficulty,
+                revision=old_attempt.revision + 1 if replacing else 0,
+                category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
+                manual_category_used=old_attempt.manual_category_used + (
+                    1 if replace_manual else 0
+                ) if replacing else 0,
             )
             db.add(attempt)
             db.commit()
