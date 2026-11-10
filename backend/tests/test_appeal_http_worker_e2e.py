@@ -417,18 +417,23 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             )), 2)
 
     def test_preanswer_hint_and_helper_consultation_both_compensated(self):
-        # Q12: -2 bronze hint, paid platinum helper consultation, -1 gold
-        # appeal deposit, then uphold: +2 bronze, +1 gold deposit +1 helper
+        # Q12: -3 bronze hint, paid platinum helper consultation, -1 gold
+        # appeal deposit, then uphold: +3 bronze, +1 gold deposit +1 helper
         # gold. No "lost game" compensation for a pre-answer complaint.
         run_id, question_id, attempt_id = self.fixture(12, before_answer=True)
         purchase_id = self.paid_helper(
-            run_id, attempt_id, price=2, consulted=True, hint_bronze=2,
+            run_id, attempt_id, price=2, consulted=True, hint_bronze=3,
         )
         with Session(self.engine) as db:
             db.add(WalletTransaction(
                 user_id=self.user_id, run_id=UUID(run_id),
                 idempotency_key=f"qa-http:{run_id}:gold-seed",
                 amount=2, reason="star/gold/qa-http-seed",
+            ))
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:bronze-extra-seed",
+                amount=1, reason="star/bronze/qa-http-seed",
             ))
             db.commit()
         with patch("persistence.appeal_worker._completion",
@@ -439,16 +444,20 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         case = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
         self.assertEqual(case["status"], "upheld")
         self.assertEqual(case["compensation"]["amount"], 0)
+        self.assertEqual(case["expenses_refunded"], [
+            {"tier": "bronze", "amount": 3, "reason": "hints"},
+            {"tier": "gold", "amount": 1, "reason": "helper"},
+        ], "All credits must survive fresh API/DB reads, not just wallet writes")
         self.assertEqual(self.ledger(appeal_id), {
             "deposit": ("gold", -1),
             "appeal-deposit-refund": ("gold", 1),
-            "appeal-hint-refund": ("bronze", 2),
+            "appeal-hint-refund": ("bronze", 3),
         })
         with Session(self.engine) as db:
             purchase = db.get(PlatinumHelperPurchase, UUID(purchase_id))
             self.assertFalse(purchase.refunded)
             self.assertEqual(purchase.consultations_used, 1)
-            self.assertEqual(star_balances(db, self.user_id)["bronze"], 2)
+            self.assertEqual(star_balances(db, self.user_id)["bronze"], 3)
             self.assertEqual(star_balances(db, self.user_id)["gold"], 3)
             self.assertEqual(star_balances(db, self.user_id)["platinum"], 0)
             self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
