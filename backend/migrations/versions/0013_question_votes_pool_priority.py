@@ -1,12 +1,12 @@
 """Community thumbs feedback and durable vote-triggered review.
 
-Revision ID: 0013_question_votes_pool_priority
+Revision ID: 0013_votes_pool
 Revises: 0012_appeal_qa_free_quota
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0013_question_votes_pool_priority"
+revision = "0013_votes_pool"
 down_revision = "0012_appeal_qa_free_quota"
 branch_labels = None
 depends_on = None
