@@ -2545,3 +2545,93 @@ test('intro explicitly exempts pregame category exclusions and helper consultati
   assert.match(intro, /consulting your helper during the game/);
   assert.match(intro, /do not count as hints/);
 });
+
+
+test('question thumbs are local-only until answer and survive question reload', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: key => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: key => saved.delete(key),
+  };
+  const key = 'ai-quiz-game:uncommitted-vote:v1:user-1:existing-game:same-question';
+  try {
+    const { app, posts, requests } = setup();
+    app.screen = 'question';
+    app.current = { ...question };
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 1);
+    assert.equal(saved.get(key), '1');
+    assert.equal(posts.length, 0, 'preanswer click must never call backend');
+
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 0);
+    assert.equal(saved.has(key), false);
+    app.voteQuestion(-1);
+    assert.equal(app.currentVote, -1);
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 1);
+    app.voteQuestion(-1);
+    assert.equal(app.currentVote, -1);
+    assert.equal(saved.get(key), '-1');
+    assert.equal(posts.length, 0);
+
+    const resumed = setup();
+    resumed.app.screen = 'question';
+    resumed.app.loadQuestion();
+    const get = resumed.requests.find(x => x.url.endsWith('/question'));
+    assert.ok(get);
+    succeed(get, { ...question });
+    assert.equal(resumed.app.currentVote, -1, 'refresh should restore draft');
+    assert.equal(saved.get(key), '-1');
+    assert.equal(resumed.posts.length, 0, 'refresh must not submit vote');
+
+    resumed.app.answer('B');
+    assert.equal(resumed.posts.length, 1);
+    assert.deepEqual(resumed.posts[0].body, {
+      question_id: 'same-question', answer: 'B', vote: -1,
+    });
+    assert.equal(saved.get(key), '-1', 'draft stays until server confirms answer');
+    succeed(resumed.posts[0], {
+      phase: 'main', correct: true, correct_answer: 'B',
+      correct_main_answers: 5, achievement: 'bronze',
+    });
+    assert.equal(saved.has(key), false);
+    assert.equal(resumed.app.currentVote, 0);
+    assert.equal(resumed.app.screen, 'feedback');
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('abandoned unanswered question creates no finalized vote and failed answer preserves draft', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: key => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: key => saved.delete(key),
+  };
+  const key = 'ai-quiz-game:uncommitted-vote:v1:user-1:existing-game:same-question';
+  try {
+    const { app, posts } = setup();
+    app.screen = 'question';
+    app.current = { ...question };
+    app.voteQuestion(-1);
+    assert.equal(posts.length, 0);
+    app.answer('A');
+    assert.equal(posts[0].body.vote, -1);
+    posts[0].subject.error(new Error('network unavailable'));
+    assert.equal(saved.get(key), '-1', 'failed answer must retain draft');
+    assert.equal(app.currentVote, -1);
+    // Merely leaving or resetting the view is not an answer: no POST vote.
+    app.screen = 'setup';
+    assert.equal(posts.length, 1);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
