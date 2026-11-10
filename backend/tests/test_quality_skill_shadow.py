@@ -85,13 +85,12 @@ class ShadowSkillTests(unittest.TestCase):
         self.assertFalse([f for f in evaluate_shadow(
             q, requested_difficulty=2)["findings"] if f["tool"] == "lexical"])
         unrelated = candidate(
-            "Какая кость защищает колено при прыжке?",
+            "Какая кость защищает сустав при прыжке?",
             {"A": "Лопатка", "B": "Надколенник",
              "C": "Локтевая кость", "D": "Ключица"},
             correct="B", difficulty=2,
         )
-        # The shorter common start "колен" does not automatically become
-        # a high-confidence root clue under the conservative threshold.
+        # No stem root appears inside the uniquely keyed answer.
         self.assertFalse([f for f in evaluate_shadow(
             unrelated, requested_difficulty=2)["findings"] if f["tool"] == "lexical"])
 
