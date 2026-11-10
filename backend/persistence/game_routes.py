@@ -11,7 +11,7 @@ from uuid import UUID, NAMESPACE_URL, uuid5
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -113,6 +113,8 @@ def _active_run(db: Session, user_id: UUID) -> GameRun | None:
 class AnswerInput(BaseModel):
     question_id: UUID
     answer: Choice
+    # Uncommitted browser choice; validated and stored with the answer once.
+    vote: StrictInt = Field(default=0, ge=-1, le=1)
 
 
 class SkipInput(BaseModel):
@@ -811,6 +813,7 @@ def answer(run_id: UUID, payload: AnswerInput, request: Request,
         result, correct_key = record_answer(
             db, run_id=run_id, user_id=user.id,
             question_id=payload.question_id, selected=payload.answer,
+            vote=payload.vote,
         )
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
