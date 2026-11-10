@@ -111,6 +111,13 @@ MANDATORY INDEPENDENT FOUR-OPTION FACT CHECK (before any scoring or tagging):
   even if the first movie is the correct answer. If unsure, mark uncertain.
 - Fact-check the whole clause before reasoning "only one option fits".
   A memorized correct answer cannot override a false premise.
+- For spatial constraints (north/south/east/west of a named place, such as
+  "южнее Волги"), verify the direction relative to that reference separately
+  for each answer. Merely checking that the answer flows into the named sea,
+  lies in the correct country, or belongs to the right category is NOT
+  sufficient. If the requested direction cannot be verified, choose
+  premise=uncertain and an uncertain option. Do not silently drop the
+  comparison when reasoning.
 - For awards/prizes with an explicit YEAR and a claimed REASON, verify the
   RECIPIENT, AWARD, YEAR and REASON as independent assertions. Familiarity
   with the recipient's work does NOT prove they won that particular prize.
