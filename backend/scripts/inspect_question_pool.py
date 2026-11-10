@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -33,7 +34,8 @@ from persistence.question_source_policy import community_vote_threshold  # noqa:
 from persistence.seed_topics import category_slug  # noqa: E402
 
 
-def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
+def inspect(db: Session, run_id: UUID, question_number: int,
+            at: datetime | None = None) -> dict:
     run = db.get(GameRun, run_id)
     if run is None:
         raise ValueError("Game run not found")
@@ -163,6 +165,62 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
         QuestionAttempt.run_id == run_id,
     )) or 0
 
+    # Inspect only category/language/difficulty-matching inventory. The
+    # CURRENT seen-by-user count may be zero because a question was shown
+    # AFTER the failed request. Its immutable shown_at time distinguishes
+    # that case, without ever reading question/option content.
+    matching = db.scalars(
+        select(Question)
+        .join(Topic, Topic.id == Question.topic_id)
+        .where(*basic, topic_filter)
+        .order_by(Question.created_at, Question.id)
+    ).all()
+    at_utc = at.astimezone(timezone.utc) if at is not None else None
+    candidate_audit = []
+    for item in matching:
+        first_shown = db.scalar(
+            select(func.min(QuestionAttempt.shown_at))
+            .join(GameRun, GameRun.id == QuestionAttempt.run_id)
+            .where(QuestionAttempt.question_id == item.id,
+                   GameRun.user_id == run.user_id)
+        )
+        first_approved = db.scalar(
+            select(func.min(QuestionReview.created_at)).where(
+                QuestionReview.question_id == item.id,
+                QuestionReview.checker_type == "ai_tagged_critic",
+                QuestionReview.decision == "accept",
+                QuestionReview.contract_version == "tagged_review_v5",
+            )
+        )
+        fact = db.get(QuestionFact, item.id)
+        candidate_audit.append({
+            "question_id": str(item.id),
+            "status_now": item.status,
+            "created_at": item.created_at.isoformat(),
+            "first_accepted_review_at": (
+                first_approved.isoformat() if first_approved else None
+            ),
+            "fact_metadata_created_at": (
+                fact.created_at.isoformat() if fact else None
+            ),
+            "first_shown_to_this_user_at": (
+                first_shown.isoformat() if first_shown else None
+            ),
+            "existed_at_requested_time": (
+                item.created_at <= at_utc if at_utc is not None else None
+            ),
+            "review_existed_at_requested_time": (
+                first_approved <= at_utc if at_utc is not None
+                and first_approved is not None else
+                False if at_utc is not None else None
+            ),
+            "already_shown_to_user_at_requested_time": (
+                first_shown <= at_utc if at_utc is not None
+                and first_shown is not None else
+                False if at_utc is not None else None
+            ),
+        })
+
     return {
         "run_id": str(run_id),
         "question_number": question_number,
@@ -181,6 +239,8 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
         "run_status_now": run.status,
         "question_attempts_in_run_now": int(issued),
         "vote_threshold_strictly_greater_than": cutoff,
+        "inspection_time_utc": at_utc.isoformat() if at_utc else None,
+        "matching_candidate_timeline": candidate_audit,
         "cumulative_sql_filter_counts": steps,
         "approved_questions_other_categories": [
             {"category": (labels or {}).get("en", "unknown"),
@@ -193,7 +253,9 @@ def inspect(db: Session, run_id: UUID, question_number: int) -> dict:
             "allowlists, moderation, vote scores or pool inventory changed "
             "since the failed request, counts remain a current snapshot, NOT "
             "historical proof. DB First probabilistic admission happens only "
-            "AFTER these SQL filters."
+            "AFTER these SQL filters. Candidate timestamps show when rows, "
+            "review and user exposure first existed. Current approval, reports "
+            "and vote scores cannot be reconstructed from these timestamps."
         ),
     }
 
@@ -202,10 +264,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", type=UUID)
     parser.add_argument("--number", type=int, default=1)
+    parser.add_argument("--at", help="Original request time, ISO-8601 UTC; example "
+                        "2026-11-10T20:32:57Z")
     args = parser.parse_args()
+    at = None
+    if args.at:
+        at = datetime.fromisoformat(args.at.replace("Z", "+00:00"))
+        if at.tzinfo is None:
+            parser.error("--at must include UTC Z or a timezone offset")
     with Session(engine()) as db:
         try:
-            report = inspect(db, args.run_id, args.number)
+            report = inspect(db, args.run_id, args.number, at=at)
             print(json.dumps(report, indent=2, ensure_ascii=False))
         finally:
             db.rollback()
