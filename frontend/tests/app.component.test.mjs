@@ -38,7 +38,7 @@ const componentSource = source
   .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
-const { AppComponent, appealQuestionExcerpt, filterAppealHistory } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -2495,11 +2495,43 @@ test('complaint history shows judge outcome pill in the decision card heading', 
   const history = source.slice(source.indexOf('async openAppealHistory()'),
     source.indexOf('async openAccountSettings()'));
   assert.match(history, /'<div class="appeal-history-verdict">' \+\s*'<div class="appeal-history-verdict-header"><strong>' \+/);
-  assert.match(history, /localized\('appeals\.historyVerdict'\) \+ '<\/strong>' \+/);
+  assert.match(history, /localized\(decision\.headingKey\) \+ '<\/strong>' \+/);
   assert.match(history, /'<span class="appeal-history-status appeal-history-status-' \+ allowedStatus \+ '\">' \+/);
   assert.match(history, /localized\('appeals\.status\.' \+ item\.status\) \+ '<\/span>' \+/);
-  assert.match(history, /safe\(item\.verdict \|\| this\.locale\.t\('appeals\.notDecided'\)\)/);
+  assert.match(history, /safe\(decision\.message\)/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-verdict-header/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-upheld/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-rejected/);
+});
+
+test('history status heading is not mistaken for a judge verdict before adjudication', () => {
+  assert.equal(english['appeals.historyComplaintStatus'], 'Complaint status');
+  const t = key => english[key];
+  const presentation = (status, verdict = null) =>
+    appealHistoryDecisionPresentation(status, verdict, t);
+  assert.deepEqual(presentation('pending', 'STALE INVALID VERDICT'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A decision has not been made yet.',
+  });
+  assert.deepEqual(presentation('retry_pending'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A decision has not been made yet.',
+  });
+  assert.deepEqual(presentation('technical_unresolved', 'A technical problem prevented review.'), {
+    headingKey: 'appeals.historyComplaintStatus',
+    message: 'A technical problem prevented review.',
+  });
+  assert.deepEqual(presentation('upheld', 'Question was flawed'), {
+    headingKey: 'appeals.historyVerdict',
+    message: 'Question was flawed',
+  });
+  assert.deepEqual(presentation('rejected', 'Question is valid'), {
+    headingKey: 'appeals.historyVerdict',
+    message: 'Question is valid',
+  });
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /appealHistoryDecisionPresentation\(/);
+  assert.match(history, /localized\(decision\.headingKey\)/);
+  assert.match(history, /safe\(decision\.message\)/);
 });
