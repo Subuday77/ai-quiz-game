@@ -60,6 +60,7 @@ interface PublicQuestion {
   answers: Partial<Record<Choice, string>>;
   bonus: boolean;
   hidden_count: number;
+  my_vote?: -1 | 0 | 1;
 }
 interface CategoryInfo {
   allowed: string[];
@@ -290,6 +291,8 @@ export class AppComponent implements OnInit, OnDestroy {
   resumeCandidate: GameInfo | null = null;
   private resumeRunLanguage = '';
   current: PublicQuestion | null = null;
+  voteBusy = false;
+  voteError = false;
   feedback: AnswerFeedback | null = null;
   loading = false;
   error = '';
@@ -1546,6 +1549,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.screen = 'question';
     this.current = null;
     this.feedback = null;
+    this.voteError = false;
     this.showCategoryExclusions = false;
     this.resumeAvailable = false;
     this.loading = true;
@@ -1635,8 +1639,34 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
   }
 
+  voteQuestion(value: -1 | 1): void {
+    if (!this.current || !this.gameId || !this.account ||
+        this.voteBusy || this.loading || this.appealBusy ||
+        this.perksBusy || this.screen !== 'question') return;
+    const questionId = this.current.question_id;
+    const nextValue: -1 | 0 | 1 = this.current.my_vote === value ? 0 : value;
+    this.voteBusy = true;
+    this.voteError = false;
+    this.subscriptions.add(this.http.put<{ my_vote: -1 | 0 | 1 }>(
+      GAME_API + '/' + this.gameId + '/questions/' + questionId + '/vote',
+      { value: nextValue },
+    ).pipe(
+      timeout(this.requestTimeoutMs),
+      finalize(() => { this.voteBusy = false; }),
+    ).subscribe({
+      next: result => {
+        if (this.current?.question_id === questionId && this.screen === 'question')
+          this.current = { ...this.current, my_vote: result.my_vote };
+      },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else if (this.current?.question_id === questionId) this.voteError = true;
+      },
+    }));
+  }
+
   answer(choice: Choice): void {
-    if (this.loading || this.perksBusy || this.appealBusy || !this.current || this.screen !== 'question' || !this.account) return;
+    if (this.loading || this.perksBusy || this.appealBusy || this.voteBusy || !this.current || this.screen !== 'question' || !this.account) return;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
