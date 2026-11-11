@@ -1,0 +1,32 @@
+# Git metadata, secrets and developer environments
+.git
+.github
+.idea
+.vscode
+**/.env
+**/.env.*
+**/.venv
+**/node_modules
+**/.angular
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/coverage
+**/*.log
+
+# Unit tests, historical experiments and QA harnesses are not runtime artifacts
+tests
+backend/tests
+frontend/tests
+notebooks
+backend/scripts
+backend/test_*.py
+test_openai_*.py
+analyze_quality_audit.py
+backend/replay_tagged_quality_nov2.py
+backend/qa_reports
+qa_reports
+**/*.ipynb
+
+# Built frontend is produced by its own stage, not copied as host output
+frontend/dist
