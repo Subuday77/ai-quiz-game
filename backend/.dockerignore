@@ -1,0 +1,14 @@
+# Build context: backend/ (production FastAPI image)
+.env
+.env.*
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+coverage
+*.log
+qa_reports
+tests
+scripts
+test_*.py
+replay_tagged_quality_nov2.py
