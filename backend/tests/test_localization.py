@@ -1,4 +1,5 @@
 """Offline UI localization tests: no external network or paid API calls."""
+import asyncio
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -13,7 +14,7 @@ from localization.catalog import LANGUAGES, english_dictionary, source_hash
 from localization.client import LocalizationUnavailable
 from localization.dev_tools import reset_available
 from starlette.requests import Request
-from localization.service import dictionary_response
+from localization.service import _batches, dictionary_response
 from persistence.database import get_db
 from persistence.models import Base, UiLocaleSync, UiTranslation
 
@@ -48,7 +49,7 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_translation_is_saved_and_subsequent_load_is_free(self):
         async def fake_translate(missing, code):
             self.assertEqual(code, "de")
-            self.assertEqual(missing, english_dictionary())
+            self.assertTrue(set(missing).issubset(english_dictionary()))
             return {key: "DE " + value for key, value in missing.items()}
 
         translator = AsyncMock(side_effect=fake_translate)
@@ -57,7 +58,7 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
             second = await dictionary_response(self.db, "de")
         self.assertFalse(first["fallback"])
         self.assertEqual(first, second)
-        self.assertEqual(translator.await_count, 1)
+        self.assertEqual(translator.await_count, len(_batches(english_dictionary())))
         self.assertEqual(self.db.scalar(select(func.count(UiTranslation.string_key))),
                          len(english_dictionary()))
         self.assertEqual(first["dictionary"]["hero.ready"], "DE Ready to play?")
@@ -81,7 +82,7 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         with patch("localization.service.translate_missing",
                    new=AsyncMock(side_effect=translate)) as translator:
             await dictionary_response(self.db, "ru")
-            self.assertEqual(translator.await_count, 1)
+            self.assertEqual(translator.await_count, len(_batches(english_dictionary())))
 
         # Helper runtime does not invoke the Localizer, even with it offline.
         with patch("localization.service.translate_missing",
@@ -127,7 +128,7 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["missing_count"], len(english_dictionary()))
         self.assertTrue(first["fallback"])
         self.assertEqual(second, first)
-        self.assertEqual(translator.await_count, 1)
+        self.assertEqual(translator.await_count, len(_batches(english_dictionary())))
         self.assertEqual(self.db.scalar(select(func.count(UiTranslation.string_key))), 0)
         state = self.db.get(UiLocaleSync, "he")
         self.assertIsNotNone(state.retry_after)
@@ -146,6 +147,99 @@ class LocalizationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["dictionary"]["hero.question"],
                          english_dictionary()["hero.question"])
         self.assertEqual(result["missing_count"], len(english_dictionary()) - 1)
+
+
+    async def test_failed_chunk_is_saved_as_missing_and_only_that_chunk_is_retried(self):
+        # A half-completed German locale must never be presented as ready.
+        source = {letter: letter.upper() for letter in "abcdef"}
+        failed_once = False
+        calls = []
+
+        async def translate(missing, code):
+            nonlocal failed_once
+            calls.append(tuple(missing))
+            if "c" in missing and not failed_once:
+                failed_once = True
+                raise LocalizationUnavailable("temporary provider failure")
+            return {key: "DE " + text for key, text in missing.items()}
+
+        with patch("localization.service.english_dictionary", return_value=source), \
+             patch("localization.service.BATCH_MAX_KEYS", 2), \
+             patch("localization.service.BATCH_MAX_CHARS", 1000), \
+             patch("localization.service.PARTIAL_RETRY_SECONDS", 0), \
+             patch("localization.service.translate_missing",
+                   new=AsyncMock(side_effect=translate)):
+            first = await dictionary_response(self.db, "de")
+            self.assertTrue(first["fallback"])
+            self.assertEqual(first["missing_count"], 2)
+            self.assertEqual(first["dictionary"]["a"], "DE A")
+            self.assertEqual(first["dictionary"]["c"], "C")
+            self.assertEqual(self.db.scalar(select(func.count()).select_from(UiTranslation)), 4)
+            self.assertIsNotNone(self.db.get(UiLocaleSync, "de").retry_after)
+
+            second = await dictionary_response(self.db, "de")
+
+        self.assertEqual(calls, [("a", "b"), ("c", "d"), ("e", "f"), ("c", "d")])
+        self.assertFalse(second["fallback"])
+        self.assertEqual(second["missing_count"], 0)
+        self.assertEqual(second["dictionary"], {key: "DE " + value
+                                                for key, value in source.items()})
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(UiTranslation)), 6)
+
+    async def test_many_chunks_keep_provider_concurrency_bounded(self):
+        source = {str(index): str(index) for index in range(9)}
+        active = 0
+        peak = 0
+
+        async def translate(missing, code):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.001)
+            active -= 1
+            return {key: "RU " + text for key, text in missing.items()}
+
+        with patch("localization.service.english_dictionary", return_value=source), \
+             patch("localization.service.BATCH_MAX_KEYS", 1), \
+             patch("localization.service.BATCH_MAX_CHARS", 1000), \
+             patch("localization.service.BATCH_CONCURRENCY", 2), \
+             patch("localization.service.translate_missing",
+                   new=AsyncMock(side_effect=translate)):
+            result = await dictionary_response(self.db, "ru")
+        self.assertFalse(result["fallback"])
+        self.assertEqual(result["missing_count"], 0)
+        self.assertEqual(peak, 2)
+
+    async def test_timeout_keeps_successful_chunks_and_releases_lease(self):
+        source = {"a": "one", "b": "two"}
+
+        async def translate(missing, code):
+            if "b" in missing:
+                await asyncio.sleep(1)
+            return {key: "HE " + value for key, value in missing.items()}
+
+        with patch("localization.service.english_dictionary", return_value=source), \
+             patch("localization.service.BATCH_MAX_KEYS", 1), \
+             patch("localization.service.BATCH_CONCURRENCY", 2), \
+             patch("localization.service.TRANSLATION_BUDGET_SECONDS", 0.04), \
+             patch("localization.service.translate_missing",
+                   new=AsyncMock(side_effect=translate)):
+            result = await dictionary_response(self.db, "he")
+        self.assertTrue(result["fallback"])
+        self.assertEqual(result["missing_count"], 1)
+        self.assertEqual(result["dictionary"], {"a": "HE one", "b": "two"})
+        state = self.db.get(UiLocaleSync, "he")
+        self.assertIsNone(state.lease_token)
+        self.assertIsNone(state.lease_until)
+        self.assertIsNotNone(state.retry_after)
+
+    def test_batches_obey_key_and_character_limits(self):
+        source = {"a": "A" * 8, "b": "B" * 8, "c": "C" * 3}
+        with patch("localization.service.BATCH_MAX_KEYS", 3), \
+             patch("localization.service.BATCH_MAX_CHARS", 10):
+            self.assertEqual(_batches(source), [
+                {"a": "A" * 8}, {"b": "B" * 8}, {"c": "C" * 3},
+            ])
 
     def test_locale_choices_have_eleven_native_names(self):
         self.assertEqual(len(LANGUAGES), 11)
