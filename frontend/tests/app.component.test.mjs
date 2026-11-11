@@ -1581,6 +1581,56 @@ test('incomplete translations keep prior screen and spinner until ready', () => 
   store.destroy(); // Cancels the scheduled retry; no paid calls leak from tests.
 });
 
+test('partial German batches cannot replace an already-visible Russian interface', () => {
+  const pending = [];
+  const russian = { ...english, 'hero.ready': 'Готовы играть?',
+    'hero.question': 'Вопрос' };
+  const german = { ...english, 'hero.ready': 'Bereit zu spielen?',
+    'hero.question': 'Frage' };
+  const http = {
+    get(url) {
+      if (url.endsWith('/ru')) return of({
+        language_code: 'ru', dictionary: russian,
+        source_version: 'v1', fallback: false, missing_count: 0,
+      });
+      if (url.endsWith('/de')) {
+        const reply = new Subject();
+        pending.push(reply);
+        return reply.asObservable();
+      }
+      throw new Error('Unexpected request: ' + url);
+    },
+  };
+  const store = new LocalizationStore(http);
+  const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
+  scheduler.run(() => {
+    store.load('ru');
+    store.load('de');
+    assert.equal(store.code, 'ru');
+    // Backend has saved some German strings, but the full locale is unfinished.
+    pending[0].next({ language_code: 'de',
+      dictionary: { ...russian, 'hero.ready': german['hero.ready'] },
+      source_version: 'v1', fallback: true, missing_count: 11 });
+    pending[0].complete();
+    assert.equal(store.loading, true);
+    assert.equal(store.code, 'ru');
+    assert.equal(store.t('hero.ready'), 'Готовы играть?');
+    assert.equal(store.t('hero.question'), 'Вопрос');
+
+    scheduler.schedule(() => {
+      assert.equal(pending.length, 2);
+      pending[1].next({ language_code: 'de', dictionary: german,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      pending[1].complete();
+      assert.equal(store.loading, false);
+      assert.equal(store.code, 'de');
+      assert.equal(store.t('hero.ready'), 'Bereit zu spielen?');
+      assert.equal(store.t('hero.question'), 'Frage');
+    }, 2600);
+  });
+  store.destroy();
+});
+
 test('failed translation keeps the previous language without saving preference', () => {
   const requests = [];
   const http = {
