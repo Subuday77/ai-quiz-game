@@ -246,6 +246,35 @@ class SilverCategoryTests(unittest.TestCase):
         fresh = self.client.get(self.base + "/categories").json()
         self.assertEqual((fresh["changes_used"], fresh["manual_used"]), (0, 0))
 
+    def test_paid_random_change_leaves_current_subject_family(self):
+        from category_taxonomy import category_family
+
+        self.credit(2)
+        with patch("persistence.game_routes._category_for_round", return_value="Biology"):
+            first = self.first_question()
+        self.assertEqual(self.generator.call_args.args[2], "Biology")
+
+        # Capture the actual random pool presented by the live route.
+        with patch("persistence.game_routes.secrets.choice",
+                   side_effect=lambda choices: choices[0]) as choose:
+            replaced = self.change(first, "random")
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        candidates = choose.call_args.args[0]
+        self.assertTrue(candidates)
+        self.assertTrue(all(
+            category_family(cat) != category_family("Biology")
+            for cat in candidates
+        ), candidates)
+        self.assertNotEqual(
+            category_family(self.generator.call_args.args[2]),
+            category_family("Biology"),
+        )
+        self.assertEqual(self.silver(), 1)
+        self.assertEqual(
+            self.client.get(self.base + "/categories").json()["changes_used"], 1,
+        )
+        self.assertNotEqual(replaced.json()["question_id"], first["question_id"])
+
     def test_failed_generation_does_not_charge_or_replace_question(self):
         self.credit(2)
         q = self.first_question()

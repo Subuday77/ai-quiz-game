@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
-from category_taxonomy import category_family, prefer_other_family
+from category_taxonomy import category_family, prefer_other_family, paid_random_change_candidates
 from diagnostics import event
 from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
@@ -961,10 +961,13 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
     if manual:
         chosen = payload.category  # An explicit purchase overrides auto-diversity.
     else:
+        # A paid replacement must primarily leave the *current* topic family,
+        # not merely differ from the preceding question's category.
         previous = preceding_question_category(db, run.id, attempt.number)
-        other_family = ([cat for cat in options
-                         if previous is None or category_family(cat) != category_family(previous)])
-        chosen = secrets.choice(other_family or options)
+        candidates = paid_random_change_candidates(
+            options, current=snapshot["current"], previous=previous,
+        )
+        chosen = secrets.choice(candidates)
     old_attempt_id = attempt.id
     difficulty = attempt.requested_difficulty
     language = run.language

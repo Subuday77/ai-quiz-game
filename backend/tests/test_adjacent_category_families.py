@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from api import app
-from category_taxonomy import CATEGORY_TOPICS, category_family, prefer_other_family
+from category_taxonomy import (
+    CATEGORY_TOPICS, category_family, prefer_other_family,
+    paid_random_change_candidates,
+)
 from consts import QUESTION_CATEGORIES
 from persistence.categories import preceding_question_category
 from persistence.database import get_db
@@ -124,6 +127,38 @@ class AdjacentCategoryFamilyTests(unittest.TestCase):
         self.assertEqual(
             prefer_other_family(["Literature", "Physics"], None),
             ["Literature", "Physics"],
+        )
+
+    def test_paid_random_change_avoids_replaced_question_family(self):
+        # Regression: replacing Biology with Medicine was treated as a change.
+        options = ["Human anatomy", "Medicine and health", "Literature", "Physics"]
+        self.assertEqual(
+            paid_random_change_candidates(options, "Biology", None),
+            ["Literature", "Physics"],
+        )
+
+    def test_paid_random_change_prefers_both_current_and_previous_diversity(self):
+        options = ["Medicine and health", "Authors and books", "Physics", "Poetry"]
+        self.assertEqual(
+            paid_random_change_candidates(options, "Biology", "Literature"),
+            ["Physics"],
+        )
+
+    def test_paid_random_change_current_family_has_priority_over_previous(self):
+        # The only different family is the same as the previous question.
+        self.assertEqual(
+            paid_random_change_candidates(
+                ["Medicine and health", "Chemistry", "Human anatomy"],
+                "Biology", "Physics",
+            ),
+            ["Chemistry"],
+        )
+
+    def test_paid_random_change_allows_related_fallback_when_unavoidable(self):
+        options = ["Human anatomy", "Medicine and health"]
+        self.assertEqual(
+            paid_random_change_candidates(options, "Biology", "Literature"),
+            options,
         )
 
     def test_previous_answer_changes_next_selection_and_survives_new_session(self):
