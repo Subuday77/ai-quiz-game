@@ -49,9 +49,14 @@ chmod 600 .env
 sudo docker compose build
 sudo docker compose up -d db
 sudo docker compose run --rm backend python -m alembic upgrade head
+sudo docker compose run --rm backend python -m persistence.seed_topics
 sudo docker compose up -d backend web
 sudo docker compose ps
 ```
+
+On a fresh database, `persistence.seed_topics` is required after Alembic: it
+inserts the 50 gameplay categories. Without it, starting a game returns HTTP
+503 (`Topic catalog not initialized`). The seeder is safe to rerun.
 
 While web is still loopback-only, inspect through an SSH tunnel:
 `ssh -L 8080:127.0.0.1:8080 deploy@YOUR_SERVER_IP`, then

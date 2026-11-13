@@ -12,11 +12,14 @@ with `git reset --hard`.
 
 ```bash
 git -C /srv/ai-quiz-game/source status -sb
+git -C /srv/ai-quiz-game/source remote set-branches --add origin feature/vps-release-prep-20261113
 git -C /srv/ai-quiz-game/source fetch origin
 git -C /srv/ai-quiz-game/source switch --track origin/feature/vps-release-prep-20261113
 git -C /srv/ai-quiz-game/source status -sb
 ```
 
+If the repo was cloned with `--single-branch`, the `remote set-branches --add`
+step is necessary: `git fetch origin` alone will not discover the new branch.
 If the target local branch already exists, use `git switch` without `--track`
 then `git pull --ff-only`. Stop if local modifications exist.
 
@@ -52,9 +55,15 @@ sudo docker compose config --quiet
 sudo docker compose build
 sudo docker compose up -d db
 sudo docker compose run --rm backend python -m alembic upgrade head
+sudo docker compose run --rm backend python -m persistence.seed_topics
 sudo docker compose up -d backend web
 sudo docker compose ps
 ```
+
+The topic seed is mandatory for an empty database: Alembic creates the schema,
+but not the 50 gameplay topics. Without it, `POST /api/v2/games` returns
+HTTP 503 (`Topic catalog not initialized`). The seeder is idempotent and prints
+`Seeded N missing topics.`; a second run normally prints `Seeded 0 missing topics.`
 
 `backend` waits for healthy PostgreSQL. Do not run destructive volume commands,
 especially **never** `docker compose down -v` on an account database.
