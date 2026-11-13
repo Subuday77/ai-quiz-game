@@ -3,7 +3,6 @@
 .brand { display: flex; align-items: center; gap: 9px; letter-spacing: .13em; font-size: 14px; font-weight: 750; margin-bottom: 30px; }
 .brand strong { color: #8de8f4; }
 .spark { color: #b9a0ff; font-size: 24px; }
-.prototype { margin-inline-start: auto; border: 1px solid #ffffff30; color: #c5c7dd; border-radius: 25px; padding: 7px 11px; font-size: 10px; letter-spacing: .1em; }
 .card { border: 1px solid #ffffff20; border-radius: 24px; padding: clamp(24px, 6vw, 56px); background: #181a37e8; box-shadow: 0 28px 80px #080c20a8; min-height: 440px; }
 .eyebrow { letter-spacing: .18em; color: #9b9fd1; font-size: 11px; font-weight: 800; margin-bottom: 18px; }
 h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1.1; margin: 0 0 20px; letter-spacing: -.04em; }
@@ -172,7 +171,6 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .stats-warning { color: #ffd0ac; }
 .resume-note { color: #b6e8ee; }
 @media (max-width: 640px) {
-  .prototype { margin-inline-start: auto; }
   .account-controls { width: 100%; justify-content: flex-start; }
   .brand { gap: 7px; }
   .account-button { padding: 8px 10px; }
@@ -180,6 +178,7 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 
 /* UI language selection is completely independent of the question language. */
 .ui-language-control {
+  margin-inline-start: auto;
   display: flex;
   align-items: center;
   gap: 7px;
