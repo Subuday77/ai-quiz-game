@@ -1,4 +1,4 @@
-"""HTTP -> background Caddy/Judge -> PostgreSQL-like ledger regression.
+"""HTTP -> background Keddy/Judge -> PostgreSQL-like ledger regression.
 
 All requests go through the real FastAPI routes and a disposable in-memory
 SQLite database. Model calls are stubbed at the provider boundary only.
@@ -72,7 +72,7 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
 
     @staticmethod
     def mock_model(messages, role, **kwargs):
-        if role == "CADDY":
+        if role == "KEDDY":
             return json.dumps({
                 "summary_en": "Conflicting award year and programming language.",
                 "claims_to_check": ["1972 Turing Award recipient", "COBOL contributions"],
@@ -208,7 +208,7 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             submitted, payload = self.appeal(run_id, question_id)
         self.assertEqual(submitted.status_code, 201, submitted.text)
         appeal_id = submitted.json()["id"]
-        self.assertEqual(calls.call_count, 2)  # one Caddy, one independent Judge
+        self.assertEqual(calls.call_count, 2)  # one Keddy, one independent Judge
 
         history = self.client.get("/api/v2/appeals")
         self.assertEqual(history.status_code, 200, history.text)

@@ -72,7 +72,7 @@ class AppealIntegrationTests(unittest.TestCase):
             "QUIZ_COMPLAINT_JUDGE_TIMEOUT_SECONDS": "40",
             "OPENAI_API_KEY": "fake-test-key",
         }):
-            self.assertNotEqual(_config("CADDY")[0], _config("JUDGE")[0])
+            self.assertNotEqual(_config("KEDDY")[0], _config("JUDGE")[0])
             data = json.dumps({
                 "decision": "inconclusive", "explanation_en": "Uncertain",
                 "explanation_player_language": "Uncertain", "rationale_facts": []})

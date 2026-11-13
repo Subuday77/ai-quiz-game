@@ -1,7 +1,7 @@
 """Isolated, real appeal-worker / wallet E2E *backend* QA.
 
 Creates a throwaway account, game and a COPY of a known quarantined question.
-Uses production file_appeal() and process_appeal() (real Caddy and Judge).
+Uses production file_appeal() and process_appeal() (real Keddy and Judge).
 The source question, real users and their wallets are never modified.
 The copied question is quarantined by file_appeal() BEFORE the fixture commits.
 

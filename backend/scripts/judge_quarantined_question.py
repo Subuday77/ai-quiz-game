@@ -1,4 +1,4 @@
-"""Read-only live Caddy -> Judge evaluation of a quarantined DB question.
+"""Read-only live Keddy -> Judge evaluation of a quarantined DB question.
 
 No fake game, no QuestionAppeal, no settlement, no wallet writes, no
 question status changes. Uses the exact production prompt/schema/model
@@ -83,20 +83,20 @@ def evaluate(question_id: UUID, *, comment: str = DEFAULT_COMMENT) -> dict:
             "before_answer": True, "selected_key": None, "hints_used": 0,
         },
     }
-    caddy = parse_keddy(_completion(keddy_messages(evidence), "CADDY"))
+    keddy = parse_keddy(_completion(keddy_messages(evidence), "KEDDY"))
     judge = parse_judge(_completion(
         judge_messages(
             evidence,
             correct_key=snapshot["stored_correct_key"],
-            preliminary=caddy,
+            preliminary=keddy,
         ),
         "JUDGE",
     ))
     return {
         "mode": "READ_ONLY_MODEL_PROBE",
         "question": snapshot,
-        "caddy_model": _config("CADDY")[0],
-        "caddy": caddy.model_dump(),
+        "caddy_model": _config("KEDDY")[0],
+        "keddy": keddy.model_dump(),
         "judge_model": _config("JUDGE")[0],
         "judge": judge.model_dump(),
         "database_changed": False,
@@ -108,7 +108,7 @@ def evaluate(question_id: UUID, *, comment: str = DEFAULT_COMMENT) -> dict:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Run real Caddy and Judge on a quarantined DB question, read-only"
+        description="Run real Keddy and Judge on a quarantined DB question, read-only"
     )
     parser.add_argument("question_id", type=UUID, help="Question UUID in PostgreSQL")
     parser.add_argument("--comment", default=DEFAULT_COMMENT,

@@ -35,7 +35,7 @@ class IsolatedAppealWorkerTests(unittest.TestCase):
                                     "gpt-6.1-sol" if role == "JUDGE" else "gpt-6-luna",
                                     "low", 1800, 40.0)))
         def mock_completion(_messages, role, **_kwargs):
-            if role == "CADDY":
+            if role == "KEDDY":
                 return json.dumps({
                     "summary_en": "Award-year and COBOL conflict.",
                     "claims_to_check": ["1972 Turing award recipient"],

@@ -48,15 +48,31 @@ def _aware(value: datetime) -> datetime:
 
 
 def _config(role: str) -> tuple[str, str, int, float]:
+    if role not in ("KEDDY", "JUDGE"):
+        raise ValueError("Unknown complaint model role")
     prefix = "QUIZ_COMPLAINT_" + role
-    model = os.environ[prefix + "_MODEL_ID"].strip()
-    effort = os.getenv(prefix + "_REASONING_EFFORT", "low").strip()
-    tokens = int(os.getenv(prefix + "_MAX_OUTPUT_TOKENS", "800"))
-    timeout = float(os.getenv(prefix + "_TIMEOUT_SECONDS", "12"))
+    # Temporary compatibility for VPS installations created before the rename.
+    # New KEDDY values always take precedence, even if both names exist.
+    legacy_prefix = "QUIZ_COMPLAINT_CADDY" if role == "KEDDY" else None
+
+    def setting(suffix: str, default: str | None = None) -> str:
+        names = [prefix + "_" + suffix]
+        if legacy_prefix:
+            names.append(legacy_prefix + "_" + suffix)
+        for name in names:
+            if name in os.environ:
+                return os.environ[name].strip()
+        if default is None:
+            raise KeyError(names[0])
+        return default
+
+    model = setting("MODEL_ID")
+    effort = setting("REASONING_EFFORT", "low")
+    tokens = int(setting("MAX_OUTPUT_TOKENS", "800"))
+    timeout = float(setting("TIMEOUT_SECONDS", "12"))
     if not model or effort not in ("none", "minimal", "low", "medium", "high") or not 128 <= tokens <= 10000 or not 1 <= timeout <= 120:
         raise ValueError("Invalid complaint model configuration")
     return model, effort, tokens, timeout
-
 
 def _completion(messages: list[dict], role: str, *,
                 appeal_id: UUID | None = None, attempt: int | None = None) -> str:
@@ -200,7 +216,7 @@ def process_appeal(appeal_id: UUID) -> str:
             stage = "keddy_input"
             messages = keddy_messages(evidence)
             stage = "keddy"
-            raw = _completion(messages, "CADDY", appeal_id=appeal_id, attempt=attempt_no)
+            raw = _completion(messages, "KEDDY", appeal_id=appeal_id, attempt=attempt_no)
             stage = "keddy_validation"
             keddy = parse_keddy(raw)
             stage = "judge_input"
@@ -221,7 +237,7 @@ def process_appeal(appeal_id: UUID) -> str:
                     localized=verdict.explanation_player_language,
                     data={"judge_decision": verdict.decision,
                           "judge_model": _config("JUDGE")[0],
-                          "keddy_model": _config("CADDY")[0],
+                          "keddy_model": _config("KEDDY")[0],
                           "keddy_summary": keddy.summary_en,
                           "rationale_facts": verdict.rationale_facts},
                 )

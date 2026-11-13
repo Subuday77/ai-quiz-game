@@ -16,7 +16,7 @@ from persistence.appeal_worker import _completion
 class AppealRevisionTests(unittest.TestCase):
     def test_strict_model_output_contracts(self):
         for role, expected in (
-            ("CADDY", {"summary_en", "claims_to_check", "identified_issues",
+            ("KEDDY", {"summary_en", "claims_to_check", "identified_issues",
                        "needs_external_fact_check"}),
             ("JUDGE", {"decision", "explanation_en",
                        "explanation_player_language", "rationale_facts"}),
@@ -121,7 +121,7 @@ class AppealRevisionTests(unittest.TestCase):
                 status="completed", output_text='{"result":"mock"}', usage=None,
                 incomplete_details=None,
             )
-            for role in ("CADDY", "JUDGE"):
+            for role in ("KEDDY", "JUDGE"):
                 _completion([{"role": "system", "content": "Return JSON"}], role)
                 spec = client.return_value.responses.create.call_args.kwargs["text"]["format"]
                 self.assertEqual(spec["type"], "json_schema")
