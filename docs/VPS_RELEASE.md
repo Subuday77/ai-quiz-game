@@ -42,8 +42,13 @@ the older `master`. PR #24 is still draft; validate it before release.
   **inside the running backend container** after any environment edit/recreate.
   This prints allowlisted flag/model policy statuses, never credentials.
   It does NOT inspect DB tag completeness, exposure/firewall, or backups.
-- Start with DB First disabled. Complete two-user live-model browser
-  regression (15 questions + bonus per run) and validate the new feature gates.
+- DB First is enabled in the full production profile for the current approved
+  VPS test policy. Verify the running backend's actual .env after redeployment;
+  do not overwrite or silently flip an existing server's mode. Complete
+  two-user live-model browser regression (15 questions + bonus per run).
+- Keep .env.production.example in parity with .env.example for all policy
+  values except transport, secrets, Localizer and DB First. CI enforces this
+  and catches missing settings and duplicate keys.
 - Caddy/HTTPS, off-site PostgreSQL backups, resource alerts and final privacy
   documentation are prerequisites to a public release.
 

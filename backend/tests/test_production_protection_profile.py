@@ -6,6 +6,21 @@ from scripts.audit_runtime_guards import audit
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def parse_env(path):
+    values = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in values:
+            raise AssertionError(f"Duplicate environment key: {key}")
+        values[key] = value
+    return values
+
+
 PROFILE = {
     name.strip(): value.strip()
     for raw in (ROOT / ".env.production.example").read_text(encoding="utf-8").splitlines()
@@ -40,6 +55,29 @@ class ProtectionProfileTests(unittest.TestCase):
         # valid public origin when checking the protection defaults.
         ready = dict(PROFILE, AUTH_ALLOWED_ORIGINS="https://quiz.example")
         self.assertFalse([f for f in audit(ready) if f.level == "FAIL"])
+
+    def test_complete_production_profile_matches_local_approved_defaults(self):
+        local = parse_env(ROOT / ".env.example")
+        production = parse_env(ROOT / ".env.production.example")
+        # Docker Compose injects this from POSTGRES_PASSWORD, and production
+        # deliberately differs for transport, Localizer, secrets and DB First.
+        exceptions = {
+            "DATABASE_URL", "OPENAI_API_KEY", "AUTH_COOKIE_SECURE",
+            "AUTH_ALLOWED_ORIGINS", "AI_LOCALIZER_BASE_URL",
+            "QUIZ_DB_FIRST_GENERATION",
+        }
+        self.assertEqual(
+            sorted(set(local) - set(production)),
+            ["DATABASE_URL"],
+            "Production must explicitly define every other local policy key",
+        )
+        for key, value in local.items():
+            if key not in exceptions:
+                with self.subTest(key=key):
+                    self.assertEqual(production[key], value)
+        self.assertEqual(production["QUIZ_DB_FIRST_GENERATION"], "true")
+        self.assertEqual(production["QUIZ_COMPLAINT_LOG_LEVEL"], "INFO")
+        self.assertEqual(production["AUTH_COOKIE_SECURE"], "true")
 
     def test_unset_protections_are_flagged_without_secrets(self):
         incomplete = {
