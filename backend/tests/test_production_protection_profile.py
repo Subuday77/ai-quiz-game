@@ -33,7 +33,10 @@ class ProtectionProfileTests(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertEqual(PROFILE.get(key), expected)
         self.assertNotEqual(PROFILE["OPENAI_MODEL_ID"], PROFILE["AI_QUALITY_MODEL_ID"])
-        self.assertFalse([f for f in audit(PROFILE) if f.level == "FAIL"])
+        # The domain is deliberately a placeholder in the template; supply a
+        # valid public origin when checking the protection defaults.
+        ready = dict(PROFILE, AUTH_ALLOWED_ORIGINS="https://quiz.example")
+        self.assertFalse([f for f in audit(ready) if f.level == "FAIL"])
 
     def test_unset_protections_are_flagged_without_secrets(self):
         incomplete = {
