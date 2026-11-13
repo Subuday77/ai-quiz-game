@@ -33,9 +33,13 @@ writeFileSync(join(temp, 'localization/store.mjs'),
 const resetSource = readFileSync(join(root, 'src/app/localization/reset-copy.ts'), 'utf8');
 writeFileSync(join(temp, 'localization/reset-copy.mjs'),
   ts.transpileModule(resetSource, { compilerOptions }).outputText);
+const aboutSource = readFileSync(join(root, 'src/app/localization/about-copy.ts'), 'utf8');
+writeFileSync(join(temp, 'localization/about-copy.mjs'),
+  ts.transpileModule(aboutSource, { compilerOptions }).outputText);
 const componentSource = source
   .replace("from './localization/store';", "from './localization/store.mjs';")
-  .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
+  .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';")
+  .replace("from './localization/about-copy';", "from './localization/about-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
