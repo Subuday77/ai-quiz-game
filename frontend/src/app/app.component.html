@@ -545,6 +545,12 @@
           </button>
         </div>
       </section>
+      <div class="about-bottom-actions">
+        <button type="button" class="outline-button about-bottom-close"
+                (click)="closeAbout()" [disabled]="aboutBusy">
+          {{ locale.t('about.close') }}
+        </button>
+      </div>
     </section>
   </div>
   <footer>{{ locale.t('footer.note') }}</footer>

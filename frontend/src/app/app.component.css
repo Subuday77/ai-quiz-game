@@ -594,3 +594,7 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .about-rule { padding-inline-start: 1.1rem; font-weight: 600; }
 .about-gift p { line-height: 1.7; margin: 0 0 1rem; }
 .about-gift h3 { color: #f8e1a9; }
+
+/* Closing at the end of the long About article must not require scrolling back. */
+.about-bottom-actions { display: flex; justify-content: center; margin-top: 24px; padding-top: 18px; border-top: 1px solid #737bb2; }
+.about-bottom-close { min-width: 160px; }

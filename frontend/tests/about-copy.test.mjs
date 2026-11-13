@@ -47,3 +47,14 @@ test('one-time reading gift is after the story, not in the introduction', () => 
   assert.ok(html.includes('about.giftClaim'));
   assert.ok(!html.includes('about.draftNotice'));
 });
+
+test('About has a bottom close control after the gift for every visitor', () => {
+  const giftEnd = html.indexOf('</section>', html.indexOf('about.gift.p11'));
+  const bottom = html.indexOf('class="about-bottom-actions"');
+  assert.ok(bottom > giftEnd, 'bottom close must follow the gift section');
+  const button = html.slice(bottom, html.indexOf('</button>', bottom) + 9);
+  assert.match(button, /\(click\)="closeAbout\(\)"/);
+  assert.match(button, /\[disabled\]="aboutBusy"/);
+  assert.match(button, /locale\.t\('about\.close'\)/);
+  assert.ok(!button.includes('*ngIf'), 'close button must not depend on gift status');
+});
