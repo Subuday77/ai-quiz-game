@@ -197,7 +197,7 @@
     <p class="intro" *ngIf="screen === 'setup'">{{ locale.t('hero.intro') }}</p>
     <button type="button" class="outline-button about-open-button"
             *ngIf="screen === 'setup'" (click)="openAbout()">
-      {{ locale.t('about.open') }}
+      {{ aboutText('about.open') }}
     </button>
     <p class="intro" *ngIf="screen === 'setup' && !authLoading && !account">{{ locale.t('hero.signIn') }}</p>
     <p class="intro resume-note" *ngIf="screen === 'setup' && restoringGame">{{ locale.t('hero.restoring') }}</p>
@@ -497,9 +497,9 @@
 
   </section>
   <div class="about-backdrop" *ngIf="aboutOpen">
-    <section class="about-panel" role="dialog" aria-modal="true" [attr.aria-label]="locale.t('about.title')">
+    <section class="about-panel" role="dialog" aria-modal="true" [attr.aria-label]="aboutText('about.title')">
       <button type="button" class="about-close" (click)="closeAbout()"
-              [attr.aria-label]="locale.t('about.close')" [disabled]="aboutBusy">×</button>
+              [attr.aria-label]="aboutText('about.close')" [disabled]="aboutBusy">×</button>
       <h2>{{ aboutText('about.title') }}</h2>
       <div class="about-prose">
         <section *ngFor="let section of aboutSections" class="about-chapter">
@@ -532,16 +532,16 @@
         <p>{{ aboutText('about.gift.p9') }}</p>
         <p>{{ aboutText('about.gift.p10') }}</p>
         <p class="about-emphasis">{{ aboutText('about.gift.p11') }}</p>
-        <p *ngIf="aboutStatusLoading" role="status">{{ locale.t('about.giftLoading') }}</p>
-        <p *ngIf="aboutClaimed" role="status">{{ locale.t('about.giftClaimed') }}</p>
-        <p class="error" *ngIf="aboutError" role="alert">{{ locale.t(aboutError) }}</p>
+        <p *ngIf="aboutStatusLoading" role="status">{{ aboutText('about.giftLoading') }}</p>
+        <p *ngIf="aboutClaimed" role="status">{{ aboutText('about.giftClaimed') }}</p>
+        <p class="error" *ngIf="aboutError" role="alert">{{ aboutText(aboutError) }}</p>
         <button type="button" class="primary" *ngIf="account && !aboutClaimed"
                 [disabled]="aboutBusy || aboutStatusLoading || !!aboutError"
-                (click)="claimAboutBonus()">{{ locale.t('about.giftClaim') }}</button>
+                (click)="claimAboutBonus()">{{ aboutText('about.giftClaim') }}</button>
         <div *ngIf="!account">
-          <p>{{ locale.t('about.giftNeedLogin') }}</p>
+          <p>{{ aboutText('about.giftNeedLogin') }}</p>
           <button type="button" class="primary" (click)="registerFromAbout()">
-            {{ locale.t('about.giftSignIn') }}
+            {{ aboutText('about.giftSignIn') }}
           </button>
         </div>
       </section>
