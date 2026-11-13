@@ -149,7 +149,8 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             db.flush()
             balance = (
                 {"bronze": 2} if before_answer else
-                {"bronze": 4, "silver": 4} if number == 10 else
+                {"bronze": 4, "silver": 4}
+                if number == 10 or (answered_correct and 6 <= number <= 10) else
                 {"gold": 4}
             )
             for tier, amount in balance.items():
