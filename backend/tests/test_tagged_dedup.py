@@ -137,10 +137,10 @@ class TaggedContractTests(unittest.TestCase):
             ("human-heart", "primary-function", "pump-blood-through-the-body",
              "Какой орган у человека перекачивает кровь по всему телу?"),
         )
-        def item(triple, wording):
+        def item(triple, wording, difficulty=2):
             return TaggedQuestion.model_validate({
                 "question": wording,
-                "difficulty": 2,
+                "difficulty": difficulty,
                 "answers": {"A": "Печень", "B": "Сердце", "C": "Почка", "D": "Лёгкое"},
                 "correct_answer": "B",
                 "tags": {"entity": [triple[0]], "concept": ["circulation"], "keyword": []},
@@ -159,7 +159,9 @@ class TaggedContractTests(unittest.TestCase):
             history = [previous(other) for j, other in enumerate(variants) if j != i]
             with self.subTest(i=i):
                 with self.assertRaises(DuplicateQuestionError):
-                    require_unique(item(variant[:3], variant[3]), history)
+                    # The same knowledge at a DIFFERENT game difficulty
+                    # is still a duplicate for this player's history.
+                    require_unique(item(variant[:3], variant[3], difficulty=15), history)
         unrelated = item(("left-ventricle", "has-thickest-wall-among-heart-chambers", "true"),
                          "Какая камера сердца имеет самую толстую мышечную стенку?")
         require_unique(unrelated, [previous(v) for v in variants])
