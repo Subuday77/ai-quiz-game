@@ -500,24 +500,38 @@
     <section class="about-panel" role="dialog" aria-modal="true" [attr.aria-label]="locale.t('about.title')">
       <button type="button" class="about-close" (click)="closeAbout()"
               [attr.aria-label]="locale.t('about.close')" [disabled]="aboutBusy">×</button>
-      <h2>{{ locale.t('about.title') }}</h2>
-      <p class="about-draft">{{ locale.t('about.draftNotice') }}</p>
+      <h2>{{ aboutText('about.title') }}</h2>
       <div class="about-prose">
-        <p>{{ locale.t('about.paragraph1') }}</p>
-        <p>{{ locale.t('about.paragraph2') }}</p>
-        <p>{{ locale.t('about.paragraph3') }}</p>
-        <p>{{ locale.t('about.paragraph4') }}</p>
+        <section *ngFor="let section of aboutSections" class="about-chapter">
+          <h3>{{ aboutText(section.heading) }}</h3>
+          <ng-container *ngFor="let block of section.blocks">
+            <p *ngIf="!block.bullet" [class.about-emphasis]="block.emphasis">
+              {{ aboutText(block.key) }}
+            </p>
+            <p *ngIf="block.bullet" class="about-rule">{{ aboutText(block.key) }}</p>
+          </ng-container>
+        </section>
       </div>
       <section class="about-gift">
-        <h3>{{ locale.t('about.giftTitle') }}</h3>
-        <p>{{ locale.t('about.giftIntro') }}</p>
+        <h3>{{ aboutText('about.giftTitle') }}</h3>
+        <p>{{ aboutText('about.gift.p1') }}</p>
+        <p>{{ aboutText('about.gift.p2') }}</p>
+        <p>{{ aboutText('about.gift.p3') }}</p>
+        <p>{{ aboutText('about.gift.p4') }}</p>
+        <p>{{ aboutText('about.gift.p5') }}</p>
+        <p class="about-emphasis">{{ aboutText('about.gift.p6') }}</p>
         <div class="about-gift-grid">
           <div *ngFor="let tier of starTiers" class="about-gift-tier" [ngClass]="tier.key">
             <span class="star-icon" aria-hidden="true">★</span>
             <strong>{{ aboutReward[tier.key] }}</strong>
-            <span>{{ locale.t('stars.' + tier.key) }}</span>
+            <span>{{ aboutText('about.gift.' + tier.key) }}</span>
           </div>
         </div>
+        <p>{{ aboutText('about.gift.p7') }}</p>
+        <p>{{ aboutText('about.gift.p8') }}</p>
+        <p>{{ aboutText('about.gift.p9') }}</p>
+        <p>{{ aboutText('about.gift.p10') }}</p>
+        <p class="about-emphasis">{{ aboutText('about.gift.p11') }}</p>
         <p *ngIf="aboutStatusLoading" role="status">{{ locale.t('about.giftLoading') }}</p>
         <p *ngIf="aboutClaimed" role="status">{{ locale.t('about.giftClaimed') }}</p>
         <p class="error" *ngIf="aboutError" role="alert">{{ locale.t(aboutError) }}</p>

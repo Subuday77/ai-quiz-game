@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 import { LocalizationStore, UI_LANGUAGES } from './localization/store';
 import { RESET_COPY, RESET_LANGUAGE_NAMES } from './localization/reset-copy';
+import { ABOUT_SECTIONS, APPROVED_ABOUT_RU } from './localization/about-copy';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
@@ -298,6 +299,10 @@ export class AppComponent implements OnInit, OnDestroy {
   account: Account | null = null;
   authLoading = true;
   authBusy = false;
+  readonly aboutSections = ABOUT_SECTIONS;
+  aboutText(key: string): string {
+    return this.locale.code === 'ru' ? (APPROVED_ABOUT_RU[key] ?? this.locale.t(key)) : this.locale.t(key);
+  }
   aboutOpen = false;
   aboutClaimed = false;
   aboutStatusLoading = false;
