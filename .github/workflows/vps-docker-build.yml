@@ -1,0 +1,30 @@
+name: VPS Docker build checks
+on:
+  pull_request:
+    paths:
+      - compose.yaml
+      - backend/**
+      - frontend/**
+      - .dockerignore
+      - .env.production.example
+      - .github/workflows/vps-docker-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate isolated Compose network and variable interpolation
+        run: |
+          cp .env.production.example .env
+          docker compose config --quiet
+          docker compose config | grep -F '127.0.0.1:8080'
+      - name: Build backend image, including migrations
+        run: docker build -f backend/Dockerfile -t quiz-backend:ci .
+      - name: Build Angular static-web image
+        run: docker build -f frontend/Dockerfile -t quiz-web:ci frontend
