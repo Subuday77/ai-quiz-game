@@ -95,7 +95,7 @@ def evaluate(question_id: UUID, *, comment: str = DEFAULT_COMMENT) -> dict:
     return {
         "mode": "READ_ONLY_MODEL_PROBE",
         "question": snapshot,
-        "caddy_model": _config("KEDDY")[0],
+        "keddy_model": _config("KEDDY")[0],
         "keddy": keddy.model_dump(),
         "judge_model": _config("JUDGE")[0],
         "judge": judge.model_dump(),
