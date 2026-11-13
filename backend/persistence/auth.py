@@ -123,6 +123,36 @@ def authenticated_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+@router.get("/username-suggestions")
+def username_suggestions(username: str, db: Session = Depends(get_db)) -> dict[str, list[str]]:
+    """Offer three currently unused usernames, never claiming to reserve them.
+
+    The same database uniqueness constraint still decides the eventual signup.
+    Suggestions follow the existing ASCII username policy and are only offered
+    for valid proposed usernames.
+    """
+    try:
+        username_key(username)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid username") from None
+    base = unicodedata.normalize("NFKC", username.strip())
+    suffixes = ("2026", "2000", "123", "_1", "_2", "_3", "_4", "_5")
+    suffixes += tuple(str(number) for number in range(1, 201))
+    suggestions: list[str] = []
+    seen: set[str] = {username_key(base)}
+    for suffix in suffixes:
+        candidate = base[:30 - len(suffix)] + suffix
+        key = username_key(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if db.scalar(select(User.id).where(User.username_key == key)) is None:
+            suggestions.append(candidate)
+            if len(suggestions) == 3:
+                break
+    return {"suggestions": suggestions}
+
+
 @router.post("/register", response_model=AccountOut, status_code=201)
 def register(payload: Credentials, request: Request, response: Response,
              db: Session = Depends(get_db)):
