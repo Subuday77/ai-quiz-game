@@ -23,7 +23,7 @@ jobs:
         run: |
           cp .env.production.example .env
           docker compose config --quiet
-          docker compose config | grep -F '127.0.0.1:8080'
+          docker compose config --format json | python -c 'import json,sys; d=json.load(sys.stdin); p=d["services"]["web"]["ports"][0]; assert p["host_ip"]=="127.0.0.1" and str(p["published"])=="8080"; assert all(not d["services"][s].get("ports") for s in ("db","backend"))'
       - name: Build backend image, including migrations
         run: docker build -f backend/Dockerfile -t quiz-backend:ci .
       - name: Build Angular static-web image
