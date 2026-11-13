@@ -2771,6 +2771,7 @@ test('thumb controls share the question-number row and use neutral SVG icons', (
 });
 
 test('answer feedback allows complaints regardless of correctness', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(template, /<button \*ngIf="current" type="button"\s+class="outline-button appeal-report-button" \(click\)="openAppealForm\(\)"/);
   assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
   assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
