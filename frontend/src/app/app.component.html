@@ -180,7 +180,7 @@
   <section class="card">
     <div class="card-topline">
       <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
-      <button *ngIf="screen === 'question' && current && !questionLoading"
+      <button *ngIf="current && ((screen === 'question' && !questionLoading) || screen === 'feedback')"
               type="button" class="outline-button appeal-header-button"
               (click)="openAppealForm()"
               [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(current.question_id)">
@@ -434,11 +434,6 @@
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
       <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
       <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
-      <button *ngIf="current" type="button"
-              class="outline-button appeal-report-button" (click)="openAppealForm()"
-              [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(current.question_id)">
-        {{ locale.t('appeals.reportQuestion') }}
-      </button>
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
