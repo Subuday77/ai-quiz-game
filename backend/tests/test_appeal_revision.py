@@ -125,6 +125,7 @@ class AppealRevisionTests(unittest.TestCase):
                 _completion([{"role": "system", "content": "Return JSON"}], role)
                 spec = client.return_value.responses.create.call_args.kwargs["text"]["format"]
                 self.assertEqual(spec["type"], "json_schema")
+                self.assertEqual(spec["name"], "quiz_appeal_" + role.lower())
                 self.assertTrue(spec["strict"])
                 self.assertEqual(spec["schema"]["required"],
                                  list(response_json_schema(role)["properties"]))
