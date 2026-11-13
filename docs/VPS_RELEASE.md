@@ -33,6 +33,8 @@ the older `master`. PR #24 is still draft; validate it before release.
   `AI_STRUCTURED_OUTPUT_MODE=strict` and
   `AI_QUALITY_STRUCTURED_OUTPUT_MODE=strict`; pin independent
   `AI_QUALITY_MODEL_ID=gpt-5.4-mini` (different from the generator).
+  Keep Judge `medium` reasoning, 1800 output tokens and 40s timeout;
+  otherwise its fallback is `low` / 800 / 12s.
 - **Existing databases:** `python -m tagging.backfill --dry-run` must report
   **0 missing** before turning tagged dedup on. Until then, do NOT turn
   the flag on blindly: `history_for_user` fails closed (HTTP 503).

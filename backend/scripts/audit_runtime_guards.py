@@ -33,6 +33,9 @@ EXPECTED = {
     "QUIZ_HELPER_DEBUG": ("false", "false", "No sensitive helper debug"),
     "LOCALIZATION_RESET_ENABLED": ("false", "false", "No localization-reset dev endpoint"),
     "QUIZ_QA_APPEAL_CREDITS_ENABLED": ("false", "false", "No test appeal credits"),
+    "QUIZ_COMPLAINT_JUDGE_REASONING_EFFORT": ("medium", "low", "Approved Judge reasoning effort"),
+    "QUIZ_COMPLAINT_JUDGE_MAX_OUTPUT_TOKENS": ("1800", "800", "Approved Judge output budget"),
+    "QUIZ_COMPLAINT_JUDGE_TIMEOUT_SECONDS": ("40", "12", "Approved Judge timeout"),
 }
 
 

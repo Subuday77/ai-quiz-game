@@ -28,6 +28,9 @@ class ProtectionProfileTests(unittest.TestCase):
             "AI_QUALITY_PROVIDER": "openai",
             "QUIZ_QUESTION_POOL_FALLBACK_ENABLED": "true",
             "QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED": "true",
+            "QUIZ_COMPLAINT_JUDGE_REASONING_EFFORT": "medium",
+            "QUIZ_COMPLAINT_JUDGE_MAX_OUTPUT_TOKENS": "1800",
+            "QUIZ_COMPLAINT_JUDGE_TIMEOUT_SECONDS": "40",
         }
         for key, expected in safeguards.items():
             with self.subTest(key=key):
