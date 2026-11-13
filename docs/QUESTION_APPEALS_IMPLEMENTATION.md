@@ -52,6 +52,12 @@ QUIZ_COMPLAINT_JUDGE_MAX_OUTPUT_TOKENS=1800
 QUIZ_COMPLAINT_JUDGE_TIMEOUT_SECONDS=40
 ```
 
+**Keddy naming transition:** the worker prefers `QUIZ_COMPLAINT_KEDDY_*` and
+temporarily accepts the older `QUIZ_COMPLAINT_CADDY_*` values as a fallback.
+During a VPS rollout, retain both prefixes until the new backend is running;
+afterwards remove the old CADDY variables from the server's private `.env`.
+The Caddy HTTPS reverse proxy is a separate component.
+
 Both use the existing `OPENAI_API_KEY`. The model IDs must be available to
 the actual OpenAI project; offline mocked tests do not prove live availability.
 
