@@ -1,4 +1,4 @@
-"""Regression guard: deployed Caddy/Judge model env names match the worker."""
+"""Regression guard: deployed Keddy/Judge model env names match the worker."""
 
 import os
 import unittest
@@ -18,10 +18,30 @@ class ProductionComplaintEnvTest(unittest.TestCase):
                 name, value = line.split("=", 1)
                 entries[name] = value
 
-        self.assertNotIn("QUIZ_COMPLAINT_KEDDY_MODEL_ID", entries)
+        self.assertNotIn("QUIZ_COMPLAINT_CADDY_MODEL_ID", entries)
         with patch.dict(os.environ, entries, clear=True):
-            self.assertEqual(_config("CADDY")[0], "gpt-6-luna")
+            self.assertEqual(_config("KEDDY")[0], "gpt-6-luna")
             self.assertEqual(_config("JUDGE")[0], "gpt-6.1-sol")
+
+
+    def test_legacy_caddy_environment_works_during_rollout(self):
+        with patch.dict(os.environ, {
+            "QUIZ_COMPLAINT_CADDY_MODEL_ID": "gpt-6-luna",
+            "QUIZ_COMPLAINT_CADDY_TIMEOUT_SECONDS": "18",
+        }, clear=True):
+            self.assertEqual(_config("KEDDY"), ("gpt-6-luna", "low", 800, 18.0))
+
+    def test_new_keddy_name_takes_precedence(self):
+        with patch.dict(os.environ, {
+            "QUIZ_COMPLAINT_KEDDY_MODEL_ID": "gpt-6-luna",
+            "QUIZ_COMPLAINT_CADDY_MODEL_ID": "obsolete-caddy-model",
+        }, clear=True):
+            self.assertEqual(_config("KEDDY")[0], "gpt-6-luna")
+
+    def test_missing_keddy_configuration_reports_new_name(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(KeyError, "QUIZ_COMPLAINT_KEDDY_MODEL_ID"):
+                _config("KEDDY")
 
 
 if __name__ == "__main__":

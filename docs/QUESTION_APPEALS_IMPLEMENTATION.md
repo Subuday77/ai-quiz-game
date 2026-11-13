@@ -42,10 +42,10 @@ English and the complaint's original language; history never runs translation.
 ## Environment (root .env, backend only)
 
 ```dotenv
-QUIZ_COMPLAINT_CADDY_MODEL_ID=gpt-6-luna
-QUIZ_COMPLAINT_CADDY_REASONING_EFFORT=low
-QUIZ_COMPLAINT_CADDY_MAX_OUTPUT_TOKENS=800
-QUIZ_COMPLAINT_CADDY_TIMEOUT_SECONDS=12
+QUIZ_COMPLAINT_KEDDY_MODEL_ID=gpt-6-luna
+QUIZ_COMPLAINT_KEDDY_REASONING_EFFORT=low
+QUIZ_COMPLAINT_KEDDY_MAX_OUTPUT_TOKENS=800
+QUIZ_COMPLAINT_KEDDY_TIMEOUT_SECONDS=12
 QUIZ_COMPLAINT_JUDGE_MODEL_ID=gpt-6.1-sol
 QUIZ_COMPLAINT_JUDGE_REASONING_EFFORT=medium
 QUIZ_COMPLAINT_JUDGE_MAX_OUTPUT_TOKENS=1800
@@ -132,7 +132,7 @@ policy is restored without deleting audit records.
 Add `QUIZ_COMPLAINT_LOG_LEVEL=INFO` to the shared root `.env`. Set
 `QUIZ_COMPLAINT_LOG_LEVEL=DEBUG` temporarily while reproducing failures.
 
-- INFO: `appeal_submitted`, Caddy/Judge start and finish, model name, response
+- INFO: `appeal_submitted`, Keddy/Judge start and finish, model name, response
   status, elapsed milliseconds and token counts; verdicts, settlement/refunds,
   retry scheduling, security validation failures and HTTP/API exceptions.
 - DEBUG: only sanitized validation field paths and error types, wallet
@@ -140,7 +140,7 @@ Add `QUIZ_COMPLAINT_LOG_LEVEL=INFO` to the shared root `.env`. Set
   source URLs, raw model responses and API secrets are **never** logged.
 - Both models use strict Responses API `text.format.type=json_schema`; actual
   input/output must still pass Pydantic validation. The separate stage name
-  identifies whether the failure occurred at evidence, Caddy, Judge or settlement.
+  identifies whether the failure occurred at evidence, Keddy, Judge or settlement.
 
 A deferred appeal can be requested **immediately** from a PyCharm terminal
 in the `backend` directory, with no restart and no additional process:

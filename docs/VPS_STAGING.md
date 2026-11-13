@@ -32,7 +32,7 @@ then run `chmod 600 .env`.
 Edit `.env` **on the VPS**, not in a shared log or message. Create a random
 URI-safe password (e.g. locally run `openssl rand -hex 32`) and enter it in
 `POSTGRES_PASSWORD`. Insert your real `OPENAI_API_KEY`. Keep the real
-`OPENAI_MODEL_ID`, reviewer, Caddy and quality settings consistent with
+`OPENAI_MODEL_ID`, reviewer, Keddy and quality settings consistent with
 your tested local setup. The Render AI Localizer URL is already included.
 
 For the **SSH-tunnel test only**, edit these two values:
