@@ -2769,3 +2769,9 @@ test('thumb controls share the question-number row and use neutral SVG icons', (
   assert.match(css, /\.question-heading-row\s*\{[^}]*display:\s*flex/);
   assert.match(css, /\.question-heading-row\s*\{[^}]*align-items:\s*center/);
 });
+
+test('answer feedback allows complaints regardless of correctness', () => {
+  assert.match(template, /<button \*ngIf="current" type="button"\s+class="outline-button appeal-report-button" \(click\)="openAppealForm\(\)"/);
+  assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
+  assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
+});

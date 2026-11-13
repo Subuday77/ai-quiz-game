@@ -91,6 +91,31 @@ class LiteralLeakTests(unittest.TestCase):
         )
         self.assertFalse(exact_answer_leak(no_full_key))
 
+    def test_android_inc_leak_with_instrumental_company_inflection(self):
+        q = QuizQuestion.model_validate({
+            "difficulty": 5,
+            "question": ("Какой компанией была разработана операционная система "
+                         "Android в её первоначальной версии до покупки проекта Google?"),
+            "answers": {
+                "A": "Palm, Inc.", "B": "Android Inc.",
+                "C": "Nokia", "D": "BlackBerry Limited",
+            },
+            "correct_answer": "B",
+        })
+        self.assertTrue(exact_answer_leak(q))
+        with self.assertRaises(QualityRegenerationError):
+            check_local_leak(q, "enforce")
+        check_local_leak(q, "audit")
+
+        unrelated = q.model_copy(update={
+            "question": "Какой тип ПО использует Android?",
+        })
+        self.assertFalse(exact_answer_leak(unrelated))
+        shared_name = q.model_copy(update={
+            "answers": {**q.answers, "A": "Android Technologies"},
+        })
+        self.assertFalse(exact_answer_leak(shared_name))
+
     def test_quotes_are_not_automatically_leaks(self):
         self.assertFalse(exact_answer_leak(question(
             "С каким телесериалом связан слоган «The truth is out there»?",

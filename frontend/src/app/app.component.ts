@@ -665,7 +665,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct)) ||
+          (this.screen === 'feedback' && !!this.feedback)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
 
     this.appealBusy = true;

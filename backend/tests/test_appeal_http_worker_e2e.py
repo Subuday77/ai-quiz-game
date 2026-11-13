@@ -88,8 +88,12 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             })
         raise AssertionError("Unexpected model stage")
 
-    def fixture(self, number: int, *, before_answer: bool = False):
+    def fixture(self, number: int, *, before_answer: bool = False,
+                answered_correct: bool = False):
         now = datetime.now(timezone.utc)
+        status = ("completed" if number == 16 else "main") if answered_correct else (
+            "main" if before_answer else "lost"
+        )
         with Session(self.engine, expire_on_commit=False) as db:
             topic = Topic(
                 slug="appeal-http-e2e-" + uuid4().hex[:12],
@@ -100,11 +104,12 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             run = GameRun(
                 user_id=self.user_id,
                 language="Russian",
-                status="main" if before_answer else "lost",
-                correct_main_answers=0 if before_answer else min(number - 1, 15),
+                status=status,
+                correct_main_answers=(min(number, 15) if answered_correct
+                                      else 0 if before_answer else min(number - 1, 15)),
                 bonus_wager_accepted=number == 16,
-                bonus_correct=False if number == 16 else None,
-                finished_at=None if before_answer else now,
+                bonus_correct=answered_correct if number == 16 else None,
+                finished_at=now if status in ("lost", "completed") else None,
             )
             db.add(run)
             db.flush()
@@ -135,8 +140,8 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
                 number=number,
                 requested_difficulty=number - 1,
                 answered_at=None if before_answer else now,
-                selected_key=None if before_answer else "A",
-                is_correct=None if before_answer else False,
+                selected_key=None if before_answer else "B" if answered_correct else "A",
+                is_correct=None if before_answer else answered_correct,
                 hints_used=1 if number == 10 else 0,
                 appeal_expenses={"hint_bronze": 2} if number == 10 else {},
             )
@@ -306,6 +311,71 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             self.assertIsNotNone(db.get(
                 QuestionAttempt, UUID(attempt_id)).superseded_at)
 
+
+    def test_correct_answer_can_be_appealed_without_score_or_loss_compensation(self):
+        run_id, question_id, attempt_id = self.fixture(6, answered_correct=True)
+        quote = self.client.get(
+            f"/api/v2/games/{run_id}/appeals/{question_id}/quote")
+        self.assertEqual(quote.status_code, 200, quote.text)
+        self.assertFalse(quote.json()["before_answer"])
+        self.assertEqual(quote.json()["deposit_tier"], "silver")
+        self.assertIsNone(quote.json()["loss_compensation_tier_if_upheld"])
+        self.assertFalse(quote.json()["bonus_wager_refund_if_upheld"])
+
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model) as calls:
+            submitted, payload = self.appeal(run_id, question_id)
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        self.assertEqual(calls.call_count, 2)
+        appeal_id = submitted.json()["id"]
+        appeal = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
+        self.assertEqual(appeal["status"], "upheld")
+        self.assertEqual(appeal["selected_key"], "B")
+        self.assertEqual(appeal["answer_key"], "B")
+        self.assertEqual(appeal["compensation"]["amount"], 0)
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("silver", -1),
+            "appeal-deposit-refund": ("silver", 1),
+        })
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(run_id))
+            attempt = db.get(QuestionAttempt, UUID(attempt_id))
+            self.assertEqual(run.status, "main")
+            self.assertEqual(run.correct_main_answers, 6)
+            self.assertTrue(attempt.is_correct)
+            self.assertEqual(attempt.selected_key, "B")
+            self.assertIsNone(attempt.superseded_at)
+            self.assertEqual(star_balances(db, self.user_id)["silver"], 4)
+
+        duplicate = self.client.post(
+            f"/api/v2/games/{run_id}/appeals", json=payload)
+        self.assertEqual(duplicate.status_code, 201, duplicate.text)
+        payload["request_id"] = str(uuid4())
+        self.assertEqual(self.client.post(
+            f"/api/v2/games/{run_id}/appeals", json=payload).status_code, 409)
+
+    def test_correct_bonus_answer_never_refunds_wager_or_awards_loss_compensation(self):
+        run_id, question_id, attempt_id = self.fixture(16, answered_correct=True)
+        quote = self.client.get(
+            f"/api/v2/games/{run_id}/appeals/{question_id}/quote")
+        self.assertEqual(quote.status_code, 200, quote.text)
+        self.assertIsNone(quote.json()["loss_compensation_tier_if_upheld"])
+        self.assertFalse(quote.json()["bonus_wager_refund_if_upheld"])
+
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model):
+            submitted, _ = self.appeal(run_id, question_id)
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        appeal = self.client.get(f"/api/v2/appeals/{submitted.json()['id']}").json()
+        self.assertEqual(appeal["status"], "upheld")
+        self.assertFalse(appeal["bonus_wager_refunded"])
+        self.assertEqual(appeal["compensation"]["amount"], 0)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(run_id))
+            attempt = db.get(QuestionAttempt, UUID(attempt_id))
+            self.assertEqual(run.status, "completed")
+            self.assertTrue(attempt.is_correct)
+            self.assertIsNone(attempt.superseded_at)
 
     def paid_helper(self, run_id: str, attempt_id: str, *,
                     price: int = 2, consulted: bool = False,

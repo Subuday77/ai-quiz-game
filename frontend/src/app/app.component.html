@@ -435,9 +435,9 @@
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
       <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
       <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
-      <button *ngIf="!result.correct && result.phase === 'lost' && current" type="button"
+      <button *ngIf="current" type="button"
               class="outline-button appeal-report-button" (click)="openAppealForm()"
-              [disabled]="loading || appealBusy || appealedQuestionIds.has(current.question_id)">
+              [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(current.question_id)">
         {{ locale.t('appeals.reportQuestion') }}
       </button>
       <div class="achievement" *ngIf="result.achievement">

@@ -46,9 +46,9 @@ def _eligible_attempt(db: Session, *, run: GameRun, question_id: UUID
         if run.status not in ("main", "bonus"):
             raise GameConflict("Round is no longer active")
         return attempt, db.get(Question, question_id), True
-    if attempt.is_correct is False and run.status == "lost":
-        return attempt, db.get(Question, question_id), False
-    raise GameConflict("Appeal is allowed before answering or after an incorrect loss")
+    # Knowing the keyed answer does not make the question unambiguous.
+    # Preserve the answered attempt, score and game phase for every post-answer filing.
+    return attempt, db.get(Question, question_id), False
 
 
 def _filings_this_month(db: Session, *, user_id: UUID, now: datetime) -> int:
