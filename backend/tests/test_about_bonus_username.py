@@ -77,7 +77,7 @@ class SignupAndAboutBonusTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v2/stars/about-bonus").json(), {"claimed": True})
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count(WalletTransaction.id))), 4)
-        self.assertEqual(self.client.post("/api/auth/logout").status_code, 200)
+        self.assertEqual(self.client.post("/api/auth/logout").status_code, 204)
         self.assertEqual(self.signup("Bob").status_code, 201)
         self.assertEqual(self.client.get("/api/v2/stars/about-bonus").json(), {"claimed": False})
         self.assertTrue(self.client.post("/api/v2/stars/about-bonus").json()["newly_claimed"])
