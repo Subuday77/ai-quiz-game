@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
-from category_taxonomy import category_family, prefer_other_family, paid_random_change_candidates
+from category_taxonomy import prefer_other_family, paid_random_change_candidates
 from diagnostics import event
 from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
