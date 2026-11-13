@@ -27,6 +27,19 @@ the older `master`. PR #24 is still draft; validate it before release.
   Uvicorn worker until duplicate worker scheduling has been assessed.
 - Database schema: the latest Alembic migration is 0013. **Back up data**
   before any future migration on an existing PostgreSQL instance.
+- **Do not silently omit question safeguards.** Keep
+  `AI_TAG_DEDUP_ENABLED=true`, `AI_QUALITY_MODE=enforce`,
+  `QUIZ_QUALITY_ARBITER_MODE=on`, `AI_LOCAL_LEAK_MODE=enforce`,
+  `AI_STRUCTURED_OUTPUT_MODE=strict` and
+  `AI_QUALITY_STRUCTURED_OUTPUT_MODE=strict`; pin independent
+  `AI_QUALITY_MODEL_ID=gpt-5.4-mini` (different from the generator).
+- **Existing databases:** `python -m tagging.backfill --dry-run` must report
+  **0 missing** before turning tagged dedup on. Until then, do NOT turn
+  the flag on blindly: `history_for_user` fails closed (HTTP 503).
+- Run the read-only `python -m scripts.audit_runtime_guards --strict`
+  **inside the running backend container** after any environment edit/recreate.
+  This prints allowlisted flag/model policy statuses, never credentials.
+  It does NOT inspect DB tag completeness, exposure/firewall, or backups.
 - Start with DB First disabled. Complete two-user live-model browser
   regression (15 questions + bonus per run) and validate the new feature gates.
 - Caddy/HTTPS, off-site PostgreSQL backups, resource alerts and final privacy
