@@ -377,6 +377,23 @@
   "questionFeedback.title": "Rate this question",
   "questionFeedback.like": "I like this question",
   "questionFeedback.dislike": "I don't like this question",
-  "questionFeedback.error": "Could not save your vote. Please try again."
+  "questionFeedback.error": "Could not save your vote. Please try again.",
+  "auth.suggestionsIntro": "That username is taken. These alternatives are currently available:",
+  "about.open": "About the game",
+  "about.title": "About AI Quiz Game",
+  "about.draftNotice": "Preview text — wording to be agreed before public release.",
+  "about.paragraph1": "An AI asks the questions. You decide whether you can beat it — and whether its questions are actually fair.",
+  "about.paragraph2": "Play through 15 increasingly challenging questions. If you answer all 15 correctly without using in-game hints, a secret sixteenth question awaits.",
+  "about.paragraph3": "Earn stars, choose categories and make use of optional helpers. Your account keeps your results and rewards between visits.",
+  "about.paragraph4": "AI can make mistakes. If a question seems wrong or ambiguous, you can challenge it and have your complaint reviewed.",
+  "about.giftTitle": "You made it all the way to the end!",
+  "about.giftIntro": "Thanks for reading. Here's a one-time gift: 20 platinum, 30 gold, 40 silver and 50 bronze stars.",
+  "about.giftClaim": "Claim your gift",
+  "about.giftClaimed": "Your one-time gift has already been claimed. Enjoy!",
+  "about.giftLoading": "Checking your gift…",
+  "about.giftNeedLogin": "Create an account or sign in to collect your gift.",
+  "about.giftSignIn": "Create an account",
+  "about.statusFailed": "Could not check your gift status. Close and try again.",
+  "about.claimFailed": "Could not claim the gift. Close and retry; an already granted gift won't be doubled.",
+  "about.close": "Close"
 }
-

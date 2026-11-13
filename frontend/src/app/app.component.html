@@ -195,6 +195,10 @@
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
     <p class="intro" *ngIf="screen === 'setup'">{{ locale.t('hero.intro') }}</p>
+    <button type="button" class="outline-button about-open-button"
+            *ngIf="screen === 'setup'" (click)="openAbout()">
+      {{ locale.t('about.open') }}
+    </button>
     <p class="intro" *ngIf="screen === 'setup' && !authLoading && !account">{{ locale.t('hero.signIn') }}</p>
     <p class="intro resume-note" *ngIf="screen === 'setup' && restoringGame">{{ locale.t('hero.restoring') }}</p>
     <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
@@ -492,6 +496,43 @@
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
 
   </section>
+  <div class="about-backdrop" *ngIf="aboutOpen">
+    <section class="about-panel" role="dialog" aria-modal="true" [attr.aria-label]="locale.t('about.title')">
+      <button type="button" class="about-close" (click)="closeAbout()"
+              [attr.aria-label]="locale.t('about.close')" [disabled]="aboutBusy">×</button>
+      <h2>{{ locale.t('about.title') }}</h2>
+      <p class="about-draft">{{ locale.t('about.draftNotice') }}</p>
+      <div class="about-prose">
+        <p>{{ locale.t('about.paragraph1') }}</p>
+        <p>{{ locale.t('about.paragraph2') }}</p>
+        <p>{{ locale.t('about.paragraph3') }}</p>
+        <p>{{ locale.t('about.paragraph4') }}</p>
+      </div>
+      <section class="about-gift">
+        <h3>{{ locale.t('about.giftTitle') }}</h3>
+        <p>{{ locale.t('about.giftIntro') }}</p>
+        <div class="about-gift-grid">
+          <div *ngFor="let tier of starTiers" class="about-gift-tier" [ngClass]="tier.key">
+            <span class="star-icon" aria-hidden="true">★</span>
+            <strong>{{ aboutReward[tier.key] }}</strong>
+            <span>{{ locale.t('stars.' + tier.key) }}</span>
+          </div>
+        </div>
+        <p *ngIf="aboutStatusLoading" role="status">{{ locale.t('about.giftLoading') }}</p>
+        <p *ngIf="aboutClaimed" role="status">{{ locale.t('about.giftClaimed') }}</p>
+        <p class="error" *ngIf="aboutError" role="alert">{{ locale.t(aboutError) }}</p>
+        <button type="button" class="primary" *ngIf="account && !aboutClaimed"
+                [disabled]="aboutBusy || aboutStatusLoading || !!aboutError"
+                (click)="claimAboutBonus()">{{ locale.t('about.giftClaim') }}</button>
+        <div *ngIf="!account">
+          <p>{{ locale.t('about.giftNeedLogin') }}</p>
+          <button type="button" class="primary" (click)="registerFromAbout()">
+            {{ locale.t('about.giftSignIn') }}
+          </button>
+        </div>
+      </section>
+    </section>
+  </div>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>
 <!-- The old interface stays unchanged underneath. A complete new dictionary

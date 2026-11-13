@@ -22,6 +22,12 @@ const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
+interface AboutBonusClaim {
+  claimed: boolean;
+  newly_claimed: boolean;
+  balances: StarCounts;
+}
+
 interface Account {
   id: string;
   username: string;
@@ -292,6 +298,12 @@ export class AppComponent implements OnInit, OnDestroy {
   account: Account | null = null;
   authLoading = true;
   authBusy = false;
+  aboutOpen = false;
+  aboutClaimed = false;
+  aboutStatusLoading = false;
+  aboutBusy = false;
+  aboutError = '';
+  readonly aboutReward: StarCounts = { bronze: 50, silver: 40, gold: 30, platinum: 20 };
   resetEnabled = false;
   resetBusy = false;
   resetError = '';
@@ -1315,6 +1327,64 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  openAbout(): void {
+    this.aboutOpen = true;
+    this.aboutError = '';
+    this.aboutClaimed = false;
+    if (!this.account) return;
+    const accountId = this.account.id;
+    this.aboutStatusLoading = true;
+    this.subscriptions.add(this.http.get<{ claimed: boolean }>(
+      STARS_API + '/about-bonus'
+    ).pipe(timeout(10000), finalize(() => {
+      if (this.account?.id === accountId) this.aboutStatusLoading = false;
+    })).subscribe({
+      next: state => {
+        if (this.account?.id === accountId && this.aboutOpen)
+          this.aboutClaimed = state.claimed;
+      },
+      error: () => {
+        if (this.account?.id === accountId && this.aboutOpen)
+          this.aboutError = 'about.statusFailed';
+      },
+    }));
+  }
+
+  closeAbout(): void {
+    if (this.aboutBusy) return;
+    this.aboutOpen = false;
+    this.aboutError = '';
+  }
+
+  async registerFromAbout(): Promise<void> {
+    this.closeAbout();
+    await this.openAuthDialog('register');
+  }
+
+  claimAboutBonus(): void {
+    if (!this.account || !this.aboutOpen || this.aboutBusy ||
+        this.aboutStatusLoading || this.aboutClaimed || this.aboutError) return;
+    const accountId = this.account.id;
+    this.aboutBusy = true;
+    this.subscriptions.add(this.http.post<AboutBonusClaim>(
+      STARS_API + '/about-bonus', {}
+    ).pipe(timeout(15000), finalize(() => {
+      if (this.account?.id === accountId) this.aboutBusy = false;
+    })).subscribe({
+      next: result => {
+        if (this.account?.id !== accountId) return;
+        this.aboutClaimed = result.claimed;
+        this.spendableStars = result.balances;
+        this.refreshStats();
+      },
+      error: err => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else if (this.account?.id === accountId)
+          this.aboutError = 'about.claimFailed';
+      },
+    }));
+  }
+
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
   async openAuthDialog(mode: AuthMode): Promise<void> {
     if (this.authBusy || this.loading || this.authLoading) return;
@@ -1330,6 +1400,7 @@ export class AppComponent implements OnInit, OnDestroy {
           '<div class="quiz-auth-fields">' +
             '<label id="quiz-label-username" for="quiz-auth-username"></label>' +
             '<input id="quiz-auth-username" class="swal2-input" type="text" autocomplete="username" maxlength="30">' +
+            (isRegister ? '<div id="quiz-username-suggestions" class="quiz-username-suggestions" role="status"></div>' : '') +
             '<label id="quiz-label-password" for="quiz-auth-password"></label>' +
             '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
               'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
@@ -1353,6 +1424,9 @@ export class AppComponent implements OnInit, OnDestroy {
           label('quiz-label-password', 'auth.password');
           hint('quiz-auth-username', 'auth.usernamePlaceholder');
           if (isRegister) {
+            popup?.querySelector<HTMLInputElement>('#quiz-auth-username')?.addEventListener('input', () => {
+              popup?.querySelector<HTMLElement>('#quiz-username-suggestions')?.replaceChildren();
+            });
             label('quiz-label-confirm', 'auth.confirm');
             hint('quiz-auth-password', 'auth.passwordHint');
             hint('quiz-auth-confirm', 'auth.repeatPlaceholder');
@@ -1396,6 +1470,42 @@ export class AppComponent implements OnInit, OnDestroy {
               { username, password },
             ).pipe(timeout(15000)));
           } catch (error: unknown) {
+            if (isRegister && error instanceof HttpErrorResponse && error.status === 409) {
+              const host = Swal.getPopup()?.querySelector<HTMLElement>('#quiz-username-suggestions');
+              if (host) {
+                host.replaceChildren();
+                try {
+                  const response = await firstValueFrom(this.http.get<{ suggestions: string[] }>(
+                    '/api/auth/username-suggestions', { params: { username } }
+                  ).pipe(timeout(10000)));
+                  const popup = Swal.getPopup();
+                  if (popup && host.isConnected && response.suggestions.length) {
+                    const caption = document.createElement('p');
+                    caption.textContent = this.locale.t('auth.suggestionsIntro');
+                    host.appendChild(caption);
+                    for (const suggestion of response.suggestions) {
+                      const button = document.createElement('button');
+                      button.type = 'button';
+                      button.className = 'quiz-username-option';
+                      button.textContent = suggestion;
+                      button.addEventListener('click', () => {
+                        const field = popup.querySelector<HTMLInputElement>('#quiz-auth-username');
+                        if (field) {
+                          field.value = suggestion;
+                          field.focus();
+                        }
+                        host.replaceChildren();
+                        Swal.resetValidationMessage();
+                      });
+                      host.appendChild(button);
+                    }
+                  }
+                } catch {
+                  // Registration still reports the original collision;
+                  // name suggestions are an optional enhancement.
+                }
+              }
+            }
             Swal.showValidationMessage(this.locale.t(this.authErrorMessage(error, mode)));
             return false;
           }
@@ -1989,6 +2099,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.spendableStars = emptyStars();
     }
     this.account = account;
+    this.aboutClaimed = false;
     this.authLoading = false;
     this.locale.load(account.ui_language || 'en');
     this.discoverResetCapability(account.id);
@@ -2008,6 +2119,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoreVersion++;
     this.restoringGame = false;
     this.account = null;
+    this.aboutOpen = false;
+    this.aboutClaimed = false;
+    this.aboutStatusLoading = false;
+    this.aboutBusy = false;
+    this.aboutError = '';
     this.totalStars = emptyStars();
     this.spendableStars = emptyStars();
     this.gamesPlayed = 0;
