@@ -2770,9 +2770,19 @@ test('thumb controls share the question-number row and use neutral SVG icons', (
   assert.match(css, /\.question-heading-row\s*\{[^}]*align-items:\s*center/);
 });
 
-test('answer feedback allows complaints regardless of correctness', () => {
+test('complaint action stays in the top-right header on both question and feedback screens', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(template, /<button \*ngIf="current" type="button"\s+class="outline-button appeal-report-button" \(click\)="openAppealForm\(\)"/);
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const topline = template.slice(template.indexOf('<div class="card-topline">'), template.indexOf('</div>', template.indexOf('<div class="card-topline">')));
+  assert.match(topline, /screen === 'question' && !questionLoading/);
+  assert.match(topline, /screen === 'feedback'/);
+  assert.match(topline, /class="outline-button appeal-header-button"/);
+  assert.match(topline, /\(click\)="openAppealForm\(\)"/);
+  assert.match(topline, /appealedQuestionIds\.has\(current\.question_id\)/);
+  const feedback = template.slice(template.indexOf('<div *ngIf="screen === \'feedback\' && feedback as result"'), template.indexOf('<div *ngIf="screen === \'done\'"'));
+  assert.doesNotMatch(feedback, /appeal-report-button|openAppealForm\(\)/, 'feedback must not create a second complaint button');
+  assert.equal((template.match(/\(click\)="openAppealForm\(\)"/g) ?? []).length, 1);
+  assert.match(css, /\.card-topline \.appeal-header-button\s*\{/);
   assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
   assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
 });
