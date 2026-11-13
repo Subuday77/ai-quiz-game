@@ -2773,7 +2773,7 @@ test('thumb controls share the question-number row and use neutral SVG icons', (
 test('complaint action stays in the top-right header on both question and feedback screens', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
-  const topline = template.slice(template.indexOf('<div class="card-topline">'), template.indexOf('</div>', template.indexOf('<div class="card-topline">')));
+  const topline = template.slice(template.indexOf('<div class="card-topline">'), template.indexOf('<h1 *ngIf="screen === \'setup\'">'));
   assert.match(topline, /screen === 'question' && !questionLoading/);
   assert.match(topline, /screen === 'feedback'/);
   assert.match(topline, /class="outline-button appeal-header-button"/);
