@@ -366,7 +366,9 @@ class AdjacentCategoryFamilyTests(unittest.TestCase):
                     )
                 seen.append(category)
                 answer = self.client.post(self.base + "/answer", json={
-                    "question_id": response.json()["question_id"], "answer": "B",
+                    "question_id": response.json()["question_id"],
+                    "answer": next(k for k, v in response.json()["answers"].items()
+                                   if v == "correct B"),
                 })
                 self.assertEqual(answer.status_code, 200, answer.text)
         self.assertEqual(len(seen), 15)

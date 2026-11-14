@@ -156,8 +156,10 @@ class PersistentGameAPITests(unittest.TestCase):
         finished_id = self.start("Russian")
         q = self.client.get(f"/api/v2/games/{finished_id}/question")
         self.assertEqual(q.status_code, 200, q.text)
+        shown = q.json()
+        wrong = next(k for k, v in shown["answers"].items() if v != "Mars")
         loss = self.client.post(f"/api/v2/games/{finished_id}/answer", json={
-            "question_id": q.json()["question_id"], "answer": "A",
+            "question_id": shown["question_id"], "answer": wrong,
         })
         self.assertEqual(loss.status_code, 200, loss.text)
         self.assertEqual(loss.json()["phase"], "lost")

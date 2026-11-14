@@ -242,8 +242,13 @@ class GlobalPoolTests(unittest.TestCase):
         with patch("api.generate_valid_question", return_value=first_candidate):
             first = self.request()
         self.assertEqual(first.status_code, 200, first.text)
+        with Session(self.engine) as db:
+            generated = db.get(Question, UUID(first.json()["question_id"]))
+            correct_text = generated.choices[generated.correct_key]
+        visible_correct = next(k for k, value in first.json()["answers"].items()
+                               if value == correct_text)
         answer = self.client.post(f"/api/v2/games/{self.run_id}/answer", json={
-            "question_id": first.json()["question_id"], "answer": "B",
+            "question_id": first.json()["question_id"], "answer": visible_correct,
         })
         self.assertEqual(answer.status_code, 200, answer.text)
         with Session(self.engine) as db:
