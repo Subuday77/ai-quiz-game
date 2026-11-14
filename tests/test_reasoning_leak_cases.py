@@ -11,7 +11,7 @@ from question_schema import QuizQuestion
 
 
 def fixture_cases():
-    script = ast.parse((ROOT / "test_openai_reviewer_v2.py").read_text(encoding="utf-8"))
+    script = ast.parse((ROOT / "tests" / "fixtures" / "reasoning_leak_cases.py").read_text(encoding="utf-8"))
     for stmt in script.body:
         if isinstance(stmt, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == "REASONING_CASES"
