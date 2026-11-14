@@ -125,6 +125,7 @@ interface AppealQuote {
 }
 interface AppealRecord {
   id: string; question_id: string; question_number: number; language: string;
+  before_answer: boolean;
   status: string; display_status?: string; submitted_at: string; closed_at: string | null;
   question_snapshot: AppealQuote['question_snapshot'];
   reasons: string[]; comment: string; source_links: string[];
