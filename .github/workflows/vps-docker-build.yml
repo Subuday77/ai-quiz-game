@@ -36,8 +36,8 @@ jobs:
           assert "OPENAI_MODEL_ID=gpt-5.4" in text
           assert "AI_LOCALIZER_BASE_URL=http://localizer-api:8080" in text
           assert "AI_LOCALIZER_API_KEY=REPLACE_WITH_QUIZ_LOCALIZER_SECRET" in text
-          assert config["networks"]["localizer_private"]["external"] is True
           config = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"]))
+          assert config["networks"]["localizer_private"]["external"] is True
           assert config["services"]["backend"]["environment"]["AUTH_COOKIE_SECURE"] == "true"
           assert all(not config["services"][s].get("ports") for s in ("db", "backend"))
           PY
