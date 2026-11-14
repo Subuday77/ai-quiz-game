@@ -7,6 +7,7 @@ for this question; all 24 permutations remain available over time.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from itertools import permutations
 from secrets import choice
 
@@ -60,5 +61,9 @@ def display_choices(order: str | None, choices: dict) -> dict[str, str]:
     return {letter: choices[source] for letter, source in zip(LETTERS, _order(order))}
 
 
-def display_scores(order: str | None, scores: dict | None) -> dict | None:
-    return display_choices(order, scores) if scores is not None else None
+def display_scores(order: str | None, scores: Mapping | None) -> dict | None:
+    # Incomplete legacy scores must make Platinum abstain, not raise.
+    if not isinstance(scores, Mapping) or any(key not in scores for key in LETTERS):
+        return None
+    return {letter: scores[source] for letter, source in
+            zip(LETTERS, _order(order))}

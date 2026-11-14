@@ -360,6 +360,47 @@ class PlatinumHelperPersistenceTests(unittest.TestCase):
         self.assertEqual(_recent_speech_history(self.db, own.id),
                          ["Не знаю, тут пас."])
 
+    def test_shuffled_helper_know_uses_visible_letter(self):
+        self.purchase()
+        question, attempt = self.issue_question()
+        attempt.choice_order = "CABD"  # Display A is canonical C (correct).
+        self.db.commit()
+        with patch("platinum_helper.service.choose_outcome", return_value="KNOW"):
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="shuffle-know", rng=Random(9),
+            )
+        self.assertEqual(payload["letter"], "A")
+        self.assertEqual(payload["choices"], {
+            "A": "300", "B": "100", "C": "200", "D": "400",
+        })
+        self.assertEqual(payload["correct_option_text"], "300")
+
+    def test_shuffled_helper_mistake_respects_hidden_options(self):
+        from persistence.gameplay import hidden_choices
+        self.purchase()
+        question, attempt = self.issue_question()
+        attempt.choice_order = "CABD"
+        attempt.hints_used = 1
+        self.db.add(QuestionReview(
+            question_id=question.id, checker_type="generator_plausibility",
+            provider="test", contract_version="generator_plausibility_v1",
+            decision="unverified_estimate", details={
+                "scores": {"A": 85, "B": 15, "C": 100, "D": 5},
+            },
+        ))
+        self.db.commit()
+        with patch("platinum_helper.service.choose_outcome", return_value="MISTAKEN"):
+            _, _, _, payload = reserve_call(
+                self.db, user_id=self.user.id, run_id=self.run.id,
+                question_id=question.id, request_key="shuffle-mistake",
+                rng=Random(3),
+            )
+        self.assertEqual(payload["outcome"], "MISTAKEN")
+        self.assertEqual(payload["letter"], "B")  # Canonical A is display B.
+        self.assertEqual(payload["choices"]["B"], "100")
+        self.assertNotIn(payload["letter"], hidden_choices(self.db, attempt, question))
+
     def test_plausible_mistake_uses_saved_generator_scores(self):
         self.purchase()
         question, attempt = self.issue_question()

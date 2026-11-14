@@ -25,7 +25,7 @@ the older `master`. PR #24 is still draft; validate it before release.
   Store `.env` as mode 0600; never commit it.
 - The API has built-in periodic appeal/vote maintenance. Run a **single**
   Uvicorn worker until duplicate worker scheduling has been assessed.
-- Database schema: the latest Alembic migration is 0013. **Back up data**
+- Database schema: the latest Alembic migration is 0014 (per-attempt option order). **Back up data**
   before any future migration on an existing PostgreSQL instance.
 - **Do not silently omit question safeguards.** Keep
   `AI_TAG_DEDUP_ENABLED=true`, `AI_QUALITY_MODE=enforce`,

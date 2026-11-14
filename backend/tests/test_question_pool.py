@@ -515,6 +515,53 @@ class GlobalPoolTests(unittest.TestCase):
             self.assertTrue(issued.is_correct)
         generate.assert_not_called()
 
+    def test_shuffled_hints_and_appeal_snapshot_show_player_letters(self):
+        from persistence.choice_order import display_choices, display_key
+        existing_id = self.seed_other_user_question()
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ):
+            served = self.request()
+        self.assertEqual(served.status_code, 200, served.text)
+        with Session(self.engine) as db:
+            attempt = db.scalar(select(QuestionAttempt)
+                .where(QuestionAttempt.run_id == self.run_id))
+            question = db.get(Question, existing_id)
+            expected_all = display_choices(attempt.choice_order, question.choices)
+            visible_correct = display_key(attempt.choice_order, question.correct_key)
+            attempt.hints_used = 1
+            db.commit()
+
+        recovered = self.request()
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        shown = recovered.json()
+        self.assertEqual(len(shown["answers"]), 3)
+        self.assertEqual(shown["answers"][visible_correct], expected_all[visible_correct])
+        removed = set("ABCD") - set(shown["answers"])
+        self.assertEqual(len(removed), 1)
+        self.assertNotIn(visible_correct, removed)
+        quote = self.client.get(
+            f"/api/v2/games/{self.run_id}/appeals/{existing_id}/quote"
+        )
+        self.assertEqual(quote.status_code, 200, quote.text)
+        snapshot = quote.json()["question_snapshot"]
+        self.assertEqual(snapshot["answers"], expected_all)
+        self.assertEqual(set(snapshot["hidden_keys"]), removed)
+
+        wrong_key = next(key for key in shown["answers"] if key != visible_correct)
+        lost = self.client.post(f"/api/v2/games/{self.run_id}/answer", json={
+            "question_id": str(existing_id), "answer": wrong_key,
+        })
+        self.assertEqual(lost.status_code, 200, lost.text)
+        self.assertFalse(lost.json()["correct"])
+        self.assertEqual(lost.json()["correct_answer"], visible_correct)
+        self.assertEqual(lost.json()["phase"], "lost")
+        replay = self.client.get(
+            f"/api/v2/games/{self.run_id}/appeals/lost-question"
+        )
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["answers"], shown["answers"])
+
     def test_pool_inspection_uses_original_q1_category_after_game_is_lost(self):
         """Regression: a completed Q1 moves the live category rotation."""
         from persistence.gameplay import record_answer

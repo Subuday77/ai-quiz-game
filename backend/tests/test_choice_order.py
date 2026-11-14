@@ -34,6 +34,10 @@ class ChoiceOrderTests(unittest.TestCase):
         })
         self.assertEqual(display_key(order, "B"), "A")
         self.assertIsNone(display_scores(order, None))
+        self.assertIsNone(display_scores(order, {"A": 10, "B": 20}))
+        self.assertEqual(display_scores(order, {**scores, "meta": 1}), {
+            "A": 90, "B": 43, "C": 55, "D": 12,
+        })
 
     def test_corrupt_permutations_fail_closed(self):
         for order in ("AAAA", "ABCDX", "ABC", "ABCE"):
