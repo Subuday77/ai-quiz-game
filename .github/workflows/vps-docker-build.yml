@@ -1,5 +1,8 @@
 name: VPS Docker build checks
 on:
+  push:
+    branches:
+      - master
   pull_request:
     paths:
       - compose.yaml

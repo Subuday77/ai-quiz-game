@@ -1,7 +1,9 @@
 # VPS release candidate — NOT approved for public deployment
 
-This branch is based on `feature/question-votes-pool-first-20261110`, **not**
-the older `master`. PR #24 is still draft; validate it before release.
+The integrated source can be merged to `master`, but a source merge is **not**
+a public production release. The privately tested VPS may remain on
+`feature/vps-release-prep-20261113` until an immutable release tag has passed
+all public-release gates below.
 
 ## Preflight
 

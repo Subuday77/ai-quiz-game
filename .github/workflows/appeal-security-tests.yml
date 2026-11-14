@@ -2,7 +2,7 @@ name: Appeals security and policy
 on:
   push:
     branches:
-      - feature/question-appeals-v2-20261109
+      - master
   pull_request:
   workflow_dispatch:
 
