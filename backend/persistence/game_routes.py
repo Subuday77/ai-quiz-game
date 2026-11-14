@@ -661,13 +661,26 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 return None
 
         if pool_search_categories:
-            for pool_category in pool_search_categories:
-                pooled = offer_pool(pool_category, probability_filter=True)
-                if pooled is not None:
-                    event("question_source_selected", source="pool",
-                          order=source_order, number=question_number,
-                          category=pool_category)
-                    return _public(*pooled, phase="main", db=db)
+            # All allowed categories in ONE ranked SQL candidate query. Keep
+            # primary-category preference and per-topic sampling limits.
+            try:
+                pooled = offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id,
+                    category=pool_search_categories[0],
+                    search_categories=pool_search_categories,
+                    max_candidates=pool_settings[2], rating_filter=True,
+                )
+            except Exception as exc:
+                event("question_pool_fallback_failed", error_type=type(exc).__name__)
+                db.rollback()
+                pooled = None
+            if pooled is not None:
+                selected_topic = db.get(Topic, pooled[1].topic_id)
+                event("question_source_selected", source="pool",
+                      order=source_order, number=question_number,
+                      category=(selected_topic.labels.get("en")
+                                if selected_topic else None))
+                return _public(*pooled, phase="main", db=db)
             event("ai_fallback", reason="no_db_admitted", number=question_number)
 
         for category_attempt, proposed_category in enumerate(categories_to_try):

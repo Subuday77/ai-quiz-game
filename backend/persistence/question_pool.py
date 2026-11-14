@@ -8,6 +8,7 @@ row locks, matching normal tagged-question persistence.
 import os
 import random
 from datetime import datetime, timezone
+from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy import exists, func, select
@@ -158,6 +159,7 @@ def offer_approved_pool_question(
     category: str, max_candidates: int | None = None,
     expected_bonus_topic_index: int | None = None,
     rating_filter: bool = False,
+    search_categories: Sequence[str] | None = None,
     replace_question_id: UUID | None = None,
     replace_attempt_id: UUID | None = None,
     replace_manual: bool = False,
@@ -173,6 +175,10 @@ def offer_approved_pool_question(
     same transaction as the new attempt, never on a pool miss.
     The SQL anti-join prevents exact repeats; require_unique also prevents
     fact/tag/semantic repeats, including those across the user's languages.
+
+    search_categories enables a single ranked SQL candidate query for DB First:
+    per-category scan limit and first-admitted-category priority are preserved.
+    Paid changes and Q16 intentionally retain the original one-topic path.
     """
     if max_candidates is None:
         max_candidates = scan_limit()
@@ -182,6 +188,16 @@ def offer_approved_pool_question(
     duplicate = 0
     admitted = []
     bonus_unverified = 0
+    multi = search_categories is not None
+    if multi:
+        if replace_question_id is not None or not rating_filter:
+            raise ValueError("Multi-category pool scan is only for unmodified DB First")
+        ordered_categories = list(search_categories)
+        if not ordered_categories or ordered_categories[0] != category or len(
+                ordered_categories) != len(set(ordered_categories)):
+            raise ValueError("Invalid ordered DB First categories")
+    else:
+        ordered_categories = [category]
     try:
         # Serialize concurrent assignments, including other game runs owned
         # by the same user. Acquire locks in the same order as offer_question.
@@ -199,6 +215,18 @@ def offer_approved_pool_question(
                 raise GameConflict("Category excluded from this game")
             db.rollback()
             return None
+        if multi:
+            # Never let an unrestricted SQL IN clause resurrect excluded or
+            # answered categories. The route derives this list from game state,
+            # but enforce it again under the user/run locks.
+            allowed = set(allowed_categories(run))
+            available = set(available_categories(
+                db, run, game_state(run, db).main_question_index + 1,
+            ))
+            if run.status != "main" or any(
+                    item not in allowed or item not in available
+                    for item in ordered_categories):
+                raise GameConflict("Invalid DB First category scan")
         old_attempt = None
         switch_price = None
         if replacing:
@@ -234,6 +262,9 @@ def offer_approved_pool_question(
         game_progress = game_state(run, db)
         difficulty = game_progress.current_difficulty
         category_key = category_slug(category)
+        category_by_slug = {category_slug(item): item for item in ordered_categories}
+        if len(category_by_slug) != len(ordered_categories):
+            raise ValueError("Duplicate DB First category slugs")
         review_exists = exists(
             select(QuestionReview.id).where(
                 QuestionReview.question_id == Question.id,
@@ -264,14 +295,14 @@ def offer_approved_pool_question(
         )
         center = rating_center() if rating_filter else 0.0
         scale = rating_scale() if rating_filter else 1.0
-        ids = db.scalars(
-            select(Question.id)
+        eligible_query = (
+            select(Question.id.label("question_id"), Topic.slug.label("topic_slug"))
             .join(Topic, Topic.id == Question.topic_id)
             .where(
                 Question.status == "approved",
                 Question.language == run.language,
                 Question.requested_difficulty == difficulty,
-                Topic.slug == category_key,
+                Topic.slug.in_(tuple(category_by_slug)),
                 review_exists,
                 fact_exists,
                 ~seen_by_user,
@@ -279,51 +310,92 @@ def offer_approved_pool_question(
                 ~pending_community_review,
                 Question.working_vote_score > community_vote_threshold(),
             )
-            # Candidate order remains random in Model First. In DB First,
-            # each verified eligible candidate is admitted independently.
-            .order_by(func.random())
-            .limit(max_candidates)
-        ).all()
-        if not ids:
+        )
+        if multi:
+            # ONE SQL candidate query, with the same max_candidates limit PER
+            # category as the old 45 sequential queries (not a global LIMIT).
+            # Window ordering is randomized within each category.
+            ranked = eligible_query.add_columns(
+                func.row_number().over(
+                    partition_by=Topic.slug, order_by=func.random(),
+                ).label("pool_rank"),
+            ).subquery()
+            records = db.execute(
+                select(ranked.c.question_id, ranked.c.topic_slug)
+                .where(ranked.c.pool_rank <= max_candidates)
+                .order_by(ranked.c.topic_slug, ranked.c.pool_rank)
+            ).all()
+        else:
+            records = db.execute(
+                eligible_query.where(Topic.slug == category_key)
+                .order_by(func.random()).limit(max_candidates)
+            ).all()
+        ids_by_category = {slug: [] for slug in category_by_slug}
+        for question_id, slug in records:
+            ids_by_category[slug].append(question_id)
+
+        if not records:
             db.rollback()
-            event("question_pool_fallback", outcome="empty", examined=0,
-                  requested_difficulty=difficulty)
+            if multi:
+                event("db_first_scan", categories_scanned=len(ordered_categories),
+                      candidate_rows=0, checked=0, admitted=0,
+                      outcome="empty", requested_difficulty=difficulty)
+            else:
+                event("question_pool_fallback", outcome="empty", examined=0,
+                      requested_difficulty=difficulty)
             return None
 
         # Re-read history AFTER acquiring the user lock: another game run
         # may have just shown the same fact even if it was never answered.
         history = history_for_user(db, user_id)
-        for question_id in ids:
-            checked += 1
-            saved = db.get(Question, question_id)
-            if saved is None or saved.status != "approved":
-                continue
-            if run.status == "bonus" and not _eligible_for_bonus_reuse(db, saved):
-                bonus_unverified += 1
-                continue
-            candidate = _tagged_from_saved(db, saved)
-            if candidate is None:
-                continue
-            try:
-                require_unique(candidate, history)
-            except DuplicateQuestionError:
-                duplicate += 1
-                continue
-            if rating_filter:
-                probability = admission_probability(
-                    saved.working_vote_score, center=center, scale=scale,
-                )
-                if random.random() >= probability:
+        selected_category = category
+        for slug, category_name in category_by_slug.items():
+            # Preserve semantics: attempt every candidate in primary category;
+            # only if none is admitted, move to the next allowed category.
+            candidates_for_category = []
+            for question_id in ids_by_category[slug]:
+                checked += 1
+                saved = db.get(Question, question_id)
+                if saved is None or saved.status != "approved":
                     continue
-                admitted.append(saved)
-            else:
-                admitted = [saved]
+                if run.status == "bonus" and not _eligible_for_bonus_reuse(db, saved):
+                    bonus_unverified += 1
+                    continue
+                candidate = _tagged_from_saved(db, saved)
+                if candidate is None:
+                    continue
+                try:
+                    require_unique(candidate, history)
+                except DuplicateQuestionError:
+                    duplicate += 1
+                    continue
+                if rating_filter:
+                    probability = admission_probability(
+                        saved.working_vote_score, center=center, scale=scale,
+                    )
+                    if random.random() >= probability:
+                        continue
+                    candidates_for_category.append(saved)
+                else:
+                    candidates_for_category = [saved]
+                    break
+            if candidates_for_category:
+                admitted = candidates_for_category
+                selected_category = category_name
                 break
 
-        event("db_pool_candidates", count=len(ids), checked=checked,
-              passed_quality=len(admitted) if not rating_filter else None)
-        if rating_filter:
-            event("db_admitted", count=len(admitted), center=center, scale=scale)
+        if multi:
+            event("db_first_scan", categories_scanned=len(ordered_categories),
+                  candidate_rows=len(records), checked=checked,
+                  admitted=len(admitted), duplicate_skips=duplicate,
+                  selected_category=selected_category if admitted else None,
+                  outcome="hit" if admitted else "no_admitted",
+                  requested_difficulty=difficulty)
+        else:
+            event("db_pool_candidates", count=len(records), checked=checked,
+                  passed_quality=len(admitted) if not rating_filter else None)
+            if rating_filter:
+                event("db_admitted", count=len(admitted), center=center, scale=scale)
         if admitted:
             saved = random.choice(admitted) if rating_filter else admitted[0]
             # The community threshold can be crossed by another player while
@@ -372,15 +444,18 @@ def offer_approved_pool_question(
             db.add(attempt)
             db.commit()
             db.refresh(attempt)
-            event("question_pool_fallback", outcome="hit", examined=checked,
-                  duplicate_skips=duplicate, unverified_bonus_skips=bonus_unverified,
-                  requested_difficulty=difficulty)
+            if not multi:
+                event("question_pool_fallback", outcome="hit", examined=checked,
+                      duplicate_skips=duplicate, unverified_bonus_skips=bonus_unverified,
+                      requested_difficulty=difficulty)
             if rating_filter:
                 event("db_first_hit", question_id=str(saved.id),
                       requested_difficulty=difficulty)
             return attempt, saved
 
         db.rollback()
+        if multi:
+            return None  # Aggregated db_first_scan event already emitted.
         event("question_pool_fallback",
               outcome="no_admitted" if rating_filter else
               "no_verified_bonus" if bonus_unverified and run.status == "bonus"

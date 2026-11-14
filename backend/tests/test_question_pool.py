@@ -205,6 +205,79 @@ class GlobalPoolTests(unittest.TestCase):
             stored = db.get(Question, pooled_id)
             self.assertEqual(db.get(Topic, stored.topic_id).labels["en"], secondary)
 
+    def test_db_first_queries_all_categories_once_and_keeps_order(self):
+        """A late-category hit uses one ranked SQL candidate scan, not N scans."""
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            categories = _main_pool_search_categories(db, run, 1, self.category)
+            self.assertGreater(len(categories), 10)
+            late_category = categories[-1]
+        pooled = self.seed_other_user_question(category=late_category)
+        ranked_queries = []
+
+        def observe(conn, cursor, statement, parameters, context, many):
+            if "row_number(" in statement.lower() and "questions" in statement.lower():
+                ranked_queries.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", observe)
+        try:
+            with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+                "persistence.question_pool.random.random", return_value=0.0
+            ), patch("api.generate_valid_question") as ai:
+                response = self.request()
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["question_id"], str(pooled))
+            self.assertEqual(len(ranked_queries), 1)
+            ai.assert_not_called()
+        finally:
+            event.remove(self.engine, "before_cursor_execute", observe)
+
+    def test_db_first_prefers_primary_admission_over_later_category(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            categories = _main_pool_search_categories(db, run, 1, self.category)
+            secondary = categories[-1]
+        primary_id = self.seed_other_user_question(category=self.category)
+        secondary_id = self.seed_other_user_question(
+            category=secondary,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(primary_id))
+        self.assertNotEqual(response.json()["question_id"], str(secondary_id))
+        ai.assert_not_called()
+
+    def test_db_first_moves_to_later_category_on_rejected_rating(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            categories = _main_pool_search_categories(db, run, 1, self.category)
+            secondary = categories[-1]
+        primary_id = self.seed_other_user_question(category=self.category)
+        secondary_id = self.seed_other_user_question(
+            category=secondary,
+            question=candidate(relation="nobel-prize-reason",
+                               concept="photoelectric-effect",
+                               answer="photoelectric-effect"),
+        )
+        with Session(self.engine) as db:
+            db.get(Question, primary_id).working_vote_score = -2
+            db.get(Question, secondary_id).working_vote_score = 7
+            db.commit()
+        # Sigmoid(-2) ~0.45 rejects 0.6; sigmoid(7) ~0.67 admits it.
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.6
+        ), patch("api.generate_valid_question") as ai:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(secondary_id))
+        ai.assert_not_called()
+
     def test_pool_first_skips_paid_excluded_category(self):
         self._silver_credit(5)
         excluded = self.category
