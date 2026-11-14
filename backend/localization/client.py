@@ -55,7 +55,8 @@ async def translate_missing(missing: dict[str, str], code: str) -> dict[str, str
     internal_http = endpoint == f"http://{_INTERNAL_LOCALIZER_HOST}:{_INTERNAL_LOCALIZER_PORT}/translate"
     if internal_http and not api_key:
         raise LocalizationUnavailable("AI_LOCALIZER_API_KEY is required for internal Localizer")
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    # Never forward the internal key to a legacy/rollback HTTPS endpoint.
+    headers = {"Authorization": f"Bearer {api_key}"} if internal_http else {}
 
     try:
         async with httpx.AsyncClient(
