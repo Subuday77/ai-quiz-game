@@ -36,6 +36,35 @@ _JSON_HINT = (
     "The previous response was not valid JSON. Return one complete JSON object "
     "matching the required output contract; no Markdown fences or extra text."
 )
+# Never pass the old question, answer key, critic rationale, or model output
+# back to the generator. A fixed server-authored hint is enough.
+_ANSWER_LEAK_HINT = (
+    "Your previous candidate was rejected because the question stem itself "
+    "revealed one answer through an identical or inflected word/root. "
+    "Choose a DIFFERENT fact and wording. Do not ask which fruit is in a "
+    "fruit-named cake or which vegetable is in a vegetable-named dish. "
+    "Make every option require knowledge beyond matching a word or its "
+    "adjective form in the stem, even at difficulty zero."
+)
+
+
+def quality_retry_hint(question: object) -> str | None:
+    """Return only a static server-approved instruction for a proven leak.
+
+    A reviewer's or Terra's free-form rationale is NEVER included.
+    Unclassified quality failures are not assumed to be answer leaks.
+    """
+    report = getattr(question, "_review_report", None)
+    if not isinstance(report, dict):
+        return None
+    details = report.get("details")
+    arbitration = details.get("arbitration") if isinstance(details, dict) else None
+    arbiter_issues = arbitration.get("issues", []) if isinstance(arbitration, dict) else []
+    review_issues = report.get("issues", [])
+    if (isinstance(arbiter_issues, list) and "answer_leak" in arbiter_issues
+            or isinstance(review_issues, list) and "answer_leak" in review_issues):
+        return _ANSWER_LEAK_HINT
+    return None
 
 
 def _only_entity_too_long(exc: ValidationError) -> bool:
@@ -98,4 +127,5 @@ def is_known_retry_feedback(value: object) -> bool:
     """Only allow predefined guidance, never arbitrary prompt text."""
     return isinstance(value, str) and value in (
         _ENTITY_HINT, _SCHEMA_HINT, _DIFFICULTY_HINT, _JSON_HINT,
+        _ANSWER_LEAK_HINT,
     )

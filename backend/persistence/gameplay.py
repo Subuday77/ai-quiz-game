@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from game_logic import AnswerResult, GameState
 from persistence.models import GameRun, Question, QuestionAttempt, QuestionReview, StarAward, Topic, User
+from persistence.choice_order import display_key, last_choice_order, new_choice_order
 from persistence.seed_topics import category_slug
 from question_schema import Choice, QuizQuestion
 
@@ -293,6 +294,7 @@ def offer_question(
                       ))) + 1),
             category_change_count=old_attempt.category_change_count + 1 if replacing else 0,
             manual_category_used=old_attempt.manual_category_used + (1 if replace_manual else 0) if replacing else 0,
+            choice_order=new_choice_order(last_choice_order(db, stored.id)),
         )
         db.add(attempt)
         if run.status == "bonus":
@@ -307,7 +309,7 @@ def offer_question(
 
 def record_answer(
     db: Session, *, run_id: UUID, user_id: UUID,
-    question_id: UUID, selected: Choice,
+    question_id: UUID, selected: Choice, vote: int = 0,
 ) -> tuple[AnswerResult, str]:
     """Accept a single answer, commit progress and star award atomically.
 
@@ -329,10 +331,20 @@ def record_answer(
         attempt, question = cached
         if question.id != question_id or question.status != "approved":
             raise GameConflict("No matching approved unanswered question")
+        # A concurrent player's accepted vote may have just quarantined this
+        # shared question. Recheck under the question lock before answering.
+        question = db.scalar(select(Question).where(
+            Question.id == question_id,
+        ).with_for_update().execution_options(populate_existing=True))
+        if question is None or question.status != "approved":
+            raise GameConflict("Question has been withdrawn")
 
         now = _now()
         state = game_state(run, db)
-        is_correct = selected == question.correct_key
+        # The answer letter is the one displayed to THIS attempt. The shared
+        # Question.correct_key remains canonical and never changes on reuse.
+        visible_correct = display_key(attempt.choice_order, question.correct_key)
+        is_correct = selected == visible_correct
         result = state.submit_answer(is_correct)
 
         attempt.answered_at = now
@@ -357,10 +369,15 @@ def record_answer(
         if was_bonus and is_correct:
             from persistence.bonus_wager import credit_won_gold
             credit_won_gold(db, run=run)
+        # Answer, final immutable vote, both ratings and a possible
+        # moderation trigger are one ACID transaction. Never count a draft.
+        from persistence.question_votes import record_final_vote
+        record_final_vote(db, question=question, user_id=user_id,
+                          run_id=run.id, value=vote)
         # If the wager is lost, its earlier debit remains and the earned
         # gold award stays untouched as an immutable achievement.
         db.commit()
-        return result, question.correct_key
+        return result, visible_correct
     except Exception:
         db.rollback()
         raise
@@ -448,10 +465,11 @@ def hidden_choices(db: Session, attempt: QuestionAttempt,
         return ()
     if attempt.hints_used not in (1, 2):
         raise GameConflict("Invalid hidden answer count")
-    return choose_to_hide(
+    canonical_hidden = choose_to_hide(
         question.correct_key, question_plausibility(db, question.id),
         count=attempt.hints_used, rng=random.Random(attempt.id.int),
     )
+    return tuple(display_key(attempt.choice_order, key) for key in canonical_hidden)
 
 
 def hide_wrong_options(

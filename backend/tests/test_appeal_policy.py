@@ -11,6 +11,51 @@ from persistence.appeal_policy import (
 )
 
 
+class AppealDisplayStatusTests(unittest.TestCase):
+    def test_first_processing_lease_is_not_mislabelled_as_technical_retry(self):
+        from types import SimpleNamespace
+        from persistence.appeal_routes import _appeal_display_status
+        now = datetime(2026, 11, 10, 16, 29, 30, tzinfo=timezone.utc)
+        lease = SimpleNamespace(
+            status="retry_pending",
+            next_retry_at=now + timedelta(minutes=30),
+            judge_attempts=0,
+        )
+        self.assertEqual(_appeal_display_status(lease, now=now), "pending")
+        self.assertEqual(
+            _appeal_display_status(SimpleNamespace(
+                status="pending", next_retry_at=None), now=now),
+            "pending",
+        )
+
+    def test_only_actual_deferred_retry_gets_retry_label(self):
+        from types import SimpleNamespace
+        from persistence.appeal_routes import _appeal_display_status
+        now = datetime(2026, 11, 10, 16, 29, 30, tzinfo=timezone.utc)
+        delayed = SimpleNamespace(
+            status="retry_pending",
+            next_retry_at=now + timedelta(days=1),
+            judge_attempts=1,
+        )
+        self.assertEqual(_appeal_display_status(delayed, now=now), "retry_pending")
+        # Model conflicts can defer a retry before any Judge call; check
+        # the future deadline, not the attempts count.
+        delayed.judge_attempts = 0
+        self.assertEqual(_appeal_display_status(delayed, now=now), "retry_pending")
+        self.assertEqual(_appeal_display_status(
+            SimpleNamespace(status="upheld", next_retry_at=None), now=now), "upheld")
+
+    def test_expired_lease_does_not_appear_as_new_technical_error(self):
+        from types import SimpleNamespace
+        from persistence.appeal_routes import _appeal_display_status
+        now = datetime(2026, 11, 10, 16, 29, 30, tzinfo=timezone.utc)
+        item = SimpleNamespace(
+            status="retry_pending",
+            next_retry_at=now - timedelta(minutes=5),
+        )
+        self.assertEqual(_appeal_display_status(item, now=now), "pending")
+
+
 class AppealPolicyTests(unittest.TestCase):
     def test_monthly_fees_are_nonrefundable_and_progressively_doubled(self):
         self.assertEqual([appeal_fee_bronze(i) for i in range(10)],

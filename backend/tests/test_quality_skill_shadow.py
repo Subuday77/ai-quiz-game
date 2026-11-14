@@ -52,6 +52,130 @@ class ShadowSkillTests(unittest.TestCase):
         self.assertEqual(r["decision"], "observe_only")
         self.assertEqual(debug.call_count, 4)  # Three tools plus summary.
 
+    def test_acidic_acid_player_incident_flags_unique_noun_adjective_shortcut(self):
+        q = candidate(
+            "Which substance turns blue litmus paper red because it is acidic?",
+            {"A": "Sodium hydroxide solution",
+             "B": "Hydrochloric acid",
+             "C": "Ammonia solution",
+             "D": "Calcium carbonate"},
+            correct="B", difficulty=4,
+        )
+        report = evaluate_shadow(q, requested_difficulty=4)
+        lexical = [f for f in report["findings"] if f["tool"] == "lexical"]
+        self.assertEqual(len(lexical), 1)
+        self.assertEqual(lexical[0]["code"], "unique_noun_adjective_shortcut")
+        self.assertEqual(lexical[0]["evidence"]["question_token"], "acidic")
+        self.assertEqual(lexical[0]["evidence"]["option_token"], "acid")
+        self.assertEqual(lexical[0]["evidence"]["noun_adjective_family"], "acid")
+        self.assertEqual(lexical[0]["evidence"]["option"], "B")
+        self.assertTrue(report["would_arbitrate"])
+        self.assertIn("unique_noun_adjective_shortcut", report["arbitration_reasons"])
+        self.assertFalse(report["arbiter_called"])
+        self.assertEqual(report["decision"], "observe_only")
+        from local_leak_filter import exact_answer_leak
+        self.assertFalse(exact_answer_leak(q), "Shadow signals must not change hard leak gate")
+
+    def test_curated_noun_adjective_pairs_are_exact_and_symmetric(self):
+        cases = [
+            ("Which reagent is described as acidic?",
+             {"A": "Salt", "B": "Acid", "C": "Sugar", "D": "Water"}, "acid"),
+            ("Which classification is basic?",
+             {"A": "Compound", "B": "Base", "C": "Element", "D": "Ion"}, "base"),
+            ("Which material is magnetic?",
+             {"A": "Wood", "B": "Magnet", "C": "Plastic", "D": "Rubber"}, "magnet"),
+            ("Which adjective describes a base?",
+             {"A": "Metallic", "B": "Basic", "C": "Gaseous", "D": "Liquid"}, "base"),
+            ("Which adjective describes a magnet?",
+             {"A": "Transparent", "B": "Magnetic", "C": "Brittle", "D": "Volatile"},
+             "magnet"),
+        ]
+        for stem, choices, noun in cases:
+            with self.subTest(stem=stem):
+                report = evaluate_shadow(candidate(stem, choices, correct="B"),
+                                         requested_difficulty=9)
+                findings = [f for f in report["findings"] if f["tool"] == "lexical"]
+                self.assertEqual(len(findings), 1)
+                self.assertEqual(findings[0]["code"], "unique_noun_adjective_shortcut")
+                self.assertEqual(findings[0]["evidence"]["noun_adjective_family"], noun)
+                self.assertTrue(report["would_arbitrate"])
+
+    def test_short_pairs_require_one_option_and_do_not_lower_general_prefix_limit(self):
+        original = candidate(
+            "Which reagent is acidic?",
+            {"A": "Sugar", "B": "Hydrochloric acid",
+             "C": "Water", "D": "Salt"}, correct="B",
+        )
+        two_acids = original.model_copy(update={
+            "answers": {**original.answers, "A": "Acetic acid"},
+        })
+        double = evaluate_shadow(two_acids, requested_difficulty=9)
+        self.assertFalse([f for f in double["findings"] if f["tool"] == "lexical"])
+        # Pair is an exact token relation: no arbitrary short prefixes,
+        # e.g. acidity is not identical to the curated adjective acidic.
+        no_pair = original.model_copy(update={
+            "question": "Which reagent causes acidity?",
+        })
+        self.assertFalse([f for f in evaluate_shadow(
+            no_pair, requested_difficulty=9)["findings"] if f["tool"] == "lexical"])
+        unrelated = original.model_copy(update={
+            "question": "Which reagent is related to basements?",
+        })
+        self.assertFalse([f for f in evaluate_shadow(
+            unrelated, requested_difficulty=9)["findings"] if f["tool"] == "lexical"])
+        # A matching distractor is not a keyed leak or mandatory arbiter call.
+        distractor = original.model_copy(update={
+            "correct_answer": "C",
+        })
+        report = evaluate_shadow(distractor, requested_difficulty=9)
+        signals = [f for f in report["findings"] if f["tool"] == "lexical"]
+        self.assertEqual(signals[0]["code"], "distractor_word_overlap")
+        self.assertFalse(report["would_arbitrate"])
+
+    def test_prefixed_root_shortcut_is_shadow_only(self):
+        # The actual Q3 incident: a root inside a prefixed answer, rather
+        # than at the start of both tokens, escaped the previous detector.
+        q = candidate(
+            "Какая часть человеческого тела обычно называется коленной чашечкой?",
+            {"A": "Лопатка", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        report = evaluate_shadow(q, requested_difficulty=2)
+        signals = [f for f in report["findings"] if f["tool"] == "lexical"]
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0]["code"], "unique_prefixed_root_shortcut")
+        self.assertEqual(signals[0]["evidence"]["common_prefix"], "коленн")
+        self.assertEqual(signals[0]["evidence"]["prefix_in_option"], "над")
+        self.assertEqual(signals[0]["evidence"]["option"], "B")
+        self.assertTrue(report["would_arbitrate"])
+        self.assertFalse(report["arbiter_called"])
+        self.assertEqual(report["decision"], "observe_only")
+        # No changes to the independent, high-confidence publication veto.
+        from local_leak_filter import exact_answer_leak
+        self.assertFalse(exact_answer_leak(q))
+
+    def test_prefixed_root_requires_one_option_and_long_root(self):
+        q = candidate(
+            "Какая часть человеческого тела обычно называется коленной чашечкой?",
+            {"A": "Подколенная область", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        self.assertFalse([f for f in evaluate_shadow(
+            q, requested_difficulty=2)["findings"] if f["tool"] == "lexical"])
+        unrelated = candidate(
+            "Какая кость защищает сустав при прыжке?",
+            {"A": "Лопатка", "B": "Надколенник",
+             "C": "Локтевая кость", "D": "Ключица"},
+            correct="B", difficulty=2,
+        )
+        # A generic literal "кость" in the C distractor is a preexisting
+        # lexical finding, not a new prefixed-root match.
+        self.assertFalse([f for f in evaluate_shadow(
+            unrelated, requested_difficulty=2)["findings"]
+            if f["code"] == "unique_prefixed_root_shortcut"])
+
     def test_morphological_no_match_or_nonunique_match(self):
         clean = self.zircon.model_copy(update={
             "question": "Какой минерал сохраняет уран в кристаллической решетке?"

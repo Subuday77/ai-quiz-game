@@ -21,6 +21,33 @@ tag deduplication, before local leakage gates and the paid tagged reviewer.
   or historical private user questions. Optional DEBUG includes generated
   candidate snippets and is unsuitable for public/shared logs.
 
+## Curated short noun/adjective clues (2026-11-10)
+
+Real English Q4 slipped through both primary reviewer and lexical shadow:
+`Which substance turns blue litmus paper red because it is acidic?`
+with the only `acid`-named option `Hydrochloric acid`. The existing
+`QUIZ_QUALITY_LEXICAL_MIN_PREFIX=5` found no signal because `acid`
+has four letters.
+
+The lexical tool now recognizes **exact whole-token** curated pairs
+`acid ↔ acidic`, `base ↔ basic`, and `magnet ↔ magnetic`.
+The configured general minimum shared-root length is **unchanged**;
+other short coincidences are not guessed. Only one matching option
+is allowed to nominate a `unique_noun_adjective_shortcut`. Multiple
+matching options suppress that signal, while an overlap in a wrong
+option is recorded only as low-severity diagnostic evidence.
+Findings remain shadow-only and never directly reject a question.
+With optional `QUIZ_QUALITY_ARBITER_MODE=on`, a high-confidence keyed
+signal sends the candidate to Terra, which must independently decide
+whether the wording really leaks the answer. Both primary reviewer
+and Terra prompts mention these specific families. If Terra confirms
+an answer leak, the candidate is rejected through the existing bounded
+quality regeneration path.
+
+Regression tests cover the original English question, the paired
+word families in both directions, uniqueness, irrelevant four-letter
+overlaps and a primary-reviewer-pass / Terra-leak-veto scenario.
+
 ## Shadow configuration — independent weights
 
 | Environment variable | Default | Purpose |
@@ -82,6 +109,43 @@ from real game logs before turning on arbitration or authority.
 
 
 ## Source-backed false-fact guard and incident quarantine
+
+## Spatial comparison safety gate (2026-11-10)
+
+A confirmed player appeal found an apparently valid structured fact triple
+`ural-river / flows-into / caspian-sea` that dropped the critical literal
+restriction `южнее Волги`. The primary critic also evaluated only the weaker
+question and mistakenly approved the candidate.
+
+The Fact Tool now detects explicitly comparative directional phrases in
+Russian, English, German, French and Spanish, including `южнее Волги`,
+`к западу от Берлина`, `south of the Volga`. This is an *unknown-truth
+signal*, not a geography lookup or automatic verdict. In tagged
+`AI_QUALITY_MODE=enforce`, these candidates require independent Terra
+arbitration **even if** the generic `QUIZ_QUALITY_ARBITER_MODE=off` or
+`QUIZ_QUALITY_SKILL_MODE=off`. Other lexical/taxonomy/fact heuristics
+retain the usual shadow and optional arbitration behavior.
+
+Terra receives the exact extracted directional phrases and must inspect each
+as a distinct question condition. Its output must anchor every requirement
+in `stem_claims`; returning only a true endpoint/country fact without the
+spatial qualifier is a **quality rejection** (regenerate candidate), not an
+immediate HTTP 503. False or uncertain comparisons fail the same existing
+independent-review acceptance gate. Genuine model/provider outages retain
+normal fail-closed behavior. A correct comparative question can still be
+accepted when all qualifiers have explicit evidence.
+
+This is a second-model consistency check, **not independent geospatial source
+verification**. A hallucinated agreement by both models remains possible.
+Exact already-confirmed player-appeal wording is separately held by the
+existing known QA incident registry. Verified shared-pool questions still
+bypass new model calls as before.
+
+Regression command:
+
+```powershell
+python -m unittest tests.test_spatial_relation_guard tests.test_quality_arbitration_live tests.test_quality_skill_shadow -v
+```
 
 The shadow Fact Tool now nominates award + year (+ stated rationale) claims
 for independent evidence using `needs_source_verification:award_year_attribution`

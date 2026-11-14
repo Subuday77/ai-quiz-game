@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI Quiz Game">
+  <!-- Single bold mark, designed for readability at 16 by 16 pixels. -->
+  <rect width="64" height="64" rx="13" fill="#171b37"/>
+  <path d="M19 21C20 13 27 9 34 9C43 9 49 15 49 23C49 30 45 34 38 39C34 42 32 44 32 46"
+        fill="none" stroke="#ffdb72" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="54" r="5" fill="#ffdb72"/>
+</svg>

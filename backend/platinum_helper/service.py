@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from persistence.gameplay import (
     GameConflict, hidden_choices, owned_game, pending_question, question_plausibility,
 )
+from persistence.choice_order import display_choices, display_key, display_scores
 from persistence.models import (
     GameRun, PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
     Question, QuestionAttempt, StarAward, Topic, User,
@@ -117,7 +118,7 @@ def _recent_speech_history(db: Session, purchase_id: UUID) -> list[str]:
     """
     rows = db.execute(
         select(PlatinumHelperCall.response_text, PlatinumHelperCall.selected_key,
-               Question.choices)
+               Question.choices, QuestionAttempt.choice_order)
         .join(QuestionAttempt,
               PlatinumHelperCall.question_attempt_id == QuestionAttempt.id)
         .join(Question, QuestionAttempt.question_id == Question.id)
@@ -127,8 +128,8 @@ def _recent_speech_history(db: Session, purchase_id: UUID) -> list[str]:
         .limit(HISTORY_LIMIT)
     ).all()
     snippets = [
-        anonymize_reply(speech, choices, key)
-        for speech, key, choices in reversed(rows)
+        anonymize_reply(speech, display_choices(order, choices), key)
+        for speech, key, choices, order in reversed(rows)
     ]
     return [snippet for snippet in snippets if snippet is not None]
 
@@ -199,9 +200,10 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
                 # The bronze perk hides the lowest-scored answers. Never
                 # recommend a hidden option or an absurdly weak distractor.
                 letter = best_visible_wrong(
-                    correct_key=question.correct_key,
+                    correct_key=display_key(attempt.choice_order, question.correct_key),
                     difficulty=question.requested_difficulty,
-                    scores=question_plausibility(db, question.id),
+                    scores=display_scores(attempt.choice_order,
+                                          question_plausibility(db, question.id)),
                     hidden=hidden_choices(db, attempt, question),
                     rng=rng,
                 )
@@ -210,7 +212,8 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
                     # remains governed by unchanged skill probabilities.
                     outcome = "UNSURE"
             else:
-                letter = question.correct_key if outcome == "KNOW" else None
+                letter = (display_key(attempt.choice_order, question.correct_key)
+                          if outcome == "KNOW" else None)
             old = PlatinumHelperCall(
                 purchase_id=purchase.id, request_key=request_key,
                 question_attempt_id=attempt.id, topic=broad, outcome=outcome,
@@ -229,14 +232,15 @@ def reserve_call(db: Session, *, user_id: UUID, run_id: UUID,
         debug_reserved(
             purchase, old, question, category,
             run_id, reused=reused_outcome, competence_source=competence_source,
-            question_number=attempt.number,
+            question_number=attempt.number, choice_order=attempt.choice_order,
         )
         return None, card(purchase), False, {
             "call_id": old.id, "request_key": request_key,
             "outcome": old.outcome, "letter": old.selected_key,
             "delivery_style": choose_delivery_style(old.id),
             "presentation_style": choose_presentation_style(old.id),
-            "question_text": question.text, "choices": question.choices,
+            "question_text": question.text,
+            "choices": display_choices(attempt.choice_order, question.choices),
             "correct_option_text": question.choices[question.correct_key],
             "topic": broad, "profession": purchase.profession,
             "name": purchase.profile["name"], "language": run.language,

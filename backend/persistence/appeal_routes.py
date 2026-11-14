@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -31,8 +31,35 @@ class AppealInput(BaseModel):
     expected_fee_bronze: int = Field(ge=0)
 
 
+def _appeal_display_status(appeal: QuestionAppeal, *, now: datetime | None = None) -> str:
+    """Keep internal retry_pending lease separate from a scheduled retry.
+
+    Worker marks an actively processing appeal retry_pending and gives it
+    a 30-minute crash-recovery lease. A genuine deferred retry is scheduled
+    for a day later. Do not tell players a technical retry is pending merely
+    because the first Judge call is underway.
+    """
+    if appeal.status != "retry_pending":
+        return appeal.status
+    # Some legacy private serializers/test snapshots do not carry a lease.
+    # Missing/None means no scheduled technical retry; show "In review".
+    next_retry_at = getattr(appeal, "next_retry_at", None)
+    if next_retry_at is None:
+        return "pending"
+    now = now or datetime.now(timezone.utc)
+    when = next_retry_at
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return ("retry_pending" if when - now > timedelta(minutes=30)
+            else "pending")
+
+
 def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
-    """Allowlist: hide the private answer key until the game is finished."""
+    """Hide both the key and free-form Judge explanation until game end.
+
+    Judge prose can name the correct letter/option even when answer_key is
+    suppressed. Preserve the complete decision in PostgreSQL for later viewing.
+    """
     reveal_key = not appeal.before_answer
     if appeal.before_answer and db is not None and appeal.run_id is not None:
         run = db.get(GameRun, appeal.run_id)
@@ -44,8 +71,11 @@ def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
         "language": appeal.language, "reasons": appeal.reasons,
         "comment": appeal.comment, "source_links": appeal.source_links,
         "before_answer": appeal.before_answer, "question_number": appeal.question_number,
-        "status": appeal.status, "submitted_at": appeal.submitted_at,
-        "closed_at": appeal.closed_at, "verdict": appeal.verdict_localized,
+        "status": appeal.status,
+        "display_status": _appeal_display_status(appeal),
+        "submitted_at": appeal.submitted_at,
+        "closed_at": appeal.closed_at,
+        "verdict": appeal.verdict_localized if reveal_key else None,
         "deposit": {"tier": appeal.deposit_tier, "amount": 1,
                     "refunded": appeal.deposit_refunded_at is not None},
         "filing_fee_bronze": appeal.filing_fee_bronze,
@@ -86,11 +116,13 @@ def lost_question_for_appeal(run_id: UUID,
     )) is not None:
         raise HTTPException(status_code=409, detail="Already appealed")
     question = db.get(Question, attempt.question_id)
+    from persistence.choice_order import display_choices
     hidden = set(hidden_choices(db, attempt, question))
+    shown = display_choices(attempt.choice_order, question.choices)
     return {
         "question_id": str(question.id), "number": attempt.number,
         "difficulty": attempt.requested_difficulty, "question": question.text,
-        "answers": {k: question.choices[k] for k in "ABCD" if k not in hidden},
+        "answers": {k: shown[k] for k in "ABCD" if k not in hidden},
         "bonus": attempt.number == 16, "hidden_count": attempt.hints_used,
     }
 
@@ -104,7 +136,7 @@ def appeal_quote(run_id: UUID, question_id: UUID,
         question = db.get(Question, question_id)
         if question is None:
             raise HTTPException(status_code=404, detail="Question missing")
-        # Display four original options; mark hidden choices as metadata, never as a key.
+        # Display the exact four options this attempt saw, including their letters.
         from persistence.gameplay import hidden_choices
         from persistence.models import QuestionAttempt, GameRun
         attempt = db.scalar(select(QuestionAttempt).where(
@@ -115,17 +147,31 @@ def appeal_quote(run_id: UUID, question_id: UUID,
         run = db.get(GameRun, run_id)
         quote["hint_refund_bronze_if_upheld"] = int(
             (attempt.appeal_expenses or {}).get("hint_bronze", 0))
+        # The player may appeal a correct answer too, but only the question
+        # that actually caused a loss can earn loss-specific compensation.
+        last_losing_attempt_id = (db.scalar(select(QuestionAttempt.id).where(
+            QuestionAttempt.run_id == run_id,
+            QuestionAttempt.is_correct.is_(False),
+            QuestionAttempt.answered_at.is_not(None),
+        ).order_by(QuestionAttempt.answered_at.desc()).limit(1))
+            if run.status == "lost" else None)
+        caused_loss = (
+            not quote["before_answer"]
+            and run.status == "lost"
+            and attempt.is_correct is False
+            and attempt.id == last_losing_attempt_id
+        )
         quote["loss_compensation_tier_if_upheld"] = (
             "platinum" if attempt.number == 16 else
             ("bronze" if attempt.number <= 5 else
              "silver" if attempt.number <= 10 else "gold")
-        ) if not quote["before_answer"] else None
+        ) if caused_loss else None
         quote["bonus_wager_refund_if_upheld"] = bool(
-            not quote["before_answer"] and attempt.number == 16 and
-            run.bonus_wager_accepted)
+            caused_loss and attempt.number == 16 and run.bonus_wager_accepted)
+        from persistence.choice_order import display_choices
         quote["question_snapshot"] = {
             "question_id": str(question_id), "question": question.text,
-            "answers": {k: question.choices[k] for k in "ABCD"},
+            "answers": display_choices(attempt.choice_order, question.choices),
             "number": attempt.number, "difficulty": attempt.requested_difficulty,
             "language": run.language,
             "hidden_keys": list(hidden_choices(db, attempt, question)),

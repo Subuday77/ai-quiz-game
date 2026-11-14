@@ -44,13 +44,19 @@ _ORGANIZATION_WORDS = {
     "центр", "центра", "центре", "центром",
     "лаборатория", "лаборатории", "лабораторию",
     "институт", "института", "институте",
-    "компания", "компании", "компанию",
+    "компания", "компании", "компанию", "компанией",
     "организация", "организации", "организацию",
     "университет", "университета",
     "center", "centre", "centers", "centres",
     "laboratory", "laboratories", "lab",
     "company", "corporation", "organization", "organisation",
     "institute", "university",
+}
+# Apply the same NFKD/token normalization to cue words and question text.
+# In particular, Russian "компанией" loses the breve in "й" and becomes
+# "компаниеи" inside _tokens(). Without this the organizational cue is missed.
+_ORGANIZATION_WORDS = {
+    token for word in _ORGANIZATION_WORDS for token in _tokens(word)
 }
 _GENERIC_NAME_WORDS = _ORGANIZATION_WORDS | {
     "research", "scientific", "science", "technological", "technology",

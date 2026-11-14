@@ -111,6 +111,13 @@ MANDATORY INDEPENDENT FOUR-OPTION FACT CHECK (before any scoring or tagging):
   even if the first movie is the correct answer. If unsure, mark uncertain.
 - Fact-check the whole clause before reasoning "only one option fits".
   A memorized correct answer cannot override a false premise.
+- For spatial constraints (north/south/east/west of a named place, such as
+  "южнее Волги"), verify the direction relative to that reference separately
+  for each answer. Merely checking that the answer flows into the named sea,
+  lies in the correct country, or belongs to the right category is NOT
+  sufficient. If the requested direction cannot be verified, choose
+  premise=uncertain and an uncertain option. Do not silently drop the
+  comparison when reasoning.
 - For awards/prizes with an explicit YEAR and a claimed REASON, verify the
   RECIPIENT, AWARD, YEAR and REASON as independent assertions. Familiarity
   with the recipient's work does NOT prove they won that particular prize.
@@ -128,6 +135,13 @@ MANDATORY SHORTCUT AUDIT, independent of the factual option verdict:
   the question and "Xerox PARC" as the only Xerox-named research center
   in the answers is a direct one-choice lexical clue. Mark leakage=fail,
   issue_codes include answer_leak, even if the keyed fact is true.
+- Also audit short exact noun/adjective pairs that the long-prefix rule may
+  miss: `acidic` in the stem versus a uniquely `acid`-named choice
+  (for example, "Hydrochloric acid"), `basic`/`base`, and
+  `magnetic`/`magnet`. If the one related answer can be singled out
+  by WORDING ALONE, report answer_leak. Being factually correct does not
+  make an answer option a good distractor. Do not treat the mere existence
+  of a morphological relation as proof of leakage.
 - A shared generic word (center, institute, program, university), or
   a name appearing in multiple options, is NOT sufficient for a leak.
   Don't confuse legitimate external knowledge with literal shortcuts.
@@ -490,6 +504,20 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         or verdict.semantic_duplicate
         or (mode == QualityMode.ENFORCE and assessment["critical"] != "none")
     )
+    # Spatial qualifiers are correctness constraints, not mere editorial
+    # signals. The primary critic can wrongly validate "flows into Caspian"
+    # while ignoring "south of Volga". Even with generic arbitration OFF
+    # or shadow skill OFF, enforce independent verification for these stems.
+    from tagging.quality_skill.fact_tool import spatial_constraints
+    required_spatial = (
+        spatial_constraints(question.question)
+        if mode == QualityMode.ENFORCE else []
+    )
+    if required_spatial:
+        event("spatial_constraint_verification_requested",
+              count=len(required_spatial),
+              reviewer_fact=verdict.fact_valid.value,
+              reviewer_premise=verdict.premise.value)
     should_arbitrate = mode == QualityMode.ENFORCE and (
         not review_rejected or (bonus_too_easy and not hard_rejected)
     )
@@ -501,6 +529,7 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
             deadline=deadline, timeout_seconds=timeout_seconds, clock=clock,
             primary_difficulty=(verdict.difficulty.value
                                 if requested_difficulty == 15 else None),
+            mandatory_spatial=required_spatial,
         )
         # A missing or disabled arbiter must never silently approve a
         # primary critic's too_easy bonus.

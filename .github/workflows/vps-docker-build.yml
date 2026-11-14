@@ -1,0 +1,45 @@
+name: VPS Docker build checks
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    paths:
+      - compose.yaml
+      - backend/**
+      - frontend/**
+      - .dockerignore
+      - .env.production.example
+      - .github/workflows/vps-docker-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate isolated Compose network and variable interpolation
+        run: |
+          cp .env.production.example .env
+          docker compose config --quiet
+          docker compose config --format json | python -c 'import json,sys; d=json.load(sys.stdin); p=d["services"]["web"]["ports"][0]; assert p["host_ip"]=="127.0.0.1" and str(p["published"])=="8080"; assert all(not d["services"][s].get("ports") for s in ("db","backend"))'
+      - name: Verify production defaults and local-only staging exception
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          with open(".env.production.example", encoding="utf-8") as f:
+              text = f.read()
+          assert "OPENAI_MODEL_ID=gpt-5.4" in text
+          assert "AI_LOCALIZER_BASE_URL=https://ai-localizer-api.onrender.com" in text
+          config = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"]))
+          assert config["services"]["backend"]["environment"]["AUTH_COOKIE_SECURE"] == "true"
+          assert all(not config["services"][s].get("ports") for s in ("db", "backend"))
+          PY
+      - name: Build backend image, including migrations
+        run: docker build -f backend/Dockerfile -t quiz-backend:ci .
+      - name: Build Angular static-web image
+        run: docker build -f frontend/Dockerfile -t quiz-web:ci frontend

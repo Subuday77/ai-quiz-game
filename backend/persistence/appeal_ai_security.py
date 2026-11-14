@@ -150,7 +150,7 @@ def response_json_schema(role: str) -> dict[str, Any]:
     """
     strings = {"type": "string"}
     string_list = {"type": "array", "items": {"type": "string"}}
-    if role == "CADDY":
+    if role == "KEDDY":
         fields: dict[str, Any] = {
             "summary_en": strings,
             "claims_to_check": string_list,

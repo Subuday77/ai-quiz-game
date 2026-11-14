@@ -1,7 +1,6 @@
 <main class="shell" [attr.dir]="rtl ? 'rtl' : 'ltr'">
   <header class="brand">
     <span class="spark">✦</span><span>AI QUIZ <strong>GAME</strong></span>
-    <span class="prototype">{{ locale.t('header.preview') }}</span>
 
     <div class="ui-language-control">
       <label for="ui-language">{{ locale.t('account.interfaceLanguage') }}</label>
@@ -150,10 +149,14 @@
       <h2>{{ helper.name }}</h2>
       <p>{{ helperProfessionLabel(helper) }} · {{ locale.format('helper.erudition', { score: helper.erudition }) }}</p>
       <p class="helper-tagline">“{{ helperTagline(helper) }}”</p>
-      <h3>{{ locale.t('helper.strong') }}</h3>
-      <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
-      <h3>{{ locale.t('helper.weak') }}</h3>
-      <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      <ng-container *ngIf="helper.strong_topics.length > 0">
+        <h3>{{ locale.t('helper.strong') }}</h3>
+        <p><ng-container *ngFor="let topic of helper.strong_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      </ng-container>
+      <ng-container *ngIf="helper.weak_topics.length > 0">
+        <h3>{{ locale.t('helper.weak') }}</h3>
+        <p><ng-container *ngFor="let topic of helper.weak_topics; let last = last">{{ locale.t('helper.topic.' + topic) }}{{ last ? '' : ', ' }}</ng-container></p>
+      </ng-container>
       <p>{{ locale.format('helper.remaining', { remaining: helper.consultations_remaining }) }}</p>
       <button class="outline-button" type="button" (click)="helperDetailsVisible = false">{{ locale.t('helper.close') }}</button>
     </section>
@@ -177,7 +180,7 @@
   <section class="card">
     <div class="card-topline">
       <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
-      <button *ngIf="screen === 'question' && current && !questionLoading"
+      <button *ngIf="current && ((screen === 'question' && !questionLoading) || screen === 'feedback')"
               type="button" class="outline-button appeal-header-button"
               (click)="openAppealForm()"
               [disabled]="loading || perksBusy || appealBusy || appealedQuestionIds.has(current.question_id)">
@@ -191,6 +194,10 @@
     <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
     <p class="intro" *ngIf="screen === 'setup'">{{ locale.t('hero.intro') }}</p>
+    <button type="button" class="outline-button about-open-button"
+            *ngIf="screen === 'setup'" (click)="openAbout()">
+      {{ locale.t('about.open') }}
+    </button>
     <p class="intro" *ngIf="screen === 'setup' && !authLoading && !account">{{ locale.t('hero.signIn') }}</p>
     <p class="intro resume-note" *ngIf="screen === 'setup' && restoringGame">{{ locale.t('hero.restoring') }}</p>
     <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
@@ -321,9 +328,40 @@
 
     <div *ngIf="screen === 'question' && current as question" class="question"
          [attr.dir]="questionRtl ? 'rtl' : 'ltr'">
-      <div class="question-label">
-        {{ locale.format('game.number', { number: question.number }) }}
-        <span *ngIf="question.bonus" class="bonus">{{ locale.t('game.bonusBadge') }}</span>
+      <div class="question-heading-row">
+        <div class="question-label">
+          {{ locale.format('game.number', { number: question.number }) }}
+          <span *ngIf="question.bonus" class="bonus">{{ locale.t('game.bonusBadge') }}</span>
+        </div>
+        <!-- Private provisional ballot, placed in the same row as question number. -->
+        <div class="question-votes" role="group" [attr.aria-label]="locale.t('questionFeedback.title')">
+          <button type="button" class="question-vote" (click)="voteQuestion(1)"
+                  [class.selected]="currentVote === 1"
+                  [attr.aria-pressed]="currentVote === 1"
+                  [attr.aria-label]="locale.t('questionFeedback.like')"
+                  [title]="locale.t('questionFeedback.like')"
+                  [disabled]="loading || appealBusy || perksBusy">
+            <svg class="vote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 10v12"/>
+              <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12.5 3a3.13 3.13 0 0 1 1 0 2 2 0 0 1 1.5 2.88Z"/>
+            </svg>
+          </button>
+          <button type="button" class="question-vote" (click)="voteQuestion(-1)"
+                  [class.selected]="currentVote === -1"
+                  [attr.aria-pressed]="currentVote === -1"
+                  [attr.aria-label]="locale.t('questionFeedback.dislike')"
+                  [title]="locale.t('questionFeedback.dislike')"
+                  [disabled]="loading || appealBusy || perksBusy">
+            <svg class="vote-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <g transform="rotate(180 12 12)">
+                <path d="M7 10v12"/>
+                <path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12.5 3a3.13 3.13 0 0 1 1 0 2 2 0 0 1 1.5 2.88Z"/>
+              </g>
+            </svg>
+          </button>
+        </div>
       </div>
       <h2>{{ question.question }}</h2>
       <div class="answers">
@@ -396,11 +434,6 @@
     <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
       <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
       <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
-      <button *ngIf="!result.correct && result.phase === 'lost' && current" type="button"
-              class="outline-button appeal-report-button" (click)="openAppealForm()"
-              [disabled]="loading || appealBusy || appealedQuestionIds.has(current.question_id)">
-        {{ locale.t('appeals.reportQuestion') }}
-      </button>
       <div class="achievement" *ngIf="result.achievement">
         {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
       </div>
@@ -457,6 +490,63 @@
     <p class="error" role="alert" *ngIf="perksError">{{ locale.t(perksError) }}</p>
 
   </section>
+  <div class="about-backdrop" *ngIf="aboutOpen">
+    <section class="about-panel" role="dialog" aria-modal="true" [attr.aria-label]="locale.t('about.title')">
+      <button type="button" class="about-close" (click)="closeAbout()"
+              [attr.aria-label]="locale.t('about.close')" [disabled]="aboutBusy">×</button>
+      <h2>{{ locale.t('about.title') }}</h2>
+      <div class="about-prose">
+        <section *ngFor="let section of aboutSections" class="about-chapter">
+          <h3>{{ locale.t(section.heading) }}</h3>
+          <ng-container *ngFor="let block of section.blocks">
+            <p *ngIf="!block.bullet" [class.about-emphasis]="block.emphasis">
+              {{ locale.t(block.key) }}
+            </p>
+            <p *ngIf="block.bullet" class="about-rule">{{ locale.t(block.key) }}</p>
+          </ng-container>
+        </section>
+      </div>
+      <section class="about-gift">
+        <h3>{{ locale.t('about.giftTitle') }}</h3>
+        <p>{{ locale.t('about.gift.p1') }}</p>
+        <p>{{ locale.t('about.gift.p2') }}</p>
+        <p>{{ locale.t('about.gift.p3') }}</p>
+        <p>{{ locale.t('about.gift.p4') }}</p>
+        <p>{{ locale.t('about.gift.p5') }}</p>
+        <p class="about-emphasis">{{ locale.t('about.gift.p6') }}</p>
+        <div class="about-gift-grid">
+          <div *ngFor="let tier of starTiers" class="about-gift-tier" [ngClass]="tier.key">
+            <span class="star-icon" aria-hidden="true">★</span>
+            <strong>{{ aboutReward[tier.key] }}</strong>
+            <span>{{ locale.t('about.gift.' + tier.key) }}</span>
+          </div>
+        </div>
+        <p>{{ locale.t('about.gift.p7') }}</p>
+        <p>{{ locale.t('about.gift.p8') }}</p>
+        <p>{{ locale.t('about.gift.p9') }}</p>
+        <p>{{ locale.t('about.gift.p10') }}</p>
+        <p class="about-emphasis">{{ locale.t('about.gift.p11') }}</p>
+        <p *ngIf="aboutStatusLoading" role="status">{{ locale.t('about.giftLoading') }}</p>
+        <p *ngIf="aboutClaimed" role="status">{{ locale.t('about.giftClaimed') }}</p>
+        <p class="error" *ngIf="aboutError" role="alert">{{ locale.t(aboutError) }}</p>
+        <button type="button" class="primary" *ngIf="account && !aboutClaimed"
+                [disabled]="aboutBusy || aboutStatusLoading || !!aboutError"
+                (click)="claimAboutBonus()">{{ locale.t('about.giftClaim') }}</button>
+        <div *ngIf="!account">
+          <p>{{ locale.t('about.giftNeedLogin') }}</p>
+          <button type="button" class="primary" (click)="registerFromAbout()">
+            {{ locale.t('about.giftSignIn') }}
+          </button>
+        </div>
+      </section>
+      <div class="about-bottom-actions">
+        <button type="button" class="outline-button about-bottom-close"
+                (click)="closeAbout()" [disabled]="aboutBusy">
+          {{ locale.t('about.close') }}
+        </button>
+      </div>
+    </section>
+  </div>
   <footer>{{ locale.t('footer.note') }}</footer>
 </main>
 <!-- The old interface stays unchanged underneath. A complete new dictionary

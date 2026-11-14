@@ -19,6 +19,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from persistence.appeal_worker import process_due
+from persistence.vote_worker import process_due_vote_reviews
 
 LOG = logging.getLogger(__name__)
 POLL_INTERVAL_SECONDS = 60
@@ -30,6 +31,7 @@ async def _process_periodically(stop: asyncio.Event) -> None:
             # Provider/SQL operations are synchronous; don't block FastAPI's
             # event loop while adjudicating an outstanding complaint.
             await asyncio.to_thread(process_due)
+            await asyncio.to_thread(process_due_vote_reviews)
         except Exception as exc:
             # DB outages and SDK errors must not terminate the web server.
             # Deliberately log only the error class, not player evidence.

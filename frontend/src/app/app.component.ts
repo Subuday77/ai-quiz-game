@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 import { LocalizationStore, UI_LANGUAGES } from './localization/store';
 import { RESET_COPY, RESET_LANGUAGE_NAMES } from './localization/reset-copy';
+import { ABOUT_SECTIONS } from './localization/about-copy';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
@@ -18,8 +19,15 @@ const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
+const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
 const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+
+interface AboutBonusClaim {
+  claimed: boolean;
+  newly_claimed: boolean;
+  balances: StarCounts;
+}
 
 interface Account {
   id: string;
@@ -117,7 +125,8 @@ interface AppealQuote {
 }
 interface AppealRecord {
   id: string; question_id: string; question_number: number; language: string;
-  status: string; submitted_at: string; closed_at: string | null;
+  before_answer: boolean;
+  status: string; display_status?: string; submitted_at: string; closed_at: string | null;
   question_snapshot: AppealQuote['question_snapshot'];
   reasons: string[]; comment: string; source_links: string[];
   verdict: string | null; deposit: { tier: StarTier; amount: number; refunded: boolean };
@@ -138,6 +147,29 @@ interface AppealHistoryFilters {
   sort: AppealHistorySort;
 }
 
+/** Preserve the wallet's distinct refund purposes in the complaint history.
+ *  The API sends machine-readable reason codes, not user-facing labels.
+ */
+export function appealHistoryRefundRows(
+  expenses: AppealRecord['expenses_refunded'] | null | undefined,
+): { labelKey: string; tier: StarTier; amount: number }[] {
+  const reasonLabels: Record<string, string> = {
+    hints: 'appeals.hintRefunds',
+    helper: 'appeals.helperCompensation',
+    unused_helper: 'appeals.unusedHelperRefund',
+  };
+  const rows: { labelKey: string; tier: StarTier; amount: number }[] = [];
+  for (const expense of expenses ?? []) {
+    if (!Number.isInteger(expense.amount) || expense.amount <= 0 ||
+        !['bronze', 'silver', 'gold', 'platinum'].includes(expense.tier)) continue;
+    const labelKey = reasonLabels[expense.reason] ?? 'appeals.otherRefunds';
+    const existing = rows.find(row => row.labelKey === labelKey && row.tier === expense.tier);
+    if (existing) existing.amount += expense.amount;
+    else rows.push({ labelKey, tier: expense.tier, amount: expense.amount });
+  }
+  return rows;
+}
+
 /** Dates in this browser's local timezone; both date endpoints are inclusive. */
 function appealLocalDate(value: string): string {
   const time = new Date(value);
@@ -156,14 +188,25 @@ export function appealQuestionExcerpt(value: string): string {
 /** Only finalized merits rulings are Judge decisions; other states are statuses. */
 export function appealHistoryDecisionPresentation(
   status: string, verdict: string | null, translate: (key: string) => string,
+  hiddenUntilGameEnd = false,
 ): { headingKey: string; message: string } {
   const decided = status === 'upheld' || status === 'rejected';
   const awaiting = status === 'pending' || status === 'retry_pending';
   return {
     headingKey: decided ? 'appeals.historyVerdict' : 'appeals.historyComplaintStatus',
     message: awaiting ? translate('appeals.notDecided') :
+      decided && hiddenUntilGameEnd ? translate('appeals.keyHidden') :
       verdict || translate('appeals.notDecided'),
   };
+}
+
+/** Use the selected UI language, not the browser's default locale. */
+export function formatAppealHistoryDate(value: string, languageCode: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(languageCode, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }) : '—';
 }
 
 /** Pure function shared by UI and regression tests: no network or state mutation. */
@@ -268,6 +311,13 @@ export class AppComponent implements OnInit, OnDestroy {
   account: Account | null = null;
   authLoading = true;
   authBusy = false;
+  readonly aboutSections = ABOUT_SECTIONS;
+  aboutOpen = false;
+  aboutClaimed = false;
+  aboutStatusLoading = false;
+  aboutBusy = false;
+  aboutError = '';
+  readonly aboutReward: StarCounts = { bronze: 50, silver: 40, gold: 30, platinum: 20 };
   resetEnabled = false;
   resetBusy = false;
   resetError = '';
@@ -290,6 +340,7 @@ export class AppComponent implements OnInit, OnDestroy {
   resumeCandidate: GameInfo | null = null;
   private resumeRunLanguage = '';
   current: PublicQuestion | null = null;
+  currentVote: -1 | 0 | 1 = 0;
   feedback: AnswerFeedback | null = null;
   loading = false;
   error = '';
@@ -626,7 +677,7 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && this.feedback?.phase === 'lost' && !this.feedback.correct)) ||
+          (this.screen === 'feedback' && !!this.feedback)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
 
     this.appealBusy = true;
@@ -788,7 +839,7 @@ export class AppComponent implements OnInit, OnDestroy {
         requestId = crypto.randomUUID();
         try { sessionStorage.setItem(storageKey, requestId); } catch { /* private mode */ }
       }
-      await firstValueFrom(this.http.post<AppealRecord>(
+      const submittedAppeal = await firstValueFrom(this.http.post<AppealRecord>(
         GAME_API + '/' + runId + '/appeals', {
           ...draft, question_id: question.question_id, request_id: requestId,
           expected_fee_bronze: quote.filing_fee_bronze,
@@ -800,6 +851,9 @@ export class AppComponent implements OnInit, OnDestroy {
       this.appealMessage = this.locale.t('appeals.received');
       this.refreshSpendableStars();
       this.refreshAppealAllowance();
+      if (submittedAppeal.status === 'pending' || submittedAppeal.status === 'retry_pending') {
+        this.watchAppealSettlement(submittedAppeal.id, accountId, runId);
+      }
       if (quote.before_answer && this.gameId === runId) {
         this.current = null;
         this.feedback = null;
@@ -827,6 +881,42 @@ export class AppComponent implements OnInit, OnDestroy {
       html: '<div class="appeal-history appeal-rules">' + blocks + '</div>',
       confirmButtonText: this.locale.t('helper.close'),
     });
+  }
+
+  /** Bounded background check: reflect Judge's eventual wallet changes without F5.
+   *  No repeated paid model request: this only reads this player's appeal status.
+   */
+  private watchAppealSettlement(appealId: string, accountId: string, runId: string): void {
+    let polls = 0;
+    let inFlight = false;
+    const watch = timer(2500, 4000).subscribe(() => {
+      if (this.account?.id !== accountId || ++polls > 24) {
+        watch.unsubscribe();
+        return;
+      }
+      if (inFlight) return;
+      inFlight = true;
+      const request = this.http.get<AppealRecord>(
+        '/api/v2/appeals/' + encodeURIComponent(appealId),
+      ).pipe(timeout(10000), finalize(() => { inFlight = false; })).subscribe({
+        next: item => {
+          if (this.account?.id !== accountId) { watch.unsubscribe(); return; }
+          if (!['upheld', 'rejected', 'technical_unresolved'].includes(item.status)) return;
+          watch.unsubscribe();
+          this.refreshSpendableStars();
+          this.refreshAppealAllowance();
+          if (this.gameId === runId &&
+              this.appealMessage === this.locale.t('appeals.received')) {
+            this.appealMessage = this.locale.t('appeals.status.' + item.status);
+          }
+        },
+        error: err => {
+          if (this.isUnauthorized(err)) watch.unsubscribe();
+        },
+      });
+      this.subscriptions.add(request);
+    });
+    this.subscriptions.add(watch);
   }
 
   private refreshAppealAllowance(): void {
@@ -860,15 +950,13 @@ export class AppComponent implements OnInit, OnDestroy {
       }
       if (this.account?.id !== accountId) return;
       this.refreshAppealAllowance();
+      // History may already show an asynchronously settled appeal, while
+      // the top-of-page wallet still reflects the earlier deposit debit.
+      this.refreshSpendableStars();
       const safe = (value: unknown) => this.escapeAppealHtml(value);
       const localized = (key: string) => safe(this.locale.t(key));
-      const formattedDate = (value: string) => {
-        const date = new Date(value);
-        return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, {
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit',
-        }) : '—';
-      };
+      const formattedDate = (value: string) =>
+        formatAppealHistoryDate(value, this.locale.code);
       const statuses: { value: AppealHistoryStatus; label: string }[] = [
         { value: 'all', label: 'appeals.historyAll' },
         { value: 'upheld', label: 'appeals.status.upheld' },
@@ -922,15 +1010,19 @@ export class AppComponent implements OnInit, OnDestroy {
             (marker ? ' <span class="appeal-answer-tag">(' + safe(marker) + ')</span>' : '') +
             '</li>';
         }).join('');
-        const costs = item.expenses_refunded.map(v =>
-          safe(v.amount + ' ' + this.locale.t('stars.' + v.tier) + ' (' + v.reason + ')')).join(', ');
+        const displayedStatus = item.display_status || item.status;
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
-          'technical_unresolved'].includes(item.status) ? item.status : 'unknown';
+          'technical_unresolved'].includes(displayedStatus) ? displayedStatus : 'unknown';
         const decision = appealHistoryDecisionPresentation(
-          item.status, item.verdict, key => this.locale.t(key));
+          item.status, item.verdict, key => this.locale.t(key),
+          item.before_answer && item.answer_key === null);
         const field = (labelKey: string, value: string) =>
           '<p class="appeal-history-field"><span class="appeal-history-field-name">' +
           localized(labelKey) + ':</span> ' + value + '</p>';
+        const fieldRefund = (labelKey: string, tier: StarTier, amount: number) =>
+          field(labelKey, safe('+' + amount + ' ' + this.locale.t('stars.' + tier)));
+        const refundFields = appealHistoryRefundRows(item.expenses_refunded).map(row =>
+          fieldRefund(row.labelKey, row.tier, row.amount)).join('');
         return '<details class="appeal-history-item" data-history-index="' + index + '">' +
           '<summary title="' + safe(question) + '">' +
             '<span class="appeal-history-heading">' +
@@ -938,7 +1030,7 @@ export class AppComponent implements OnInit, OnDestroy {
               '<span class="appeal-history-date">' + safe(formattedDate(item.submitted_at)) + '</span>' +
             '</span>' +
             '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
-              localized('appeals.status.' + item.status) + '</span>' +
+              localized('appeals.status.' + allowedStatus) + '</span>' +
             '<span class="appeal-history-chevron" aria-hidden="true"></span>' +
           '</summary>' +
           '<div class="appeal-history-detail">' +
@@ -961,7 +1053,7 @@ export class AppComponent implements OnInit, OnDestroy {
               '<div class="appeal-history-verdict-header"><strong>' +
                 localized(decision.headingKey) + '</strong>' +
                 '<span class="appeal-history-status appeal-history-status-' + allowedStatus + '">' +
-                  localized('appeals.status.' + item.status) + '</span>' +
+                  localized('appeals.status.' + allowedStatus) + '</span>' +
               '</div><p dir="auto">' +
               safe(decision.message) + '</p></div>' +
             '<div class="appeal-history-economy">' +
@@ -972,14 +1064,14 @@ export class AppComponent implements OnInit, OnDestroy {
                   'appeals.depositPending')) + ')') +
               field('appeals.fee',
                 safe(item.filing_fee_bronze + ' ' + this.locale.t('stars.bronze'))) +
-              field('appeals.compensation',
+              field('appeals.lossCompensation',
                 safe(item.compensation.amount + ' ' +
                   this.locale.t('stars.' + item.compensation.tier))) +
               (item.question_number === 16
                 ? field('appeals.wagerRefunded',
                   safe(this.locale.t(item.bonus_wager_refunded ? 'appeals.yes' : 'appeals.no')))
                 : '') +
-              field('appeals.hintRefunds', costs || '0') +
+              refundFields +
             '</div>' +
           '</div></details>';
       }).join('');
@@ -1245,6 +1337,64 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
+  openAbout(): void {
+    this.aboutOpen = true;
+    this.aboutError = '';
+    this.aboutClaimed = false;
+    if (!this.account) return;
+    const accountId = this.account.id;
+    this.aboutStatusLoading = true;
+    this.subscriptions.add(this.http.get<{ claimed: boolean }>(
+      STARS_API + '/about-bonus'
+    ).pipe(timeout(10000), finalize(() => {
+      if (this.account?.id === accountId) this.aboutStatusLoading = false;
+    })).subscribe({
+      next: state => {
+        if (this.account?.id === accountId && this.aboutOpen)
+          this.aboutClaimed = state.claimed;
+      },
+      error: () => {
+        if (this.account?.id === accountId && this.aboutOpen)
+          this.aboutError = 'about.statusFailed';
+      },
+    }));
+  }
+
+  closeAbout(): void {
+    if (this.aboutBusy) return;
+    this.aboutOpen = false;
+    this.aboutError = '';
+  }
+
+  async registerFromAbout(): Promise<void> {
+    this.closeAbout();
+    await this.openAuthDialog('register');
+  }
+
+  claimAboutBonus(): void {
+    if (!this.account || !this.aboutOpen || this.aboutBusy ||
+        this.aboutStatusLoading || this.aboutClaimed || this.aboutError) return;
+    const accountId = this.account.id;
+    this.aboutBusy = true;
+    this.subscriptions.add(this.http.post<AboutBonusClaim>(
+      STARS_API + '/about-bonus', {}
+    ).pipe(timeout(15000), finalize(() => {
+      if (this.account?.id === accountId) this.aboutBusy = false;
+    })).subscribe({
+      next: result => {
+        if (this.account?.id !== accountId) return;
+        this.aboutClaimed = result.claimed;
+        this.spendableStars = result.balances;
+        this.refreshStats();
+      },
+      error: err => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else if (this.account?.id === accountId)
+          this.aboutError = 'about.claimFailed';
+      },
+    }));
+  }
+
   // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
   async openAuthDialog(mode: AuthMode): Promise<void> {
     if (this.authBusy || this.loading || this.authLoading) return;
@@ -1260,6 +1410,7 @@ export class AppComponent implements OnInit, OnDestroy {
           '<div class="quiz-auth-fields">' +
             '<label id="quiz-label-username" for="quiz-auth-username"></label>' +
             '<input id="quiz-auth-username" class="swal2-input" type="text" autocomplete="username" maxlength="30">' +
+            (isRegister ? '<div id="quiz-username-suggestions" class="quiz-username-suggestions" role="status"></div>' : '') +
             '<label id="quiz-label-password" for="quiz-auth-password"></label>' +
             '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
               'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
@@ -1283,6 +1434,9 @@ export class AppComponent implements OnInit, OnDestroy {
           label('quiz-label-password', 'auth.password');
           hint('quiz-auth-username', 'auth.usernamePlaceholder');
           if (isRegister) {
+            popup?.querySelector<HTMLInputElement>('#quiz-auth-username')?.addEventListener('input', () => {
+              popup?.querySelector<HTMLElement>('#quiz-username-suggestions')?.replaceChildren();
+            });
             label('quiz-label-confirm', 'auth.confirm');
             hint('quiz-auth-password', 'auth.passwordHint');
             hint('quiz-auth-confirm', 'auth.repeatPlaceholder');
@@ -1326,6 +1480,42 @@ export class AppComponent implements OnInit, OnDestroy {
               { username, password },
             ).pipe(timeout(15000)));
           } catch (error: unknown) {
+            if (isRegister && error instanceof HttpErrorResponse && error.status === 409) {
+              const host = Swal.getPopup()?.querySelector<HTMLElement>('#quiz-username-suggestions');
+              if (host) {
+                host.replaceChildren();
+                try {
+                  const response = await firstValueFrom(this.http.get<{ suggestions: string[] }>(
+                    '/api/auth/username-suggestions', { params: { username } }
+                  ).pipe(timeout(10000)));
+                  const popup = Swal.getPopup();
+                  if (popup && host.isConnected && response.suggestions.length) {
+                    const caption = document.createElement('p');
+                    caption.textContent = this.locale.t('auth.suggestionsIntro');
+                    host.appendChild(caption);
+                    for (const suggestion of response.suggestions) {
+                      const button = document.createElement('button');
+                      button.type = 'button';
+                      button.className = 'quiz-username-option';
+                      button.textContent = suggestion;
+                      button.addEventListener('click', () => {
+                        const field = popup.querySelector<HTMLInputElement>('#quiz-auth-username');
+                        if (field) {
+                          field.value = suggestion;
+                          field.focus();
+                        }
+                        host.replaceChildren();
+                        Swal.resetValidationMessage();
+                      });
+                      host.appendChild(button);
+                    }
+                  }
+                } catch {
+                  // Registration still reports the original collision;
+                  // name suggestions are an optional enhancement.
+                }
+              }
+            }
             Swal.showValidationMessage(this.locale.t(this.authErrorMessage(error, mode)));
             return false;
           }
@@ -1546,6 +1736,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.screen = 'question';
     this.current = null;
     this.feedback = null;
+    this.currentVote = 0;
     this.showCategoryExclusions = false;
     this.resumeAvailable = false;
     this.loading = true;
@@ -1574,6 +1765,7 @@ export class AppComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (question) => {
         this.current = question;
+        this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
         this.gameQuestionIssued = true;
         this.helperReply = '';
@@ -1635,17 +1827,54 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
   }
 
+  private draftVoteKey(questionId: string): string {
+    return DRAFT_VOTE_KEY + this.account?.id + ':' + this.gameId + ':' + questionId;
+  }
+
+  private restoreDraftVote(questionId: string): -1 | 0 | 1 {
+    try {
+      const raw = localStorage.getItem(this.draftVoteKey(questionId));
+      return raw === '-1' ? -1 : raw === '1' ? 1 : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private clearDraftVote(questionId: string): void {
+    try { localStorage.removeItem(this.draftVoteKey(questionId)); }
+    catch { /* local storage is optional */ }
+  }
+
+  voteQuestion(value: -1 | 1): void {
+    // A choice on an unanswered card is provisional. No HTTP call, no
+    // reputation change, no Judge referral until answer succeeds.
+    if (!this.current || !this.gameId || !this.account ||
+        this.loading || this.appealBusy || this.perksBusy ||
+        this.screen !== 'question') return;
+    this.currentVote = this.currentVote === value ? 0 : value;
+    try {
+      const key = this.draftVoteKey(this.current.question_id);
+      if (this.currentVote === 0) localStorage.removeItem(key);
+      else localStorage.setItem(key, String(this.currentVote));
+    } catch { /* refresh may forget local choice, never creates a DB vote */ }
+  }
+
   answer(choice: Choice): void {
     if (this.loading || this.perksBusy || this.appealBusy || !this.current || this.screen !== 'question' || !this.account) return;
+    const submittedQuestionId = this.current.question_id;
+    const submittedVote = this.currentVote;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<AnswerFeedback>(
       GAME_API + '/' + this.gameId + '/answer', {
-        question_id: this.current.question_id,
+        question_id: submittedQuestionId,
         answer: choice,
+        vote: submittedVote,
       },
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (result) => {
+        this.clearDraftVote(submittedQuestionId);
+        this.currentVote = 0;
         this.feedback = result;
         this.bonusDecisionAvailable = result.phase === 'bonus';
         if (this.current?.bonus && !result.correct) {
@@ -1880,6 +2109,7 @@ export class AppComponent implements OnInit, OnDestroy {
       this.spendableStars = emptyStars();
     }
     this.account = account;
+    this.aboutClaimed = false;
     this.authLoading = false;
     this.locale.load(account.ui_language || 'en');
     this.discoverResetCapability(account.id);
@@ -1899,6 +2129,11 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoreVersion++;
     this.restoringGame = false;
     this.account = null;
+    this.aboutOpen = false;
+    this.aboutClaimed = false;
+    this.aboutStatusLoading = false;
+    this.aboutBusy = false;
+    this.aboutError = '';
     this.totalStars = emptyStars();
     this.spendableStars = emptyStars();
     this.gamesPlayed = 0;
@@ -2366,6 +2601,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private resetGameView(): void {
+    this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.longWait = false;

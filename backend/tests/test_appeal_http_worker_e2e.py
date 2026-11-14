@@ -1,4 +1,4 @@
-"""HTTP -> background Caddy/Judge -> PostgreSQL-like ledger regression.
+"""HTTP -> background Keddy/Judge -> PostgreSQL-like ledger regression.
 
 All requests go through the real FastAPI routes and a disposable in-memory
 SQLite database. Model calls are stubbed at the provider boundary only.
@@ -22,8 +22,8 @@ from sqlalchemy.pool import StaticPool
 from api import app
 from persistence.database import get_db
 from persistence.models import (
-    Base, GameRun, Question, QuestionAppeal, QuestionAttempt,
-    Topic, WalletTransaction,
+    Base, GameRun, PlatinumHelperCall, PlatinumHelperPurchase,
+    Question, QuestionAppeal, QuestionAttempt, Topic, WalletTransaction,
 )
 from persistence.star_economy import star_balances
 
@@ -72,7 +72,7 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
 
     @staticmethod
     def mock_model(messages, role, **kwargs):
-        if role == "CADDY":
+        if role == "KEDDY":
             return json.dumps({
                 "summary_en": "Conflicting award year and programming language.",
                 "claims_to_check": ["1972 Turing Award recipient", "COBOL contributions"],
@@ -88,8 +88,12 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             })
         raise AssertionError("Unexpected model stage")
 
-    def fixture(self, number: int, *, before_answer: bool = False):
+    def fixture(self, number: int, *, before_answer: bool = False,
+                answered_correct: bool = False):
         now = datetime.now(timezone.utc)
+        status = ("completed" if number == 16 else "main") if answered_correct else (
+            "main" if before_answer else "lost"
+        )
         with Session(self.engine, expire_on_commit=False) as db:
             topic = Topic(
                 slug="appeal-http-e2e-" + uuid4().hex[:12],
@@ -100,11 +104,12 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             run = GameRun(
                 user_id=self.user_id,
                 language="Russian",
-                status="main" if before_answer else "lost",
-                correct_main_answers=0 if before_answer else min(number - 1, 15),
+                status=status,
+                correct_main_answers=(min(number, 15) if answered_correct
+                                      else 0 if before_answer else min(number - 1, 15)),
                 bonus_wager_accepted=number == 16,
-                bonus_correct=False if number == 16 else None,
-                finished_at=None if before_answer else now,
+                bonus_correct=answered_correct if number == 16 else None,
+                finished_at=now if status in ("lost", "completed") else None,
             )
             db.add(run)
             db.flush()
@@ -135,8 +140,8 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
                 number=number,
                 requested_difficulty=number - 1,
                 answered_at=None if before_answer else now,
-                selected_key=None if before_answer else "A",
-                is_correct=None if before_answer else False,
+                selected_key=None if before_answer else "B" if answered_correct else "A",
+                is_correct=None if before_answer else answered_correct,
                 hints_used=1 if number == 10 else 0,
                 appeal_expenses={"hint_bronze": 2} if number == 10 else {},
             )
@@ -144,7 +149,8 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             db.flush()
             balance = (
                 {"bronze": 2} if before_answer else
-                {"bronze": 4, "silver": 4} if number == 10 else
+                {"bronze": 4, "silver": 4}
+                if number == 10 or (answered_correct and 6 <= number <= 10) else
                 {"gold": 4}
             )
             for tier, amount in balance.items():
@@ -202,7 +208,7 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             submitted, payload = self.appeal(run_id, question_id)
         self.assertEqual(submitted.status_code, 201, submitted.text)
         appeal_id = submitted.json()["id"]
-        self.assertEqual(calls.call_count, 2)  # one Caddy, one independent Judge
+        self.assertEqual(calls.call_count, 2)  # one Keddy, one independent Judge
 
         history = self.client.get("/api/v2/appeals")
         self.assertEqual(history.status_code, 200, history.text)
@@ -294,8 +300,14 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         case = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
         self.assertEqual(case["status"], "upheld")
         self.assertIsNone(case["answer_key"])
+        self.assertIsNone(case["verdict"], "Judge explanation must not spoil the answer")
         self.assertNotIn("correct_key", json.dumps(case))
         self.assertEqual(case["compensation"]["amount"], 0)
+        listing = self.client.get("/api/v2/appeals")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        listed = next(item for item in listing.json() if item["id"] == appeal_id)
+        self.assertIsNone(listed["verdict"])
+        self.assertIsNone(listed["answer_key"])
         self.assertEqual(self.ledger(appeal_id), {
             "deposit": ("bronze", -1),
             "appeal-deposit-refund": ("bronze", 1),
@@ -305,6 +317,300 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
             self.assertEqual(db.get(GameRun, UUID(run_id)).status, "main")
             self.assertIsNotNone(db.get(
                 QuestionAttempt, UUID(attempt_id)).superseded_at)
+        # No spoiler until the round actually ends; the full stored verdict
+        # becomes visible from both detail and list after finishing.
+        with Session(self.engine) as db:
+            original = db.get(QuestionAppeal, UUID(appeal_id))
+            saved_verdict = original.verdict_localized
+            self.assertTrue(saved_verdict)
+            # Simulate the natural end of this same round; do not settle twice.
+            run = db.get(GameRun, UUID(run_id))
+            run.status = "completed"
+            db.commit()
+        after = self.client.get(f"/api/v2/appeals/{appeal_id}")
+        self.assertEqual(after.status_code, 200, after.text)
+        self.assertEqual(after.json()["answer_key"], "B")
+        self.assertEqual(after.json()["verdict"], saved_verdict)
+        listed_after = next(item for item in
+                            self.client.get("/api/v2/appeals").json()
+                            if item["id"] == appeal_id)
+        self.assertEqual(listed_after["verdict"], saved_verdict)
+
+    def test_correct_answer_can_be_appealed_without_score_or_loss_compensation(self):
+        run_id, question_id, attempt_id = self.fixture(6, answered_correct=True)
+        quote = self.client.get(
+            f"/api/v2/games/{run_id}/appeals/{question_id}/quote")
+        self.assertEqual(quote.status_code, 200, quote.text)
+        self.assertFalse(quote.json()["before_answer"])
+        self.assertEqual(quote.json()["deposit_tier"], "silver")
+        self.assertIsNone(quote.json()["loss_compensation_tier_if_upheld"])
+        self.assertFalse(quote.json()["bonus_wager_refund_if_upheld"])
+
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model) as calls:
+            submitted, payload = self.appeal(run_id, question_id)
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        self.assertEqual(calls.call_count, 2)
+        appeal_id = submitted.json()["id"]
+        appeal = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
+        self.assertEqual(appeal["status"], "upheld")
+        self.assertEqual(appeal["selected_key"], "B")
+        self.assertEqual(appeal["answer_key"], "B")
+        self.assertEqual(appeal["compensation"]["amount"], 0)
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("silver", -1),
+            "appeal-deposit-refund": ("silver", 1),
+        })
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(run_id))
+            attempt = db.get(QuestionAttempt, UUID(attempt_id))
+            self.assertEqual(run.status, "main")
+            self.assertEqual(run.correct_main_answers, 6)
+            self.assertTrue(attempt.is_correct)
+            self.assertEqual(attempt.selected_key, "B")
+            self.assertIsNone(attempt.superseded_at)
+            self.assertEqual(star_balances(db, self.user_id)["silver"], 4)
+
+        duplicate = self.client.post(
+            f"/api/v2/games/{run_id}/appeals", json=payload)
+        self.assertEqual(duplicate.status_code, 201, duplicate.text)
+        payload["request_id"] = str(uuid4())
+        self.assertEqual(self.client.post(
+            f"/api/v2/games/{run_id}/appeals", json=payload).status_code, 409)
+
+    def test_correct_bonus_answer_never_refunds_wager_or_awards_loss_compensation(self):
+        run_id, question_id, attempt_id = self.fixture(16, answered_correct=True)
+        quote = self.client.get(
+            f"/api/v2/games/{run_id}/appeals/{question_id}/quote")
+        self.assertEqual(quote.status_code, 200, quote.text)
+        self.assertIsNone(quote.json()["loss_compensation_tier_if_upheld"])
+        self.assertFalse(quote.json()["bonus_wager_refund_if_upheld"])
+
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model):
+            submitted, _ = self.appeal(run_id, question_id)
+        self.assertEqual(submitted.status_code, 201, submitted.text)
+        appeal = self.client.get(f"/api/v2/appeals/{submitted.json()['id']}").json()
+        self.assertEqual(appeal["status"], "upheld")
+        self.assertFalse(appeal["bonus_wager_refunded"])
+        self.assertEqual(appeal["compensation"]["amount"], 0)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, UUID(run_id))
+            attempt = db.get(QuestionAttempt, UUID(attempt_id))
+            self.assertEqual(run.status, "completed")
+            self.assertTrue(attempt.is_correct)
+            self.assertIsNone(attempt.superseded_at)
+
+    def paid_helper(self, run_id: str, attempt_id: str, *,
+                    price: int = 2, consulted: bool = False,
+                    hint_bronze: int = 0):
+        """Record actual purchase and (optionally) expenses before filing."""
+        with Session(self.engine, expire_on_commit=False) as db:
+            purchase = PlatinumHelperPurchase(
+                run_id=UUID(run_id), user_id=self.user_id,
+                price=price, profession="Historian", profile={"featured_high": [],
+                "featured_low": [], "erudition": 50},
+                consultations_used=int(consulted), refunded=False,
+            )
+            db.add(purchase)
+            db.flush()
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:platinum-seed",
+                amount=price, reason="star/platinum/qa-http-seed",
+            ))
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"helper:{purchase.id}:purchase",
+                amount=-price, reason="star/platinum/helper-purchase",
+            ))
+            if consulted:
+                db.add(PlatinumHelperCall(
+                    purchase_id=purchase.id, request_key=str(uuid4()),
+                    question_attempt_id=UUID(attempt_id), topic="General knowledge",
+                    outcome="KNOW", selected_key="B", status="completed",
+                    response_text="The answer is B.",
+                ))
+            if hint_bronze:
+                attempt = db.get(QuestionAttempt, UUID(attempt_id))
+                attempt.hints_used = 1
+                attempt.appeal_expenses = {"hint_bronze": hint_bronze}
+                db.add(WalletTransaction(
+                    user_id=self.user_id, run_id=UUID(run_id),
+                    idempotency_key=f"qa-http:{run_id}:hint-spent",
+                    amount=-hint_bronze, reason="star/bronze/hint-purchase",
+                ))
+            db.commit()
+            return str(purchase.id)
+
+    def test_unused_helper_not_refunded_while_game_continues(self):
+        # One upheld pre-answer complaint must not take away a usable helper.
+        run_id, question_id, attempt_id = self.fixture(12, before_answer=True)
+        purchase_id = self.paid_helper(run_id, attempt_id, price=2)
+        with Session(self.engine) as db:
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:gold-seed",
+                amount=2, reason="star/gold/qa-http-seed",
+            ))
+            db.commit()
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model):
+            submission, _ = self.appeal(run_id, question_id)
+        self.assertEqual(submission.status_code, 201, submission.text)
+        appeal_id = submission.json()["id"]
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["status"], "upheld")
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("gold", -1), "appeal-deposit-refund": ("gold", 1),
+        })
+        with Session(self.engine) as db:
+            purchase = db.get(PlatinumHelperPurchase, UUID(purchase_id))
+            self.assertFalse(purchase.refunded)
+            self.assertEqual(purchase.consultations_used, 0)
+            self.assertEqual(db.get(GameRun, UUID(run_id)).status, "main")
+            self.assertEqual(star_balances(db, self.user_id)["platinum"], 0)
+            self.assertEqual(star_balances(db, self.user_id)["gold"], 2)
+            self.assertIsNone(db.scalar(select(WalletTransaction.id).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:refund"
+            )))
+
+    def test_unused_helper_refunded_once_only_when_bad_question_caused_loss(self):
+        run_id, question_id, attempt_id = self.fixture(12)
+        purchase_id = self.paid_helper(run_id, attempt_id, price=2, hint_bronze=2)
+        # A separate hint refund is flushed before the unused-helper receipt.
+        with Session(self.engine) as db:
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:bronze-seed",
+                amount=2, reason="star/bronze/qa-http-seed",
+            ))
+            db.commit()
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model):
+            submission, payload = self.appeal(run_id, question_id)
+        self.assertEqual(submission.status_code, 201, submission.text)
+        appeal_id = submission.json()["id"]
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["status"], "upheld")
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("gold", -1),
+            "appeal-deposit-refund": ("gold", 1),
+            "appeal-hint-refund": ("bronze", 2),
+            "appeal-compensation": ("gold", 1),
+        })
+        self.assertEqual(
+            self.client.get(f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"],
+            [{"tier": "bronze", "amount": 2, "reason": "hints"},
+             {"tier": "platinum", "amount": 2, "reason": "unused_helper"}],
+            "Unused-helper platinum must survive JSON persistence after hints",
+        )
+        with Session(self.engine) as db:
+            purchase = db.get(PlatinumHelperPurchase, UUID(purchase_id))
+            self.assertTrue(purchase.refunded)
+            self.assertEqual(purchase.consultations_used, 0)
+            self.assertEqual(star_balances(db, self.user_id)["platinum"], 2)
+            self.assertEqual(star_balances(db, self.user_id)["gold"], 5)
+            self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:refund"
+            )), 2)
+        # Repeated HTTP request and worker settlement never refund twice.
+        repeat = self.client.post(
+            f"/api/v2/games/{run_id}/appeals", json=payload)
+        self.assertEqual(repeat.status_code, 201, repeat.text)
+        self.assertEqual(repeat.json()["id"], appeal_id)
+        with Session(self.engine) as db:
+            self.assertEqual(star_balances(db, self.user_id)["platinum"], 2)
+            self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:refund"
+            )), 2)
+
+    def test_preanswer_hint_and_helper_consultation_both_compensated(self):
+        # Q12: -3 bronze hint, paid platinum helper consultation, -1 gold
+        # appeal deposit, then uphold: +3 bronze, +1 gold deposit +1 helper
+        # gold. No "lost game" compensation for a pre-answer complaint.
+        run_id, question_id, attempt_id = self.fixture(12, before_answer=True)
+        purchase_id = self.paid_helper(
+            run_id, attempt_id, price=2, consulted=True, hint_bronze=3,
+        )
+        with Session(self.engine) as db:
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:gold-seed",
+                amount=2, reason="star/gold/qa-http-seed",
+            ))
+            db.add(WalletTransaction(
+                user_id=self.user_id, run_id=UUID(run_id),
+                idempotency_key=f"qa-http:{run_id}:bronze-extra-seed",
+                amount=1, reason="star/bronze/qa-http-seed",
+            ))
+            db.commit()
+        with patch("persistence.appeal_worker._completion",
+                   side_effect=self.mock_model):
+            submission, _ = self.appeal(run_id, question_id)
+        self.assertEqual(submission.status_code, 201, submission.text)
+        appeal_id = submission.json()["id"]
+        case = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
+        self.assertEqual(case["status"], "upheld")
+        self.assertEqual(case["compensation"]["amount"], 0)
+        self.assertEqual(case["expenses_refunded"], [
+            {"tier": "bronze", "amount": 3, "reason": "hints"},
+            {"tier": "gold", "amount": 1, "reason": "helper"},
+        ], "All credits must survive fresh API/DB reads, not just wallet writes")
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("gold", -1),
+            "appeal-deposit-refund": ("gold", 1),
+            "appeal-hint-refund": ("bronze", 3),
+        })
+        with Session(self.engine) as db:
+            purchase = db.get(PlatinumHelperPurchase, UUID(purchase_id))
+            self.assertFalse(purchase.refunded)
+            self.assertEqual(purchase.consultations_used, 1)
+            self.assertEqual(star_balances(db, self.user_id)["bronze"], 3)
+            self.assertEqual(star_balances(db, self.user_id)["gold"], 3)
+            self.assertEqual(star_balances(db, self.user_id)["platinum"], 0)
+            self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:appeal-gold"
+            )), 1)
+            self.assertIsNone(db.scalar(select(WalletTransaction.id).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:refund"
+            )))
+
+        # Reconstruct a historical receipt affected by the original in-place
+        # JSON mutation. The gold transaction remains and must never replay.
+        from scripts.repair_appeal_helper_receipt import repair
+        with Session(self.engine) as db:
+            row = db.get(QuestionAppeal, UUID(appeal_id))
+            row.verdict_data = {
+                **(row.verdict_data or {}),
+                "expenses_refunded": [{"tier": "bronze", "amount": 3, "reason": "hints"}],
+            }
+            db.commit()
+        with Session(self.engine) as db:
+            preview = repair(db, UUID(appeal_id))
+            self.assertEqual(preview["status"], "eligible_dry_run")
+            db.rollback()
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"],
+            [{"tier": "bronze", "amount": 3, "reason": "hints"}])
+        with Session(self.engine) as db:
+            fixed = repair(db, UUID(appeal_id), apply=True)
+            self.assertEqual(fixed["status"], "repaired")
+            db.commit()
+        with Session(self.engine) as db:
+            second = repair(db, UUID(appeal_id), apply=True)
+            self.assertEqual(second["status"], "already_recorded")
+            db.rollback()
+        self.assertEqual(self.client.get(
+            f"/api/v2/appeals/{appeal_id}").json()["expenses_refunded"], [
+            {"tier": "bronze", "amount": 3, "reason": "hints"},
+            {"tier": "gold", "amount": 1, "reason": "helper"},
+        ])
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(WalletTransaction.amount).where(
+                WalletTransaction.idempotency_key == f"helper:{purchase_id}:appeal-gold"
+            )), 1)
+            self.assertEqual(star_balances(db, self.user_id)["gold"], 3)
 
 
 if __name__ == "__main__":

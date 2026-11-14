@@ -16,7 +16,7 @@ from persistence.appeal_worker import _completion
 class AppealRevisionTests(unittest.TestCase):
     def test_strict_model_output_contracts(self):
         for role, expected in (
-            ("CADDY", {"summary_en", "claims_to_check", "identified_issues",
+            ("KEDDY", {"summary_en", "claims_to_check", "identified_issues",
                        "needs_external_fact_check"}),
             ("JUDGE", {"decision", "explanation_en",
                        "explanation_player_language", "rationale_facts"}),
@@ -83,6 +83,44 @@ class AppealRevisionTests(unittest.TestCase):
         self.assertEqual(payload["answer_key"], "B")
         self.assertEqual(payload["selected_key"], "A")
 
+    def test_before_answer_judge_text_cannot_reveal_letter_until_round_ends(self):
+        from unittest.mock import MagicMock
+        from persistence.models import GameRun
+
+        # A realistic Judge reply contains the literal correct option.
+        example = SimpleNamespace(
+            id="appeal-id", question_id="question-id", run_id="run-id",
+            question_snapshot={"question": "Where?", "answers": {
+                "A": "Paris", "B": "Rome", "C": "Berlin", "D": "London"}},
+            language="Russian", reasons=[], comment="", source_links=[],
+            before_answer=True, question_number=10, status="rejected",
+            submitted_at=None, closed_at=None,
+            verdict_localized="Правильный вариант — C, Берлин.",
+            deposit_tier="silver", deposit_refunded_at=None,
+            filing_fee_bronze=0, compensated_at=None,
+            bonus_wager_refunded_at=None, verdict_data=None,
+            context={"correct_key": "C", "selected_key": None},
+        )
+        db = MagicMock()
+        for status in ("main", "bonus"):
+            with self.subTest(status=status):
+                db.get.return_value = SimpleNamespace(status=status)
+                result = _public(example, db=db)
+                self.assertEqual(result["status"], "rejected")
+                self.assertIsNone(result["answer_key"])
+                self.assertIsNone(result["verdict"])
+                self.assertNotIn("Берлин", json.dumps(result, ensure_ascii=False).split(
+                    '"verdict":')[-1])
+        for status in ("lost", "completed", "abandoned"):
+            with self.subTest(status=status):
+                db.get.return_value = SimpleNamespace(status=status)
+                result = _public(example, db=db)
+                self.assertEqual(result["answer_key"], "C")
+                self.assertEqual(result["verdict"], example.verdict_localized)
+        db.get.assert_called_with(GameRun, "run-id")
+        # The original in-DB verdict is untouched by serialization.
+        self.assertIn("Берлин", example.verdict_localized)
+
     def test_info_and_debug_log_scrub_data(self):
         output = io.StringIO()
         handler = logging.StreamHandler(output)
@@ -121,10 +159,11 @@ class AppealRevisionTests(unittest.TestCase):
                 status="completed", output_text='{"result":"mock"}', usage=None,
                 incomplete_details=None,
             )
-            for role in ("CADDY", "JUDGE"):
+            for role in ("KEDDY", "JUDGE"):
                 _completion([{"role": "system", "content": "Return JSON"}], role)
                 spec = client.return_value.responses.create.call_args.kwargs["text"]["format"]
                 self.assertEqual(spec["type"], "json_schema")
+                self.assertEqual(spec["name"], "quiz_appeal_" + role.lower())
                 self.assertTrue(spec["strict"])
                 self.assertEqual(spec["schema"]["required"],
                                  list(response_json_schema(role)["properties"]))

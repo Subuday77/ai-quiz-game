@@ -40,6 +40,12 @@ Every slug MUST be canonical LOWERCASE ENGLISH ASCII kebab-case
 language used for the question. The fact.subject MUST be one of the
 entity tags. The relation must describe the EXACT knowledge being asked
 (e.g. birth-year, not simply date); object represents the correct answer.
+When the stem includes a directional comparison to a named reference
+(e.g. "южнее Волги", "south of London"), the fact.relation MUST encode
+that comparison, NOT just the river's destination or city's country.
+A candidate satisfying only the weaker condition is INVALID. Check that
+the chosen answer actually lies in the specified direction from the
+reference. If uncertain, choose a simpler question without that comparison.
 Different wordings and answer orders for the same knowledge MUST produce
 the same subject and relation. Do NOT use the difficulty as a tag.
 
@@ -69,6 +75,23 @@ Avoid a direct name shortcut where a branded product in the stem and
 exactly one answer naming its maker/research organization share a
 distinctive brand token (e.g. "Xerox Alto" -> "Xerox PARC"). Reword the
 question or replace the choices so the player must know an external fact.
+
+MANDATORY ANSWER-IN-STEM CHECK, including the VERY EASIEST difficulty 0:
+Do not put a distinctive form of the correct answer into the question
+stem when that same word/root singles out just ONE answer option.
+Examples to NEVER generate: "Какой фрукт используется в банановом хлебе?"
+with answer "Банан", "Из чего делают картофельное пюре?" with answer
+"Картофель", "What is acidic?" with the only choice ending in "acid".
+These are not legitimate trivia challenges even at difficulty 0.
+Beware of inflections, noun/adjective pairs and branded compounds:
+"бананового" -> "банан", "картофельного" -> "картофель",
+"acidic" -> "acid". A player must need outside knowledge to distinguish
+the correct choice; a simple visual root match must NOT give it away.
+At low difficulty use familiar facts with DISTINCTIVE BUT NON-ECHOING
+answer options; prefer a new topic instead of repeating an ingredient/
+product name already exposed by the question wording. Independently
+scan all four options for this wording shortcut before returning JSON.
+A generic term shared by multiple options is not sufficient evidence.
 
 Do not output Unicode control characters (category Cc) in the question
 or answer options. Escaped NUL (\\u0000) is equally forbidden: do NOT

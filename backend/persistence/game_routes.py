@@ -11,12 +11,12 @@ from uuid import UUID, NAMESPACE_URL, uuid5
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
-from category_taxonomy import category_family, prefer_other_family
+from category_taxonomy import prefer_other_family, paid_random_change_candidates
 from diagnostics import event
 from persistence.auth import authenticated_user, validate_origin
 from persistence.database import get_db
@@ -113,6 +113,8 @@ def _active_run(db: Session, user_id: UUID) -> GameRun | None:
 class AnswerInput(BaseModel):
     question_id: UUID
     answer: Choice
+    # Uncommitted browser choice; validated and stored with the answer once.
+    vote: StrictInt = Field(default=0, ge=-1, le=1)
 
 
 class SkipInput(BaseModel):
@@ -228,7 +230,10 @@ def _public(attempt, stored, phase: str, *, db: Session | None = None) -> Public
         if db is None:
             raise GameConflict("Database needed for persisted question hints")
         hidden = set(hidden_choices(db, attempt, stored))
-    options = {key: stored.choices[key] for key in "ABCD" if key not in hidden}
+    from persistence.choice_order import display_choices
+    options = {key: text for key, text in
+               display_choices(attempt.choice_order, stored.choices).items()
+               if key not in hidden}
     return PublicQuestion(
         question_id=str(attempt.question_id),
         number=attempt.number,
@@ -278,6 +283,26 @@ def _category_for_round(run_id: UUID, number: int,
     candidates = [cat for cat in rotated if cat in unused] or rotated
     return prefer_other_family(candidates, previous)[0]
 
+
+
+def _main_pool_search_categories(
+    db: Session, run: GameRun, number: int, primary: str,
+) -> list[str]:
+    """DB First: search the assigned topic, then every other usable main topic.
+
+    Use the game's saved allowlist and answered-category history. This is only
+    a read-only search order: no paid category change, new hint or saved state.
+    """
+    available = set(available_categories(db, run, number))
+    allowed = list(allowed_categories(run))
+    seeded = random.Random(run.id.int).sample(allowed, k=len(allowed))
+    offset = (number - 1) % len(seeded)
+    rotated = seeded[offset:] + seeded[:offset]
+    remaining = [item for item in rotated if item != primary and item in available]
+    ranked = prefer_other_family(
+        remaining, preceding_question_category(db, run.id, number),
+    )
+    return [primary] + ranked
 
 
 def _alternate_main_category(db: Session, run: GameRun, number: int,
@@ -559,6 +584,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     # Deferred import avoids coupling the persistence layer to AI provider
     # SDKs and reuses the same retry/quality/leak policy as legacy games.
     from api import generate_valid_question
+    from persistence.question_source_policy import question_source_order
+    try:
+        source_order = question_source_order()
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Invalid question source configuration") from None
 
     # Keep the original v2 path for legacy clients; tagged games have
     # strict quality gates, emergency pool reuse and late-game recovery.
@@ -579,8 +609,13 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 detail="Historical questions lack verified tags; run tagging.backfill",
             ) from None
 
-        # Q10–Q15 may try one other unused allowed category automatically.
-        # Q16 uses its existing *persisted* bonus rotation and the same cap.
+        # AI retry policy stays unchanged: one alternate for late main slots.
+        # DB First searches all unplayed/allowed main topics before *any* AI.
+        # Q16 retains its separate persisted rotation and stricter pool checks.
+        pool_search_categories = (
+            _main_pool_search_categories(db, run, question_number, category)
+            if source_order == "pool_first" and question_number <= 15 else []
+        )
         categories_to_try = [category]
         if 10 <= question_number <= 15:
             alternate = _alternate_main_category(db, run, question_number, category)
@@ -591,10 +626,24 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
         db.rollback()  # Never hold a DB connection while calling AI.
 
         pool_settings = None
+        if source_order == "pool_first":
+            try:
+                # Explicit pool-first mode overrides the emergency-fallback
+                # toggle; it does NOT relax any question verification gate.
+                pool_settings = (
+                    True,
+                    question_number != 16
+                    and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED"),
+                    scan_limit(),
+                )
+            except ValueError:
+                raise HTTPException(
+                    status_code=503, detail="Invalid question pool configuration"
+                ) from None
         reserves = []
         last_generation_error = None
 
-        def offer_pool(candidate_category: str):
+        def offer_pool(candidate_category: str, *, probability_filter: bool = False):
             if not pool_settings[0]:
                 return None
             try:
@@ -602,6 +651,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     db, run_id=run_id, user_id=user.id,
                     category=candidate_category, max_candidates=pool_settings[2],
                     expected_bonus_topic_index=bonus_index,
+                    rating_filter=probability_filter,
                 )
             except Exception as exc:
                 # The optional pool must never bypass quality checks or
@@ -609,6 +659,29 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 event("question_pool_fallback_failed", error_type=type(exc).__name__)
                 db.rollback()
                 return None
+
+        if pool_search_categories:
+            # All allowed categories in ONE ranked SQL candidate query. Keep
+            # primary-category preference and per-topic sampling limits.
+            try:
+                pooled = offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id,
+                    category=pool_search_categories[0],
+                    search_categories=pool_search_categories,
+                    max_candidates=pool_settings[2], rating_filter=True,
+                )
+            except Exception as exc:
+                event("question_pool_fallback_failed", error_type=type(exc).__name__)
+                db.rollback()
+                pooled = None
+            if pooled is not None:
+                selected_topic = db.get(Topic, pooled[1].topic_id)
+                event("question_source_selected", source="pool",
+                      order=source_order, number=question_number,
+                      category=(selected_topic.labels.get("en")
+                                if selected_topic else None))
+                return _public(*pooled, phase="main", db=db)
+            event("ai_fallback", reason="no_db_admitted", number=question_number)
 
         for category_attempt, proposed_category in enumerate(categories_to_try):
             if category_attempt and question_number == 16:
@@ -630,6 +703,16 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                 )
                 db.rollback()
             selected_category = proposed_category
+            if (category_attempt == 0 and source_order == "pool_first"
+                    and question_number == 16):
+                pooled = offer_pool(selected_category, probability_filter=True)
+                if pooled is not None:
+                    event("question_source_selected", source="pool",
+                          order=source_order, number=question_number)
+                    return _public(
+                        *pooled, phase="bonus" if pooled[0].number == 16 else "main",
+                        db=db,
+                    )
             if category_attempt:
                 if selected_category == category:
                     # No actual alternative was available; avoid a duplicate
@@ -647,6 +730,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                         db=db,
                     )
             exclusions = generator_context(history, category_slug(selected_category))
+            if (source_order == "pool_first" and category_attempt == 0
+                    and question_number == 16):
+                event("ai_fallback", reason="no_db_admitted", number=question_number)
+            event("question_source_selected", source="generator",
+                  order=source_order, number=question_number)
             db.rollback()
             too_easy_reserve = []
             try:
@@ -773,6 +861,7 @@ def answer(run_id: UUID, payload: AnswerInput, request: Request,
         result, correct_key = record_answer(
             db, run_id=run_id, user_id=user.id,
             question_id=payload.question_id, selected=payload.answer,
+            vote=payload.vote,
         )
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
@@ -888,10 +977,13 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
     if manual:
         chosen = payload.category  # An explicit purchase overrides auto-diversity.
     else:
+        # A paid replacement must primarily leave the *current* topic family,
+        # not merely differ from the preceding question's category.
         previous = preceding_question_category(db, run.id, attempt.number)
-        other_family = ([cat for cat in options
-                         if previous is None or category_family(cat) != category_family(previous)])
-        chosen = secrets.choice(other_family or options)
+        candidates = paid_random_change_candidates(
+            options, current=snapshot["current"], previous=previous,
+        )
+        chosen = secrets.choice(candidates)
     old_attempt_id = attempt.id
     difficulty = attempt.requested_difficulty
     language = run.language
@@ -899,6 +991,32 @@ def change_category(run_id: UUID, payload: ChangeCategoryInput, request: Request
 
     from api import generate_valid_question
     tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
+    # A paid manual category selection must not silently switch topics. Query
+    # this exact topic's verified pool before generating anything new.
+    if tagged and manual:
+        from persistence.question_source_policy import question_source_order
+        from persistence.question_pool import offer_approved_pool_question, scan_limit
+        try:
+            if question_source_order() == "pool_first":
+                pooled = offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id, category=chosen,
+                    max_candidates=scan_limit(), rating_filter=True,
+                    replace_question_id=payload.question_id,
+                    replace_attempt_id=old_attempt_id,
+                    replace_manual=True,
+                    category_operation_key=f"star:{user.id}:{payload.request_id}:category",
+                )
+                if pooled is not None:
+                    event("question_source_selected", source="pool",
+                          order="pool_first", number=attempt.number,
+                          paid_category=True)
+                    return _public(*pooled, phase="main", db=db)
+        except ValueError:
+            raise HTTPException(status_code=503, detail="Invalid question pool configuration") from None
+        except GameNotFound:
+            raise HTTPException(status_code=404, detail="Game not found") from None
+        except (GameConflict, PerkUnavailable) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
         from tagging.repository import history_for_user

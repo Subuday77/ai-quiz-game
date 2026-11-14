@@ -2,7 +2,7 @@ name: Appeals security and policy
 on:
   push:
     branches:
-      - feature/question-appeals-v2-20261109
+      - master
   pull_request:
   workflow_dispatch:
 
@@ -106,3 +106,6 @@ jobs:
       - name: Exercise appeal filing, duplicate protection, and Q16 settlement in PostgreSQL
         working-directory: backend
         run: python -m scripts.appeal_postgres_regression
+      - name: Verify four simultaneous one-time reward claims under PostgreSQL row locking
+        working-directory: backend
+        run: python -m scripts.about_bonus_postgres_regression

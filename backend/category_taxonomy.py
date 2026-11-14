@@ -122,3 +122,24 @@ def prefer_other_family(categories: list[str], previous: str | None) -> list[str
     family = category_family(previous)
     return ([cat for cat in categories if category_family(cat) != family]
             + [cat for cat in categories if category_family(cat) == family])
+
+def paid_random_change_candidates(
+    categories: list[str], current: str, previous: str | None,
+) -> list[str]:
+    """Choose the random paid replacement pool by topic-family priority.
+
+    First avoid the family of the question being replaced. Within those
+    candidates, avoid the preceding question's family if possible. Only fall
+    back to a related family if no unrelated allowed category is available.
+    The caller makes the random selection and handles debit/persistence.
+    """
+    alternatives = [
+        cat for cat in categories if category_family(cat) != category_family(current)
+    ]
+    eligible = alternatives or list(categories)
+    if previous is None:
+        return eligible
+    other_than_previous = [
+        cat for cat in eligible if category_family(cat) != category_family(previous)
+    ]
+    return other_than_previous or eligible

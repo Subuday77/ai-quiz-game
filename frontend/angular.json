@@ -22,6 +22,9 @@
             "styles": [
               "node_modules/sweetalert2/dist/sweetalert2.min.css",
               "src/styles.css"
+            ],
+            "assets": [
+              "src/favicon.svg"
             ]
           }
         },

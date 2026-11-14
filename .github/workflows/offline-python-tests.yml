@@ -3,8 +3,7 @@ name: Offline Python regressions
 on:
   push:
     branches:
-      - feature/quiz-fact-dedup-tags
-      - feature/star-perks-shop
+      - master
   workflow_dispatch:
 
 jobs:

@@ -180,7 +180,9 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
         from tagging.quality_skill.fact_tool import known_false_fact
         from tagging.quality_skill.known_issues import known_qa_issue
-        from tagging.repair import repair_four_entity_tags, validation_retry_hint
+        from tagging.repair import (
+            repair_four_entity_tags, validation_retry_hint, quality_retry_hint,
+        )
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
     deadline = perf_counter() + policy.budget_seconds
@@ -349,7 +351,12 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
                                "object": question.fact.object,
                                "rejected": True})
         except QualityRegenerationError as exc:
-            retry_feedback = None
+            # A confirmed answer-in-stem leak needs different wording/facts,
+            # not just the existing fact-triple exclusion. This is fixed
+            # server-authored guidance, never the model's original rationale.
+            retry_feedback = quality_retry_hint(question) if tagged else None
+            if retry_feedback:
+                event("tagged_quality_retry_feedback", kind="answer_leak")
             rejection_reason = "quality_rejected"
             rejection_error_type = type(exc).__name__
             other_failures += 1

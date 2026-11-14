@@ -20,6 +20,7 @@ from persistence.appeal_policy import (
 from persistence.gameplay import GameConflict, GameNotFound, owned_game
 from persistence.models import (
     GameRun, Question, QuestionAppeal, QuestionAttempt, QuestionModeration,
+    QuestionVoteReview,
     PlatinumHelperCall, PlatinumHelperPurchase, WalletTransaction,
 )
 from persistence.star_economy import lock_user_stars, spend_star, star_balance
@@ -45,9 +46,9 @@ def _eligible_attempt(db: Session, *, run: GameRun, question_id: UUID
         if run.status not in ("main", "bonus"):
             raise GameConflict("Round is no longer active")
         return attempt, db.get(Question, question_id), True
-    if attempt.is_correct is False and run.status == "lost":
-        return attempt, db.get(Question, question_id), False
-    raise GameConflict("Appeal is allowed before answering or after an incorrect loss")
+    # Knowing the keyed answer does not make the question unambiguous.
+    # Preserve the answered attempt, score and game phase for every post-answer filing.
+    return attempt, db.get(Question, question_id), False
 
 
 def _filings_this_month(db: Session, *, user_id: UUID, now: datetime) -> int:
@@ -171,9 +172,10 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             GameRun.user_id == user_id,
             GameRun.status.in_(("lost", "completed")))) or 0)
 
-        # Preserve ALL four original options, plus explicit hidden keys. The
-        # immutable snapshot lets the player review the exact hint state.
-        answers = {key: question.choices[key] for key in "ABCD"}
+        # Freeze the exact shown letters, including removed-option metadata.
+        # Judge, Keddy and the player must agree on what A/B/C/D meant.
+        from persistence.choice_order import display_choices, display_key
+        answers = display_choices(attempt.choice_order, question.choices)
         from persistence.gameplay import hidden_choices
         hidden_keys = list(hidden_choices(db, attempt, question))
         helper = db.scalar(select(PlatinumHelperPurchase).where(
@@ -205,7 +207,7 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             comment=cleaned_comment, source_links=source_links,
             context={
                 "selected_key": attempt.selected_key,
-                "correct_key": question.correct_key,  # private judge input
+                "correct_key": display_key(attempt.choice_order, question.correct_key),  # private judge input
                 "hints_used": attempt.hints_used,
                 "expenses": dict(attempt.appeal_expenses or {}),
                 "helper_purchase_id": str(helper.id) if helper else None,
@@ -335,12 +337,24 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                             idempotency_key=key, amount=1,
                             reason="star/gold/helper-appeal-compensation"))
                         data = dict(appeal.verdict_data or {})
-                        data.setdefault("expenses_refunded", []).append(
-                            {"tier": "gold", "amount": 1, "reason": "helper"})
+                        # JSON columns are not deep-mutable: setdefault()
+                        # reuses the previously assigned list and mutates
+                        # both the ORM's old and new value. SQLAlchemy then
+                        # sees equal JSON and skips the UPDATE, even though
+                        # the gold wallet transaction is committed.
+                        data["expenses_refunded"] = [
+                            *(data.get("expenses_refunded") or []),
+                            {"tier": "gold", "amount": 1, "reason": "helper"},
+                        ]
                         appeal.verdict_data = data
-                elif purchase.consultations_used == 0 and not purchase.refunded:
-                    # Never refund a helper that was subsequently used, or
-                    # one already refunded for a successful Q15 run.
+                elif (caused_loss and purchase.consultations_used == 0
+                      and not purchase.refunded):
+                    # An upheld appeal must NOT cancel a still-usable helper
+                    # during an ongoing run. Refund the never-consulted
+                    # purchase only when this exact wrong question ended
+                    # the game; the Q15 earned refund remains independent.
+                    # Shared helper:{id}:refund idempotency also prevents
+                    # double refunds across multiple upheld appeals.
                     key = f"helper:{purchase.id}:refund"
                     if db.scalar(select(WalletTransaction.id).where(
                             WalletTransaction.idempotency_key == key)) is None:
@@ -350,9 +364,13 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                             reason="star/platinum/helper-refund"))
                         purchase.refunded = True
                         data = dict(appeal.verdict_data or {})
-                        data.setdefault("expenses_refunded", []).append(
+                        # Assign a *new* list so the JSON mutation persists
+                        # even if a hint refund was recorded earlier.
+                        data["expenses_refunded"] = [
+                            *(data.get("expenses_refunded") or []),
                             {"tier": "platinum", "amount": purchase.price,
-                             "reason": "unused_helper"})
+                             "reason": "unused_helper"},
+                        ]
                         appeal.verdict_data = data
     if decision == "upheld" and caused_loss:
         _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
@@ -368,14 +386,22 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
     reason = permanent_block_reason(
         distinct_players=moderation.distinct_complainants,
         upheld=moderation.upheld_count)
-    if reason is not None:
+    if reason is not None or moderation.permanently_blocked:
         moderation.permanently_blocked = True
-        moderation.block_reason = moderation.block_reason or reason
+        moderation.block_reason = moderation.block_reason or reason or "previously_blocked"
         question.status = "rejected"
-    elif db.scalar(select(func.count(QuestionAppeal.id)).where(
-        QuestionAppeal.question_id == appeal.question_id,
-        QuestionAppeal.id != appeal.id,
-        QuestionAppeal.status.in_(("pending", "retry_pending")),
-    )) == 0:
-        question.status = "approved"
+    else:
+        other_appeal_pending = db.scalar(select(func.count(QuestionAppeal.id)).where(
+            QuestionAppeal.question_id == appeal.question_id,
+            QuestionAppeal.id != appeal.id,
+            QuestionAppeal.status.in_(("pending", "retry_pending")),
+        )) != 0
+        community_hold = db.scalar(select(QuestionVoteReview.question_id).where(
+            QuestionVoteReview.question_id == appeal.question_id,
+            QuestionVoteReview.status.in_((
+                "pending", "retry_pending", "inconclusive", "technical_unresolved",
+            )),
+        ).limit(1)) is not None
+        if not other_appeal_pending and not community_hold and question.status != "rejected":
+            question.status = "approved"
     return appeal

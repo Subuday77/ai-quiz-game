@@ -3,7 +3,6 @@
 .brand { display: flex; align-items: center; gap: 9px; letter-spacing: .13em; font-size: 14px; font-weight: 750; margin-bottom: 30px; }
 .brand strong { color: #8de8f4; }
 .spark { color: #b9a0ff; font-size: 24px; }
-.prototype { margin-inline-start: auto; border: 1px solid #ffffff30; color: #c5c7dd; border-radius: 25px; padding: 7px 11px; font-size: 10px; letter-spacing: .1em; }
 .card { border: 1px solid #ffffff20; border-radius: 24px; padding: clamp(24px, 6vw, 56px); background: #181a37e8; box-shadow: 0 28px 80px #080c20a8; min-height: 440px; }
 .eyebrow { letter-spacing: .18em; color: #9b9fd1; font-size: 11px; font-weight: 800; margin-bottom: 18px; }
 h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1.1; margin: 0 0 20px; letter-spacing: -.04em; }
@@ -172,7 +171,6 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .stats-warning { color: #ffd0ac; }
 .resume-note { color: #b6e8ee; }
 @media (max-width: 640px) {
-  .prototype { margin-inline-start: auto; }
   .account-controls { width: 100%; justify-content: flex-start; }
   .brand { gap: 7px; }
   .account-button { padding: 8px 10px; }
@@ -180,6 +178,7 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 
 /* UI language selection is completely independent of the question language. */
 .ui-language-control {
+  margin-inline-start: auto;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -526,3 +525,75 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .card-topline .appeal-header-button { max-width: 100%; margin: 2px 0; }
   .appeal-allowance-inline { margin-inline-start: 0; }
 }
+
+/* Private question feedback shares the line with the question number. */
+.question-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.question-heading-row .question-label { flex: 0 1 auto; }
+.question-votes {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.question-vote {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid #6a719f;
+  display: inline-grid;
+  place-items: center;
+  background: #282c50;
+  color: #dce7f8;
+  cursor: pointer;
+  transition: background .14s, border-color .14s, color .14s;
+}
+.vote-icon { width: 20px; height: 20px; display: block; }
+.question-vote:hover:not(:disabled) { border-color: #8ce9ef; background: #373d6a; }
+.question-vote:focus-visible { outline: 2px solid #8ce9ef; outline-offset: 2px; }
+.question-vote.selected {
+  border-color: #8ce9ef;
+  background: #35566b;
+  color: #8ce9ef;
+  box-shadow: 0 0 0 2px #8ce9ef26;
+}
+.question-vote:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 420px) {
+  .question-heading-row { gap: 9px; }
+  .question-votes { gap: 5px; }
+  .question-vote { width: 33px; height: 33px; }
+}
+
+/* Release candidate: About page and the one-time reading gift. */
+.about-open-button { margin: 4px 0 18px; }
+.about-backdrop { position: fixed; inset: 0; z-index: 1100; background: #080b20dd; display: grid; place-items: center; padding: 16px; }
+.about-panel { background: #1b1e3e; border: 1px solid #737bb2; border-radius: 18px; padding: 28px; width: min(710px, 100%); max-height: 88vh; overflow-y: auto; color: #f1f3ff; position: relative; }
+.about-panel h2 { margin-top: 0; padding-inline-end: 28px; }
+.about-close { position: absolute; top: 10px; inset-inline-end: 14px; border: 0; background: transparent; color: #f1f3ff; font-size: 28px; cursor: pointer; }
+.about-prose { line-height: 1.7; color: #e0e4fb; }
+.about-prose p { margin: 0 0 1.1rem; }
+.about-gift { border-top: 1px solid #737bb2; margin-top: 2.5rem; padding-top: 1.5rem; }
+.about-gift-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 18px 0; }
+.about-gift-tier { display: flex; align-items: center; flex-direction: column; gap: 5px; background: #ffffff10; padding: 12px 4px; border-radius: 10px; font-size: 12px; text-align: center; }
+.about-gift-tier strong { font-size: 24px; }
+.quiz-username-suggestions { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px 8px; }
+.quiz-username-suggestions p { width: 100%; font-size: 12px; margin: 4px 0; color: #f0d5a6; }
+.quiz-username-option { background: #32375d; color: #eef5ff; border: 1px solid #7d96c3; border-radius: 7px; padding: 7px 10px; cursor: pointer; }
+.quiz-username-option:hover, .quiz-username-option:focus-visible { background: #465487; }
+@media (max-width: 520px) { .about-panel { padding: 20px 15px; } .about-gift-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.about-chapter + .about-chapter { margin-top: 2.6rem; }
+.about-chapter h3 { margin: 0 0 1rem; font-size: 1.18rem; color: #e6d9ff; }
+.about-emphasis { font-weight: 750; color: #f8e1a9; }
+.about-rule { padding-inline-start: 1.1rem; font-weight: 600; }
+.about-gift p { line-height: 1.7; margin: 0 0 1rem; }
+.about-gift h3 { color: #f8e1a9; }
+
+/* Closing at the end of the long About article must not require scrolling back. */
+.about-bottom-actions { display: flex; justify-content: center; margin-top: 24px; padding-top: 18px; border-top: 1px solid #737bb2; }
+.about-bottom-close { min-width: 160px; }

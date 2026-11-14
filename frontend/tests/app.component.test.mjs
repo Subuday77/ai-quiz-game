@@ -33,12 +33,18 @@ writeFileSync(join(temp, 'localization/store.mjs'),
 const resetSource = readFileSync(join(root, 'src/app/localization/reset-copy.ts'), 'utf8');
 writeFileSync(join(temp, 'localization/reset-copy.mjs'),
   ts.transpileModule(resetSource, { compilerOptions }).outputText);
+const aboutSource = readFileSync(join(root, 'src/app/localization/about-copy.ts'), 'utf8');
+writeFileSync(join(temp, 'localization/about-copy.mjs'),
+  ts.transpileModule(aboutSource, { compilerOptions }).outputText);
 const componentSource = source
   .replace("from './localization/store';", "from './localization/store.mjs';")
-  .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';");
+  .replace("from './localization/reset-copy';", "from './localization/reset-copy.mjs';")
+  .replace("from './localization/about-copy';", "from './localization/about-copy.mjs';");
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
-const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
+  appealHistoryRefundRows, formatAppealHistoryDate } = await import(
+    pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -1580,6 +1586,56 @@ test('incomplete translations keep prior screen and spinner until ready', () => 
   store.destroy(); // Cancels the scheduled retry; no paid calls leak from tests.
 });
 
+test('partial German batches cannot replace an already-visible Russian interface', () => {
+  const pending = [];
+  const russian = { ...english, 'hero.ready': 'Готовы играть?',
+    'hero.question': 'Вопрос' };
+  const german = { ...english, 'hero.ready': 'Bereit zu spielen?',
+    'hero.question': 'Frage' };
+  const http = {
+    get(url) {
+      if (url.endsWith('/ru')) return of({
+        language_code: 'ru', dictionary: russian,
+        source_version: 'v1', fallback: false, missing_count: 0,
+      });
+      if (url.endsWith('/de')) {
+        const reply = new Subject();
+        pending.push(reply);
+        return reply.asObservable();
+      }
+      throw new Error('Unexpected request: ' + url);
+    },
+  };
+  const store = new LocalizationStore(http);
+  const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
+  scheduler.run(() => {
+    store.load('ru');
+    store.load('de');
+    assert.equal(store.code, 'ru');
+    // Backend has saved some German strings, but the full locale is unfinished.
+    pending[0].next({ language_code: 'de',
+      dictionary: { ...russian, 'hero.ready': german['hero.ready'] },
+      source_version: 'v1', fallback: true, missing_count: 11 });
+    pending[0].complete();
+    assert.equal(store.loading, true);
+    assert.equal(store.code, 'ru');
+    assert.equal(store.t('hero.ready'), 'Готовы играть?');
+    assert.equal(store.t('hero.question'), 'Вопрос');
+
+    scheduler.schedule(() => {
+      assert.equal(pending.length, 2);
+      pending[1].next({ language_code: 'de', dictionary: german,
+        source_version: 'v1', fallback: false, missing_count: 0 });
+      pending[1].complete();
+      assert.equal(store.loading, false);
+      assert.equal(store.code, 'de');
+      assert.equal(store.t('hero.ready'), 'Bereit zu spielen?');
+      assert.equal(store.t('hero.question'), 'Frage');
+    }, 2600);
+  });
+  store.destroy();
+});
+
 test('failed translation keeps the previous language without saving preference', () => {
   const requests = [];
   const http = {
@@ -2477,6 +2533,49 @@ test('complaint history filter toolbar and premium cards provide accessible cont
   assert.match(css, /@media \(max-width: 590px\)/);
 });
 
+test('appeal history separates 3 bronze hint refund, 1 gold helper reward and 0 loss reward', () => {
+  const items = appealHistoryRefundRows([
+    { tier: 'bronze', amount: 3, reason: 'hints' },
+    { tier: 'gold', amount: 1, reason: 'helper' },
+  ]);
+  assert.deepEqual(items, [
+    { labelKey: 'appeals.hintRefunds', tier: 'bronze', amount: 3 },
+    { labelKey: 'appeals.helperCompensation', tier: 'gold', amount: 1 },
+  ]);
+  assert.equal(english[items[0].labelKey], 'Hint costs refunded');
+  assert.equal(english[items[1].labelKey], 'Helper consultation compensation');
+  assert.equal(english['appeals.lossCompensation'],
+    'Compensation for losing on this question');
+
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /appealHistoryRefundRows\(item\.expenses_refunded\)/);
+  assert.match(history, /field\('appeals\.lossCompensation',/);
+  assert.match(history, /refundFields \+/);
+  assert.doesNotMatch(history, /field\('appeals\.compensation',/);
+  assert.doesNotMatch(history, /' \(' \+ v\.reason \+ '\)'/);
+  assert.doesNotMatch(history, /field\('appeals\.hintRefunds', costs \|\| '0'\)/);
+});
+
+test('appeal history labels unused helper platinum refund and handles repeated or novel entries', () => {
+  assert.deepEqual(appealHistoryRefundRows(null), []);
+  assert.deepEqual(appealHistoryRefundRows([
+    { tier: 'platinum', amount: 2, reason: 'unused_helper' },
+  ]), [{ labelKey: 'appeals.unusedHelperRefund', tier: 'platinum', amount: 2 }]);
+  assert.deepEqual(appealHistoryRefundRows([
+    { tier: 'gold', amount: 1, reason: 'helper' },
+    { tier: 'gold', amount: 1, reason: 'helper' },
+    { tier: 'silver', amount: 1, reason: 'new_backend_reason' },
+    { tier: 'bronze', amount: 0, reason: 'hints' },
+  ]), [
+    { labelKey: 'appeals.helperCompensation', tier: 'gold', amount: 2 },
+    { labelKey: 'appeals.otherRefunds', tier: 'silver', amount: 1 },
+  ]);
+  for (const key of ['appeals.unusedHelperRefund', 'appeals.otherRefunds']) {
+    assert.ok(english[key], key + ' must have an English source for localization');
+  }
+});
+
 test('complaint history clear button resets search, dates, status and ordering together', () => {
   const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
   assert.equal(english['appeals.historyReset'], 'Clear filters');
@@ -2497,11 +2596,30 @@ test('complaint history shows judge outcome pill in the decision card heading', 
   assert.match(history, /'<div class="appeal-history-verdict">' \+\s*'<div class="appeal-history-verdict-header"><strong>' \+/);
   assert.match(history, /localized\(decision\.headingKey\) \+ '<\/strong>' \+/);
   assert.match(history, /'<span class="appeal-history-status appeal-history-status-' \+ allowedStatus \+ '\">' \+/);
-  assert.match(history, /localized\('appeals\.status\.' \+ item\.status\) \+ '<\/span>' \+/);
+  assert.match(history, /localized\('appeals\.status\.' \+ allowedStatus\) \+ '<\/span>' \+/);
   assert.match(history, /safe\(decision\.message\)/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-verdict-header/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-upheld/);
   assert.match(styles, /\.quiz-appeal-history-popup \.appeal-history-status-rejected/);
+});
+
+test('an active appeal lease displays In review, not a technical retry, and wallet catches up', () => {
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /item\.display_status \|\| item\.status/);
+  assert.match(history, /localized\('appeals\.status\.' \+ allowedStatus\)/);
+  assert.match(history, /this\.refreshSpendableStars\(\)/,
+    'history fetch must refresh the post-settlement wallet');
+
+  const submit = source.slice(source.indexOf('async openAppealForm('),
+    source.indexOf('async openAppealRules('));
+  assert.match(submit, /this\.watchAppealSettlement\(submittedAppeal\.id, accountId, runId\)/);
+  const watcher = source.slice(source.indexOf('private watchAppealSettlement('),
+    source.indexOf('private refreshAppealAllowance('));
+  assert.match(watcher, /\/api\/v2\/appeals\//);
+  assert.match(watcher, /this\.refreshSpendableStars\(\)/);
+  assert.match(watcher, /watch\.unsubscribe\(\)/);
+  assert.match(watcher, /polls > 24/);
 });
 
 test('history status heading is not mistaken for a judge verdict before adjudication', () => {
@@ -2536,6 +2654,39 @@ test('history status heading is not mistaken for a judge verdict before adjudica
   assert.match(history, /safe\(decision\.message\)/);
 });
 
+test('settled pre-answer appeal hides Judge prose until the game ends', () => {
+  const translate = key => english[key];
+  const leaks = 'Correct option C is Berlin.';
+  const hidden = appealHistoryDecisionPresentation('rejected', leaks, translate, true);
+  assert.equal(hidden.headingKey, 'appeals.historyVerdict');
+  assert.equal(hidden.message, english['appeals.keyHidden']);
+  assert.doesNotMatch(hidden.message, /Berlin|option C/);
+  const revealed = appealHistoryDecisionPresentation('rejected', leaks, translate, false);
+  assert.equal(revealed.message, leaks);
+  assert.equal(appealHistoryDecisionPresentation(
+    'pending', leaks, translate, true).message, english['appeals.notDecided']);
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /item\.before_answer && item\.answer_key === null/);
+});
+
+test('complaint history dates follow the UI language and use 24-hour time', () => {
+  const utc = '2026-11-14T01:32:00Z';
+  const options = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  };
+  assert.equal(formatAppealHistoryDate(utc, 'ru'),
+    new Date(utc).toLocaleString('ru', options));
+  assert.equal(formatAppealHistoryDate(utc, 'de'),
+    new Date(utc).toLocaleString('de', options));
+  assert.equal(formatAppealHistoryDate('nonsense', 'ru'), '—');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /formatAppealHistoryDate\(value, this\.locale\.code\)/);
+  assert.doesNotMatch(history, /toLocaleString\(undefined,/);
+});
+
 test('intro explicitly exempts pregame category exclusions and helper consultations from Q16 hints', () => {
   const intro = english['hero.intro'];
   assert.match(intro, /secret 16th question/);
@@ -2544,4 +2695,128 @@ test('intro explicitly exempts pregame category exclusions and helper consultati
   assert.match(intro, /Excluding categories before the game/);
   assert.match(intro, /consulting your helper during the game/);
   assert.match(intro, /do not count as hints/);
+});
+
+
+test('question thumbs are local-only until answer and survive question reload', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: key => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: key => saved.delete(key),
+  };
+  const key = 'ai-quiz-game:uncommitted-vote:v1:user-1:existing-game:same-question';
+  try {
+    const { app, posts, requests } = setup();
+    app.screen = 'question';
+    app.current = { ...question };
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 1);
+    assert.equal(saved.get(key), '1');
+    assert.equal(posts.length, 0, 'preanswer click must never call backend');
+
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 0);
+    assert.equal(saved.has(key), false);
+    app.voteQuestion(-1);
+    assert.equal(app.currentVote, -1);
+    app.voteQuestion(1);
+    assert.equal(app.currentVote, 1);
+    app.voteQuestion(-1);
+    assert.equal(app.currentVote, -1);
+    assert.equal(saved.get(key), '-1');
+    assert.equal(posts.length, 0);
+
+    const resumed = setup();
+    resumed.app.screen = 'question';
+    resumed.app.loadQuestion();
+    const get = resumed.requests.find(x => x.url.endsWith('/question'));
+    assert.ok(get);
+    succeed(get, { ...question });
+    assert.equal(resumed.app.currentVote, -1, 'refresh should restore draft');
+    assert.equal(saved.get(key), '-1');
+    assert.equal(resumed.posts.length, 0, 'refresh must not submit vote');
+
+    resumed.app.answer('B');
+    assert.equal(resumed.posts.length, 1);
+    assert.deepEqual(resumed.posts[0].body, {
+      question_id: 'same-question', answer: 'B', vote: -1,
+    });
+    assert.equal(saved.get(key), '-1', 'draft stays until server confirms answer');
+    succeed(resumed.posts[0], {
+      phase: 'main', correct: true, correct_answer: 'B',
+      correct_main_answers: 5, achievement: 'bronze',
+    });
+    assert.equal(saved.has(key), false);
+    assert.equal(resumed.app.currentVote, 0);
+    assert.equal(resumed.app.screen, 'feedback');
+    assert.equal(posts.length, 0);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+test('abandoned unanswered question creates no finalized vote and failed answer preserves draft', () => {
+  const previous = globalThis.localStorage;
+  const saved = new Map();
+  globalThis.localStorage = {
+    getItem: key => saved.get(key) ?? null,
+    setItem: (key, value) => saved.set(key, value),
+    removeItem: key => saved.delete(key),
+  };
+  const key = 'ai-quiz-game:uncommitted-vote:v1:user-1:existing-game:same-question';
+  try {
+    const { app, posts } = setup();
+    app.screen = 'question';
+    app.current = { ...question };
+    app.voteQuestion(-1);
+    assert.equal(posts.length, 0);
+    app.answer('A');
+    assert.equal(posts[0].body.vote, -1);
+    posts[0].subject.error(new Error('network unavailable'));
+    assert.equal(saved.get(key), '-1', 'failed answer must retain draft');
+    assert.equal(app.currentVote, -1);
+    // Merely leaving or resetting the view is not an answer: no POST vote.
+    app.screen = 'setup';
+    assert.equal(posts.length, 1);
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+});
+
+
+test('thumb controls share the question-number row and use neutral SVG icons', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const start = html.indexOf('<div class="question-heading-row">');
+  const end = html.indexOf('<h2>{{ question.question }}</h2>', start);
+  assert.ok(start >= 0 && end > start, 'heading row must precede question text');
+  const row = html.slice(start, end);
+  assert.match(row, /class="question-label"/);
+  assert.match(row, /class="question-votes"/);
+  assert.equal((row.match(/class="question-vote"/g) ?? []).length, 2);
+  assert.equal((row.match(/<svg class="vote-icon"/g) ?? []).length, 2);
+  assert.doesNotMatch(row, /👍|👎/, 'OS emoji skin/color must not be used');
+  assert.match(css, /\.question-heading-row\s*\{[^}]*display:\s*flex/);
+  assert.match(css, /\.question-heading-row\s*\{[^}]*align-items:\s*center/);
+});
+
+test('complaint action stays in the top-right header on both question and feedback screens', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const topline = template.slice(template.indexOf('<div class="card-topline">'), template.indexOf('<h1 *ngIf="screen === \'setup\'">'));
+  assert.match(topline, /screen === 'question' && !questionLoading/);
+  assert.match(topline, /screen === 'feedback'/);
+  assert.match(topline, /class="outline-button appeal-header-button"/);
+  assert.match(topline, /\(click\)="openAppealForm\(\)"/);
+  assert.match(topline, /appealedQuestionIds\.has\(current\.question_id\)/);
+  const feedback = template.slice(template.indexOf('<div *ngIf="screen === \'feedback\' && feedback as result"'), template.indexOf('<div *ngIf="screen === \'done\'"'));
+  assert.doesNotMatch(feedback, /appeal-report-button|openAppealForm\(\)/, 'feedback must not create a second complaint button');
+  assert.equal((template.match(/\(click\)="openAppealForm\(\)"/g) ?? []).length, 1);
+  assert.match(css, /\.card-topline \.appeal-header-button\s*\{/);
+  assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
+  assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
 });

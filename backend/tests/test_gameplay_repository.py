@@ -81,18 +81,23 @@ class GameplayRepositoryTests(unittest.TestCase):
             self.assertIsNotNone(restored)
             self.assertEqual(restored[0].id, attempt.id)
             self.assertEqual(restored[1].correct_key, "B")
+            self.assertEqual(restored[0].choice_order, attempt.choice_order)
         self.assertEqual(self.db.scalar(
             select(func.count(QuestionAttempt.id))
         ), 1)
 
     def test_answer_commits_once_and_never_awards_on_replay(self):
         _, question = self.offer()
+        from persistence.choice_order import display_key
+        attempt = self.db.scalar(select(QuestionAttempt).where(
+            QuestionAttempt.run_id == self.run.id))
+        visible_correct = display_key(attempt.choice_order, question.correct_key)
         result, actual_key = record_answer(
             self.db, run_id=self.run.id, user_id=self.first,
-            question_id=question.id, selected="B",
+            question_id=question.id, selected=visible_correct,
         )
         self.assertTrue(result.correct)
-        self.assertEqual(actual_key, "B")
+        self.assertEqual(actual_key, visible_correct)
         with self.assertRaises(GameConflict):
             record_answer(
                 self.db, run_id=self.run.id, user_id=self.first,
@@ -122,10 +127,12 @@ class GameplayRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(pending_question(self.db, run_id=self.run.id))
 
     def test_wrong_answer_loses_and_records_duration(self):
-        _, question = self.offer()
+        from persistence.choice_order import display_key
+        attempt, question = self.offer()
+        visible_wrong = display_key(attempt.choice_order, "A")
         result, _ = record_answer(
             self.db, run_id=self.run.id, user_id=self.first,
-            question_id=question.id, selected="A",
+            question_id=question.id, selected=visible_wrong,
         )
         self.assertFalse(result.correct)
         self.assertEqual(result.phase, "lost")
@@ -138,11 +145,13 @@ class GameplayRepositoryTests(unittest.TestCase):
             self.assertGreaterEqual(attempt.answer_duration_ms, 0)
 
     def test_five_correct_answers_award_bronze_once(self):
+        from persistence.choice_order import display_key
         for index in range(5):
-            _, question = self.offer(difficulty=index, suffix=str(index))
+            attempt, question = self.offer(difficulty=index, suffix=str(index))
             outcome, _ = record_answer(
                 self.db, run_id=self.run.id, user_id=self.first,
-                question_id=question.id, selected="B",
+                question_id=question.id,
+                selected=display_key(attempt.choice_order, question.correct_key),
             )
         self.assertEqual(outcome.achievement, "bronze")
         self.assertEqual(self.db.scalar(
