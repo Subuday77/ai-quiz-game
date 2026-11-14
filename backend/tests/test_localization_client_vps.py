@@ -63,6 +63,27 @@ class LocalizerPrivateClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(token, str(seen[0].url))
         self.assertFalse(factory.call_args.kwargs["trust_env"])
 
+    async def test_render_rollback_does_not_receive_private_api_key(self):
+        seen = []
+
+        async def handle(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={
+                "dictionary": {"greet": "Hallo"},
+                "fallback": False,
+            })
+
+        original_client = httpx.AsyncClient
+        mock_client = original_client(transport=httpx.MockTransport(handle))
+        with patch.dict(os.environ, {
+            "AI_LOCALIZER_BASE_URL": "https://ai-localizer-api.onrender.com",
+            "AI_LOCALIZER_API_KEY": "private-do-not-send-to-render",
+        }), patch("localization.client.httpx.AsyncClient", return_value=mock_client):
+            result = await translate_missing({"greet": "Hello"}, "de")
+
+        self.assertEqual(result, {"greet": "Hallo"})
+        self.assertNotIn("authorization", seen[0].headers)
+
     async def test_invalid_response_placeholders_never_enter_cache(self):
         async def handle(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={
