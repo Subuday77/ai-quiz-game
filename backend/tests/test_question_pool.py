@@ -655,9 +655,22 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["question_id"], str(existing_id))
         with Session(self.engine) as db:
+            from persistence.choice_order import display_key
+            attempt = db.scalar(select(QuestionAttempt).where(
+                QuestionAttempt.run_id == self.run_id,
+                QuestionAttempt.question_id == existing_id,
+            ))
+            question = db.get(Question, existing_id)
+            wrong_canonical = next(
+                key for key in "ABCD" if key != question.correct_key
+            )
+            wrong_visible = display_key(attempt.choice_order, wrong_canonical)
+            self.assertNotEqual(
+                wrong_visible, display_key(attempt.choice_order, question.correct_key)
+            )
             result, _ = record_answer(
                 db, run_id=self.run_id, user_id=self.alice,
-                question_id=existing_id, selected="A",
+                question_id=existing_id, selected=wrong_visible,
             )
             self.assertEqual(db.get(GameRun, self.run_id).status, "lost")
         with Session(self.engine) as db:
