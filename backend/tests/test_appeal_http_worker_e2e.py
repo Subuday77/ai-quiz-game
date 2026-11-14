@@ -308,6 +308,17 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         listed = next(item for item in listing.json() if item["id"] == appeal_id)
         self.assertIsNone(listed["verdict"])
         self.assertIsNone(listed["answer_key"])
+        self.assertEqual(self.ledger(appeal_id), {
+            "deposit": ("bronze", -1),
+            "appeal-deposit-refund": ("bronze", 1),
+        })
+        with Session(self.engine) as db:
+            self.assertEqual(star_balances(db, self.user_id)["bronze"], 2)
+            self.assertEqual(db.get(GameRun, UUID(run_id)).status, "main")
+            self.assertIsNotNone(db.get(
+                QuestionAttempt, UUID(attempt_id)).superseded_at)
+        # No spoiler until the round actually ends; the full stored verdict
+        # becomes visible from both detail and list after finishing.
         with Session(self.engine) as db:
             original = db.get(QuestionAppeal, UUID(appeal_id))
             saved_verdict = original.verdict_localized
@@ -324,16 +335,6 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
                             self.client.get("/api/v2/appeals").json()
                             if item["id"] == appeal_id)
         self.assertEqual(listed_after["verdict"], saved_verdict)
-        self.assertEqual(self.ledger(appeal_id), {
-            "deposit": ("bronze", -1),
-            "appeal-deposit-refund": ("bronze", 1),
-        })
-        with Session(self.engine) as db:
-            self.assertEqual(star_balances(db, self.user_id)["bronze"], 2)
-            self.assertEqual(db.get(GameRun, UUID(run_id)).status, "main")
-            self.assertIsNotNone(db.get(
-                QuestionAttempt, UUID(attempt_id)).superseded_at)
-
 
     def test_correct_answer_can_be_appealed_without_score_or_loss_compensation(self):
         run_id, question_id, attempt_id = self.fixture(6, answered_correct=True)
