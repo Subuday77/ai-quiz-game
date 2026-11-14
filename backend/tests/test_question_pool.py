@@ -466,6 +466,50 @@ class GlobalPoolTests(unittest.TestCase):
         generate.assert_not_called()
         self.assertNotIn("correct_answer", response.json())
 
+    def test_reused_question_has_new_persisted_order_and_correct_visible_key(self):
+        """A reused question cannot carry the previous player's answer letters."""
+        from persistence.choice_order import display_choices, display_key
+        existing_id = self.seed_other_user_question()
+        with Session(self.engine) as db:
+            original = db.get(Question, existing_id)
+            previous = db.scalar(select(QuestionAttempt)
+                .where(QuestionAttempt.question_id == existing_id))
+            bob_options = display_choices(previous.choice_order, original.choices)
+            true_answer = original.choices[original.correct_key]
+            original_order = previous.choice_order
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as generate:
+            served = self.request()
+        self.assertEqual(served.status_code, 200, served.text)
+        shown = served.json()
+        self.assertEqual(shown["question_id"], str(existing_id))
+        self.assertNotEqual(shown["answers"], bob_options)
+        self.assertEqual(set(shown["answers"].values()), set(bob_options.values()))
+        self.assertEqual(shown, self.request().json())  # F5/retry invariant
+        with Session(self.engine) as db:
+            latest = db.scalar(select(QuestionAttempt)
+                .where(QuestionAttempt.run_id == self.run_id))
+            self.assertNotEqual(latest.choice_order, original_order)
+            self.assertEqual(display_choices(latest.choice_order,
+                                             db.get(Question, existing_id).choices),
+                             shown["answers"])
+            visible_correct = display_key(latest.choice_order, "B")
+        self.assertEqual(shown["answers"][visible_correct], true_answer)
+        answered = self.client.post(f"/api/v2/games/{self.run_id}/answer", json={
+            "question_id": shown["question_id"], "answer": visible_correct,
+            "vote": -1,
+        })
+        self.assertEqual(answered.status_code, 200, answered.text)
+        self.assertTrue(answered.json()["correct"])
+        self.assertEqual(answered.json()["correct_answer"], visible_correct)
+        with Session(self.engine) as db:
+            issued = db.scalar(select(QuestionAttempt)
+                .where(QuestionAttempt.run_id == self.run_id))
+            self.assertEqual(issued.selected_key, visible_correct)
+            self.assertTrue(issued.is_correct)
+        generate.assert_not_called()
+
     def test_pool_inspection_uses_original_q1_category_after_game_is_lost(self):
         """Regression: a completed Q1 moves the live category rotation."""
         from persistence.gameplay import record_answer

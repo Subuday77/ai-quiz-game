@@ -508,12 +508,15 @@ class PersistentGameAPITests(unittest.TestCase):
         game_id = self.start()
         url = f"/api/v2/games/{game_id}"
         question = self.client.get(url + "/question").json()
+        visible_correct = next(
+            key for key, text in question["answers"].items() if text == "Mars"
+        )
         response = self.client.post(url + "/answer", json={
-            "question_id": question["question_id"], "answer": "B",
+            "question_id": question["question_id"], "answer": visible_correct,
         })
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["correct"])
-        self.assertEqual(response.json()["correct_answer"], "B")
+        self.assertEqual(response.json()["correct_answer"], visible_correct)
         self.assertEqual(response.json()["correct_main_answers"], 1)
         self.assertEqual(self.client.post(url + "/answer", json={
             "question_id": question["question_id"], "answer": "B",
@@ -587,7 +590,9 @@ class PersistentGameAPITests(unittest.TestCase):
             current = self.client.get(url + "/question")
             self.assertEqual(current.status_code, 200, current.text)
             scored = self.client.post(url + "/answer", json={
-                "question_id": current.json()["question_id"], "answer": "B",
+                "question_id": current.json()["question_id"],
+                "answer": next(k for k, text in current.json()["answers"].items()
+                               if text == "Mars"),
             })
             self.assertEqual(scored.status_code, 200, scored.text)
         self.assertEqual(scored.json()["achievement"], "bronze")

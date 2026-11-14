@@ -226,7 +226,9 @@ class SilverCategoryTests(unittest.TestCase):
             "question_id": first["question_id"], "answer": "B",
         }).status_code, 409)
         self.assertEqual(self.client.post(self.base + "/answer", json={
-            "question_id": q3["question_id"], "answer": "B",
+            "question_id": q3["question_id"],
+            "answer": next(k for k, text in q3["answers"].items()
+                           if text == "correct"),
         }).status_code, 200)
 
         with Session(self.engine) as db:

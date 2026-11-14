@@ -90,22 +90,16 @@ def active_round(info) -> None:
 
 def reserved(purchase, call, question, category: str, run_id, *,
              reused: bool, competence_source: str = "unknown",
-             question_number: int = 1) -> None:
+             question_number: int = 1, choice_order: str | None = None) -> None:
     if not enabled():
         return
     profile = purchase.profile
     skill = profile["skills"].get(call.topic, "MEDIUM")
     weights = outcome_weights(skill, question_number)
     from persistence.choice_order import display_key
-    from persistence.models import QuestionAttempt
-    attempt = db_attempt = None
-    # The selected key is visible to the player; the canonical key isn't.
-    # This diagnostic has no Session, so reconstruct the order via the call
-    # only when supplied by the service through its optional attribute.
-    order = getattr(call, "_choice_order", None)
+    visible_correct = display_key(choice_order, question.correct_key)
     selected_correct = (
-        call.selected_key == display_key(order, question.correct_key)
-        if call.selected_key is not None else None
+        call.selected_key == visible_correct if call.selected_key is not None else None
     )
     _emit(
         "helper_consultation_reserved",
@@ -127,7 +121,7 @@ def reserved(purchase, call, question, category: str, run_id, *,
         outcome=call.outcome,
         confidence=(choose_delivery_style(call.id) if call.selected_key is not None else None),
         selected_key=call.selected_key,
-        correct_key=question.correct_key,
+        correct_key=visible_correct,
         selected_answer_correct=selected_correct,
         reused_outcome=reused,
     )

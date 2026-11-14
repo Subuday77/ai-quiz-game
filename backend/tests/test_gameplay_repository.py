@@ -81,18 +81,23 @@ class GameplayRepositoryTests(unittest.TestCase):
             self.assertIsNotNone(restored)
             self.assertEqual(restored[0].id, attempt.id)
             self.assertEqual(restored[1].correct_key, "B")
+            self.assertEqual(restored[0].choice_order, attempt.choice_order)
         self.assertEqual(self.db.scalar(
             select(func.count(QuestionAttempt.id))
         ), 1)
 
     def test_answer_commits_once_and_never_awards_on_replay(self):
         _, question = self.offer()
+        from persistence.choice_order import display_key
+        attempt = self.db.scalar(select(QuestionAttempt).where(
+            QuestionAttempt.run_id == self.run.id))
+        visible_correct = display_key(attempt.choice_order, question.correct_key)
         result, actual_key = record_answer(
             self.db, run_id=self.run.id, user_id=self.first,
-            question_id=question.id, selected="B",
+            question_id=question.id, selected=visible_correct,
         )
         self.assertTrue(result.correct)
-        self.assertEqual(actual_key, "B")
+        self.assertEqual(actual_key, visible_correct)
         with self.assertRaises(GameConflict):
             record_answer(
                 self.db, run_id=self.run.id, user_id=self.first,
