@@ -1,6 +1,6 @@
 """Regression tests for Q16 subjective difficulty consensus.
 
-Run from backend: python -m unittest test_q16_too_easy_consensus -v
+Run from backend: python -m unittest discover -s tests -p 'test_q16_too_easy_consensus.py' -v
 """
 import unittest
 

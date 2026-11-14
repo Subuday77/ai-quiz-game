@@ -20,3 +20,20 @@ answer_check_*.csv
 
 # Local Platinum Helper live QA: stored questions, correct options and raw AI text
 backend/qa_reports/
+
+# Generated AI calibration results; keep prompts/answers out of Git
+generator_ab_*.jsonl
+generator_ab_*.csv
+generator_ab_*.md
+critic_v3_*.jsonl
+critic_v3_*.csv
+critic_two_stage_*.jsonl
+critic_two_stage_*.csv
+audit_v3_scores.csv
+backend/tagged_critic_replay_nov2_*.jsonl
+qa_reports/
+
+# Local Python scratch databases and transient outputs
+*.sqlite
+*.sqlite3
+*.db
