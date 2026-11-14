@@ -111,11 +111,13 @@ def lost_question_for_appeal(run_id: UUID,
     )) is not None:
         raise HTTPException(status_code=409, detail="Already appealed")
     question = db.get(Question, attempt.question_id)
+    from persistence.choice_order import display_choices
     hidden = set(hidden_choices(db, attempt, question))
+    shown = display_choices(attempt.choice_order, question.choices)
     return {
         "question_id": str(question.id), "number": attempt.number,
         "difficulty": attempt.requested_difficulty, "question": question.text,
-        "answers": {k: question.choices[k] for k in "ABCD" if k not in hidden},
+        "answers": {k: shown[k] for k in "ABCD" if k not in hidden},
         "bonus": attempt.number == 16, "hidden_count": attempt.hints_used,
     }
 
@@ -129,7 +131,7 @@ def appeal_quote(run_id: UUID, question_id: UUID,
         question = db.get(Question, question_id)
         if question is None:
             raise HTTPException(status_code=404, detail="Question missing")
-        # Display four original options; mark hidden choices as metadata, never as a key.
+        # Display the exact four options this attempt saw, including their letters.
         from persistence.gameplay import hidden_choices
         from persistence.models import QuestionAttempt, GameRun
         attempt = db.scalar(select(QuestionAttempt).where(
@@ -161,9 +163,10 @@ def appeal_quote(run_id: UUID, question_id: UUID,
         ) if caused_loss else None
         quote["bonus_wager_refund_if_upheld"] = bool(
             caused_loss and attempt.number == 16 and run.bonus_wager_accepted)
+        from persistence.choice_order import display_choices
         quote["question_snapshot"] = {
             "question_id": str(question_id), "question": question.text,
-            "answers": {k: question.choices[k] for k in "ABCD"},
+            "answers": display_choices(attempt.choice_order, question.choices),
             "number": attempt.number, "difficulty": attempt.requested_difficulty,
             "language": run.language,
             "hidden_keys": list(hidden_choices(db, attempt, question)),

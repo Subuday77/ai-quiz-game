@@ -260,6 +260,9 @@ class QuestionAttempt(Base):
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     category_change_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     manual_category_used: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    # Display A/B/C/D -> immutable canonical A/B/C/D, frozen per issuance.
+    # NULL on legacy attempts means identity; existing rounds never reshuffle.
+    choice_order: Mapped[str | None] = mapped_column(String(4), nullable=True)
     answer_duration_ms: Mapped[int | None] = mapped_column(Integer)
     client_active_duration_ms: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (

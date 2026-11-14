@@ -96,8 +96,16 @@ def reserved(purchase, call, question, category: str, run_id, *,
     profile = purchase.profile
     skill = profile["skills"].get(call.topic, "MEDIUM")
     weights = outcome_weights(skill, question_number)
+    from persistence.choice_order import display_key
+    from persistence.models import QuestionAttempt
+    attempt = db_attempt = None
+    # The selected key is visible to the player; the canonical key isn't.
+    # This diagnostic has no Session, so reconstruct the order via the call
+    # only when supplied by the service through its optional attribute.
+    order = getattr(call, "_choice_order", None)
     selected_correct = (
-        call.selected_key == question.correct_key if call.selected_key is not None else None
+        call.selected_key == display_key(order, question.correct_key)
+        if call.selected_key is not None else None
     )
     _emit(
         "helper_consultation_reserved",
@@ -152,7 +160,8 @@ def finished(db, purchase, call, *, reply: str | None, charged: bool) -> None:
 
     attempt = db.get(QuestionAttempt, call.question_attempt_id)
     question = db.get(Question, attempt.question_id) if attempt else None
-    correct_key = question.correct_key if question else None
+    from persistence.choice_order import display_key
+    correct_key = display_key(attempt.choice_order, question.correct_key) if question else None
     selected_correct = (
         (call.selected_key == correct_key)
         if call.selected_key is not None and correct_key is not None else None

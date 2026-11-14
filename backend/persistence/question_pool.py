@@ -18,6 +18,7 @@ from persistence.categories import allowed_categories, available_categories
 from persistence.gameplay import (
     GameConflict, GameNotFound, game_state, owned_game, pending_question,
 )
+from persistence.choice_order import last_choice_order, new_choice_order
 from persistence.models import (
     GameRun, Question, QuestionAttempt, QuestionFact, QuestionReport,
     QuestionReview, QuestionTag, QuestionVoteReview, Tag, Topic, User,
@@ -366,6 +367,7 @@ def offer_approved_pool_question(
                 manual_category_used=old_attempt.manual_category_used + (
                     1 if replace_manual else 0
                 ) if replacing else 0,
+                choice_order=new_choice_order(last_choice_order(db, saved.id)),
             )
             db.add(attempt)
             db.commit()

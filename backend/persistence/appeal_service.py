@@ -172,9 +172,10 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             GameRun.user_id == user_id,
             GameRun.status.in_(("lost", "completed")))) or 0)
 
-        # Preserve ALL four original options, plus explicit hidden keys. The
-        # immutable snapshot lets the player review the exact hint state.
-        answers = {key: question.choices[key] for key in "ABCD"}
+        # Freeze the exact shown letters, including removed-option metadata.
+        # Judge, Keddy and the player must agree on what A/B/C/D meant.
+        from persistence.choice_order import display_choices, display_key
+        answers = display_choices(attempt.choice_order, question.choices)
         from persistence.gameplay import hidden_choices
         hidden_keys = list(hidden_choices(db, attempt, question))
         helper = db.scalar(select(PlatinumHelperPurchase).where(
@@ -206,7 +207,7 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
             comment=cleaned_comment, source_links=source_links,
             context={
                 "selected_key": attempt.selected_key,
-                "correct_key": question.correct_key,  # private judge input
+                "correct_key": display_key(attempt.choice_order, question.correct_key),  # private judge input
                 "hints_used": attempt.hints_used,
                 "expenses": dict(attempt.appeal_expenses or {}),
                 "helper_purchase_id": str(helper.id) if helper else None,

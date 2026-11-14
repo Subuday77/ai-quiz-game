@@ -230,7 +230,10 @@ def _public(attempt, stored, phase: str, *, db: Session | None = None) -> Public
         if db is None:
             raise GameConflict("Database needed for persisted question hints")
         hidden = set(hidden_choices(db, attempt, stored))
-    options = {key: stored.choices[key] for key in "ABCD" if key not in hidden}
+    from persistence.choice_order import display_choices
+    options = {key: text for key, text in
+               display_choices(attempt.choice_order, stored.choices).items()
+               if key not in hidden}
     return PublicQuestion(
         question_id=str(attempt.question_id),
         number=attempt.number,
