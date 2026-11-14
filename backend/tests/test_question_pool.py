@@ -214,9 +214,14 @@ class GlobalPoolTests(unittest.TestCase):
             late_category = categories[-1]
         pooled = self.seed_other_user_question(category=late_category)
         ranked_queries = []
+        candidate_queries = []
 
         def observe(conn, cursor, statement, parameters, context, many):
-            if "row_number(" in statement.lower() and "questions" in statement.lower():
+            sql = " ".join(statement.lower().split())
+            if ("from questions join topics" in sql
+                    and "question_reviews" in sql and "question_facts" in sql):
+                candidate_queries.append(statement)
+            if "row_number(" in sql and "questions" in sql:
                 ranked_queries.append(statement)
 
         event.listen(self.engine, "before_cursor_execute", observe)
@@ -228,6 +233,7 @@ class GlobalPoolTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["question_id"], str(pooled))
             self.assertEqual(len(ranked_queries), 1)
+            self.assertEqual(len(candidate_queries), 1)
             ai.assert_not_called()
         finally:
             event.remove(self.engine, "before_cursor_execute", observe)
