@@ -43,7 +43,8 @@ const componentSource = source
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
-  appealHistoryRefundRows } = await import(pathToFileURL(join(temp, 'app.component.mjs')).href);
+  appealHistoryRefundRows, formatAppealHistoryDate } = await import(
+    pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
   pathToFileURL(join(temp, 'localization/reset-copy.mjs')).href,
@@ -2651,6 +2652,39 @@ test('history status heading is not mistaken for a judge verdict before adjudica
   assert.match(history, /appealHistoryDecisionPresentation\(/);
   assert.match(history, /localized\(decision\.headingKey\)/);
   assert.match(history, /safe\(decision\.message\)/);
+});
+
+test('settled pre-answer appeal hides Judge prose until the game ends', () => {
+  const translate = key => english[key];
+  const leaks = 'Correct option C is Berlin.';
+  const hidden = appealHistoryDecisionPresentation('rejected', leaks, translate, true);
+  assert.equal(hidden.headingKey, 'appeals.historyVerdict');
+  assert.equal(hidden.message, english['appeals.keyHidden']);
+  assert.doesNotMatch(hidden.message, /Berlin|option C/);
+  const revealed = appealHistoryDecisionPresentation('rejected', leaks, translate, false);
+  assert.equal(revealed.message, leaks);
+  assert.equal(appealHistoryDecisionPresentation(
+    'pending', leaks, translate, true).message, english['appeals.notDecided']);
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /item\.before_answer && item\.answer_key === null/);
+});
+
+test('complaint history dates follow the UI language and use 24-hour time', () => {
+  const utc = '2026-11-14T01:32:00Z';
+  const options = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  };
+  assert.equal(formatAppealHistoryDate(utc, 'ru'),
+    new Date(utc).toLocaleString('ru', options));
+  assert.equal(formatAppealHistoryDate(utc, 'de'),
+    new Date(utc).toLocaleString('de', options));
+  assert.equal(formatAppealHistoryDate('nonsense', 'ru'), '—');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /formatAppealHistoryDate\(value, this\.locale\.code\)/);
+  assert.doesNotMatch(history, /toLocaleString\(undefined,/);
 });
 
 test('intro explicitly exempts pregame category exclusions and helper consultations from Q16 hints', () => {

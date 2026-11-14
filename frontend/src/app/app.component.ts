@@ -187,14 +187,25 @@ export function appealQuestionExcerpt(value: string): string {
 /** Only finalized merits rulings are Judge decisions; other states are statuses. */
 export function appealHistoryDecisionPresentation(
   status: string, verdict: string | null, translate: (key: string) => string,
+  hiddenUntilGameEnd = false,
 ): { headingKey: string; message: string } {
   const decided = status === 'upheld' || status === 'rejected';
   const awaiting = status === 'pending' || status === 'retry_pending';
   return {
     headingKey: decided ? 'appeals.historyVerdict' : 'appeals.historyComplaintStatus',
     message: awaiting ? translate('appeals.notDecided') :
+      decided && hiddenUntilGameEnd ? translate('appeals.keyHidden') :
       verdict || translate('appeals.notDecided'),
   };
+}
+
+/** Use the selected UI language, not the browser's default locale. */
+export function formatAppealHistoryDate(value: string, languageCode: string): string {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString(languageCode, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }) : '—';
 }
 
 /** Pure function shared by UI and regression tests: no network or state mutation. */
@@ -943,13 +954,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.refreshSpendableStars();
       const safe = (value: unknown) => this.escapeAppealHtml(value);
       const localized = (key: string) => safe(this.locale.t(key));
-      const formattedDate = (value: string) => {
-        const date = new Date(value);
-        return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, {
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit',
-        }) : '—';
-      };
+      const formattedDate = (value: string) =>
+        formatAppealHistoryDate(value, this.locale.code);
       const statuses: { value: AppealHistoryStatus; label: string }[] = [
         { value: 'all', label: 'appeals.historyAll' },
         { value: 'upheld', label: 'appeals.status.upheld' },
@@ -1007,7 +1013,8 @@ export class AppComponent implements OnInit, OnDestroy {
         const allowedStatus = ['upheld', 'rejected', 'pending', 'retry_pending',
           'technical_unresolved'].includes(displayedStatus) ? displayedStatus : 'unknown';
         const decision = appealHistoryDecisionPresentation(
-          item.status, item.verdict, key => this.locale.t(key));
+          item.status, item.verdict, key => this.locale.t(key),
+          item.before_answer && item.answer_key === null);
         const field = (labelKey: string, value: string) =>
           '<p class="appeal-history-field"><span class="appeal-history-field-name">' +
           localized(labelKey) + ':</span> ' + value + '</p>';

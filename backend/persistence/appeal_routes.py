@@ -55,7 +55,11 @@ def _appeal_display_status(appeal: QuestionAppeal, *, now: datetime | None = Non
 
 
 def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
-    """Allowlist: hide the private answer key until the game is finished."""
+    """Hide both the key and free-form Judge explanation until game end.
+
+    Judge prose can name the correct letter/option even when answer_key is
+    suppressed. Preserve the complete decision in PostgreSQL for later viewing.
+    """
     reveal_key = not appeal.before_answer
     if appeal.before_answer and db is not None and appeal.run_id is not None:
         run = db.get(GameRun, appeal.run_id)
@@ -70,7 +74,8 @@ def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
         "status": appeal.status,
         "display_status": _appeal_display_status(appeal),
         "submitted_at": appeal.submitted_at,
-        "closed_at": appeal.closed_at, "verdict": appeal.verdict_localized,
+        "closed_at": appeal.closed_at,
+        "verdict": appeal.verdict_localized if reveal_key else None,
         "deposit": {"tier": appeal.deposit_tier, "amount": 1,
                     "refunded": appeal.deposit_refunded_at is not None},
         "filing_fee_bronze": appeal.filing_fee_bronze,

@@ -300,8 +300,30 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         case = self.client.get(f"/api/v2/appeals/{appeal_id}").json()
         self.assertEqual(case["status"], "upheld")
         self.assertIsNone(case["answer_key"])
+        self.assertIsNone(case["verdict"], "Judge explanation must not spoil the answer")
         self.assertNotIn("correct_key", json.dumps(case))
         self.assertEqual(case["compensation"]["amount"], 0)
+        listing = self.client.get("/api/v2/appeals")
+        self.assertEqual(listing.status_code, 200, listing.text)
+        listed = next(item for item in listing.json() if item["id"] == appeal_id)
+        self.assertIsNone(listed["verdict"])
+        self.assertIsNone(listed["answer_key"])
+        with Session(self.engine) as db:
+            original = db.get(QuestionAppeal, UUID(appeal_id))
+            saved_verdict = original.verdict_localized
+            self.assertTrue(saved_verdict)
+            # Simulate the natural end of this same round; do not settle twice.
+            run = db.get(GameRun, UUID(run_id))
+            run.status = "completed"
+            db.commit()
+        after = self.client.get(f"/api/v2/appeals/{appeal_id}")
+        self.assertEqual(after.status_code, 200, after.text)
+        self.assertEqual(after.json()["answer_key"], "B")
+        self.assertEqual(after.json()["verdict"], saved_verdict)
+        listed_after = next(item for item in
+                            self.client.get("/api/v2/appeals").json()
+                            if item["id"] == appeal_id)
+        self.assertEqual(listed_after["verdict"], saved_verdict)
         self.assertEqual(self.ledger(appeal_id), {
             "deposit": ("bronze", -1),
             "appeal-deposit-refund": ("bronze", 1),
