@@ -79,7 +79,7 @@ async def translate_missing(missing: dict[str, str], code: str) -> dict[str, str
             or any(not isinstance(s, str) or not s.strip() or len(s) > 4000
                    for s in translated.values())):
         raise LocalizationUnavailable("Invalid AI Localizer response")
-    placeholder = re.compile(r"\\{\\{[a-zA-Z0-9_]+\\}\\}")
+    placeholder = re.compile(r"\{\{[a-zA-Z0-9_]+\}\}")
     for key, original in missing.items():
         if sorted(placeholder.findall(original)) != sorted(placeholder.findall(translated[key])):
             raise LocalizationUnavailable("AI Localizer altered a UI placeholder")
