@@ -63,7 +63,7 @@ class ProtectionProfileTests(unittest.TestCase):
         # deliberately differs for transport, Localizer, secrets and DB First.
         exceptions = {
             "DATABASE_URL", "OPENAI_API_KEY", "AUTH_COOKIE_SECURE",
-            "AUTH_ALLOWED_ORIGINS", "AI_LOCALIZER_BASE_URL",
+            "AUTH_ALLOWED_ORIGINS", "AI_LOCALIZER_BASE_URL", "AI_LOCALIZER_API_KEY",
             "QUIZ_DB_FIRST_GENERATION",
         }
         self.assertEqual(
@@ -75,6 +75,8 @@ class ProtectionProfileTests(unittest.TestCase):
             if key not in exceptions:
                 with self.subTest(key=key):
                     self.assertEqual(production[key], value)
+        self.assertEqual(production["AI_LOCALIZER_BASE_URL"], "http://localizer-api:8080")
+        self.assertEqual(production["AI_LOCALIZER_API_KEY"], "REPLACE_WITH_QUIZ_LOCALIZER_SECRET")
         self.assertEqual(production["QUIZ_DB_FIRST_GENERATION"], "true")
         self.assertEqual(production["QUIZ_COMPLAINT_LOG_LEVEL"], "INFO")
         self.assertEqual(production["AUTH_COOKIE_SECURE"], "true")

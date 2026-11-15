@@ -40,6 +40,7 @@ services:
     networks:
       - db_private
       - app_net
+      - localizer_private
 
   web:
     build:
@@ -59,6 +60,10 @@ networks:
   db_private:
     internal: true
   app_net:
+  # Same-host Localizer, never attached to public HTTP ingress.
+  localizer_private:
+    external: true
+    name: ai-localizer-clients
 
 volumes:
   quiz_pgdata:
