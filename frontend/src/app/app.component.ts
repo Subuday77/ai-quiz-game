@@ -1519,7 +1519,53 @@ export class AppComponent implements OnInit, OnDestroy {
     if (existingEmail) {
       const res = await Swal.fire({ titleText: this.locale.t('auth.verifyEmail'),
         text: this.locale.t('auth.sendVerification') + ': ' + existingEmail + '?',
+        showDenyButton: true,
+        denyButtonText: this.locale.t('auth.changeUnverifiedEmail'),
+        confirmButtonText: this.locale.t('auth.sendVerification'),
         showCancelButton: true, background: '#1b1e3e', color: '#f1f3ff' });
+      if (res.isDenied) {
+        const change = await Swal.fire({
+          titleText: this.locale.t('auth.changeUnverifiedEmail'),
+          html: '<div class="quiz-auth-fields">' +
+            '<label id="correct-email-label" for="correct-email-input"></label>' +
+            '<input id="correct-email-input" class="swal2-input" type="email" autocomplete="email" maxlength="254">' +
+            '<label id="correct-password-label" for="correct-password-input"></label>' +
+            '<input id="correct-password-input" class="swal2-input" type="password" autocomplete="current-password" maxlength="256">' +
+            '</div>',
+          didOpen: () => {
+            const popup = Swal.getPopup();
+            const emailLabel = popup?.querySelector<HTMLElement>('#correct-email-label');
+            const passLabel = popup?.querySelector<HTMLElement>('#correct-password-label');
+            if (emailLabel) emailLabel.textContent = this.locale.t('auth.email');
+            if (passLabel) passLabel.textContent = this.locale.t('auth.currentPassword');
+          },
+          showCancelButton: true, showLoaderOnConfirm: true,
+          background: '#1b1e3e', color: '#f1f3ff',
+          preConfirm: async () => {
+            const popup = Swal.getPopup();
+            const email = popup?.querySelector<HTMLInputElement>('#correct-email-input')?.value.trim() || '';
+            const current_password = popup?.querySelector<HTMLInputElement>('#correct-password-input')?.value || '';
+            if (!EMAIL_PATTERN.test(email) || !current_password) {
+              Swal.showValidationMessage(this.locale.t('auth.fieldsInvalid'));
+              return false;
+            }
+            try {
+              return await firstValueFrom(this.http.post<Account>(
+                '/api/auth/email/replace-unverified', { email, current_password }
+              ).pipe(timeout(15000)));
+            } catch {
+              Swal.showValidationMessage(this.locale.t('auth.emailClaimUnavailable'));
+              return false;
+            }
+          },
+        });
+        if (change.isConfirmed && change.value && this.account) {
+          this.account = change.value as Account;
+          await Swal.fire({ text: this.locale.t('auth.correctedEmail'),
+                            background: '#1b1e3e', color: '#f1f3ff' });
+        }
+        return;
+      }
       if (!res.isConfirmed) return;
       try {
         await firstValueFrom(this.http.post('/api/auth/email/resend', {}).pipe(timeout(15000)));
