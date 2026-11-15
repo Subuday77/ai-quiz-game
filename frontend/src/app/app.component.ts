@@ -1232,7 +1232,7 @@ export class AppComponent implements OnInit, OnDestroy {
         const username = (Swal.getPopup()?.querySelector<HTMLInputElement>(
           '#settings-username-input')?.value || '').trim();
         if (!username || username.length > 80) {
-          Swal.showValidationMessage('Enter a display name (up to 80 characters).');
+          Swal.showValidationMessage(this.locale.t('auth.displayNameInvalid'));
           return false;
         }
         try {
@@ -1492,9 +1492,9 @@ export class AppComponent implements OnInit, OnDestroy {
   private async requestPasswordReset(): Promise<void> {
     const { default: Swal } = await import('sweetalert2');
     const result = await Swal.fire({
-      titleText: 'Reset password',
-      input: 'email', inputPlaceholder: 'Email address',
-      showCancelButton: true, confirmButtonText: 'Send reset link',
+      titleText: this.locale.t('auth.resetPassword'),
+      input: 'email', inputPlaceholder: this.locale.t('auth.emailPlaceholder'),
+      showCancelButton: true, confirmButtonText: this.locale.t('auth.sendReset'),
       background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8',
       showLoaderOnConfirm: true,
       preConfirm: async (email: string) => {
@@ -1502,13 +1502,13 @@ export class AppComponent implements OnInit, OnDestroy {
           await firstValueFrom(this.http.post('/api/auth/password/forgot', { email }).pipe(timeout(15000)));
           return true;
         } catch {
-          Swal.showValidationMessage('Could not request password reset. Try again later.');
+          Swal.showValidationMessage(this.locale.t('auth.resetRequestFailed'));
           return false;
         }
       },
     });
     if (result.isConfirmed && result.value)
-      await Swal.fire({ text: 'If this verified email exists, a password reset link has been sent.',
+      await Swal.fire({ text: this.locale.t('auth.resetRequested'),
                         background: '#1b1e3e', color: '#f1f3ff' });
   }
 
@@ -1517,32 +1517,32 @@ export class AppComponent implements OnInit, OnDestroy {
     const { default: Swal } = await import('sweetalert2');
     const existingEmail = this.account.email;
     if (existingEmail) {
-      const res = await Swal.fire({ titleText: 'Verify your email',
-        text: 'Send another verification link to ' + existingEmail + '?',
+      const res = await Swal.fire({ titleText: this.locale.t('auth.verifyEmail'),
+        text: this.locale.t('auth.sendVerification') + ': ' + existingEmail + '?',
         showCancelButton: true, background: '#1b1e3e', color: '#f1f3ff' });
       if (!res.isConfirmed) return;
       try {
         await firstValueFrom(this.http.post('/api/auth/email/resend', {}).pipe(timeout(15000)));
-        await Swal.fire({ text: 'Verification link sent.', background: '#1b1e3e', color: '#f1f3ff' });
-      } catch { await Swal.fire({ text: 'Unable to send verification link.', background: '#1b1e3e', color: '#f1f3ff' }); }
+        await Swal.fire({ text: this.locale.t('auth.verificationSent'), background: '#1b1e3e', color: '#f1f3ff' });
+      } catch { await Swal.fire({ text: this.locale.t('auth.verificationFailed'), background: '#1b1e3e', color: '#f1f3ff' }); }
       return;
     }
-    const result = await Swal.fire({ titleText: 'Add a recovery email',
-      input: 'email', inputPlaceholder: 'Your email address', showCancelButton: true,
+    const result = await Swal.fire({ titleText: this.locale.t('auth.claimEmail'),
+      input: 'email', inputPlaceholder: this.locale.t('auth.emailPlaceholder'), showCancelButton: true,
       background: '#1b1e3e', color: '#f1f3ff', showLoaderOnConfirm: true,
       preConfirm: async (email: string) => {
         try {
           await firstValueFrom(this.http.post('/api/auth/email/claim', { email }).pipe(timeout(15000)));
           return email;
         } catch {
-          Swal.showValidationMessage('Email unavailable or delivery not configured.');
+          Swal.showValidationMessage(this.locale.t('auth.emailClaimUnavailable'));
           return false;
         }
       },
     });
     if (result.isConfirmed && result.value) {
       this.account.email = result.value as string;
-      await Swal.fire({ text: 'Please confirm the link sent to your email.', background: '#1b1e3e', color: '#f1f3ff' });
+      await Swal.fire({ text: this.locale.t('auth.verificationSent'), background: '#1b1e3e', color: '#f1f3ff' });
     }
   }
 
@@ -1563,27 +1563,27 @@ export class AppComponent implements OnInit, OnDestroy {
       try {
         await firstValueFrom(this.http.post('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
         if (this.account) this.account.email_verified = true;
-        await Swal.fire({ titleText: 'Email verified', icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
-      } catch { await Swal.fire({ titleText: 'Invalid or expired verification link',
+        await Swal.fire({ titleText: this.locale.t('auth.emailVerified'), icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
+      } catch { await Swal.fire({ titleText: this.locale.t('auth.verificationInvalid'),
                                   icon: 'error', background: '#1b1e3e', color: '#f1f3ff' }); }
     }
     if (reset) {
-      const result = await Swal.fire({ titleText: 'Choose a new password', input: 'password',
+      const result = await Swal.fire({ titleText: this.locale.t('auth.chooseNewPassword'), input: 'password',
         inputAttributes: { minlength: '8', maxlength: '256', autocomplete: 'new-password' },
         showCancelButton: true, background: '#1b1e3e', color: '#f1f3ff',
         showLoaderOnConfirm: true,
         preConfirm: async (new_password: string) => {
-          if (!new_password || new_password.length < 8) { Swal.showValidationMessage('Minimum 8 characters'); return false; }
+          if (!new_password || new_password.length < 8) { Swal.showValidationMessage(this.locale.t('auth.passwordInvalid')); return false; }
           try {
             await firstValueFrom(this.http.post('/api/auth/password/reset',
               { token: reset, new_password }).pipe(timeout(20000)));
             return true;
-          } catch { Swal.showValidationMessage('Invalid or expired reset link.'); return false; }
+          } catch { Swal.showValidationMessage(this.locale.t('auth.resetInvalid')); return false; }
         },
       });
       if (result.isConfirmed && result.value) {
         this.clearAccount();
-        await Swal.fire({ titleText: 'Password updated', text: 'Please sign in again.',
+        await Swal.fire({ titleText: this.locale.t('auth.passwordUpdated'),
                           background: '#1b1e3e', color: '#f1f3ff' });
       }
     }
