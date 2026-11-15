@@ -129,7 +129,8 @@ def health() -> dict[str, str]:
 
 def public_donation_url() -> str | None:
     """A configurable link, never an arbitrary frontend redirect destination."""
-    url = os.environ.get("BUY_ME_A_COFFEE_URL", "").strip()
+    # Owner-provided default; explicitly setting an empty env var disables donations.
+    url = os.environ.get("BUY_ME_A_COFFEE_URL", "https://buymeacoffee.com/subuday").strip()
     if not url:
         return None
     parsed = urlsplit(url)
