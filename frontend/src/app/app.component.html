@@ -34,7 +34,7 @@
               </button>
               <button class="account-button" type="button" *ngIf="!player.email_verified"
                       (click)="claimAccountEmail()" [disabled]="authBusy || loading">
-                {{ player.email ? 'Verify email' : 'Add recovery email' }}
+                {{ locale.t(player.email ? 'auth.verifyEmail' : 'auth.claimEmail') }}
               </button>
               <button class="account-button" type="button"
                       (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
