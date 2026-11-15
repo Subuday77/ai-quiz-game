@@ -225,7 +225,8 @@ class RetryTests(unittest.TestCase):
 
     def test_public_config_exposes_only_validated_timing_settings(self):
         with patch.dict("os.environ", {"QUIZ_LONG_WAIT_WARNING_SECONDS": "4",
-                                       "QUIZ_HTTP_TIMEOUT_SECONDS": "20"}):
+                                       "QUIZ_HTTP_TIMEOUT_SECONDS": "20",
+                                       "BUY_ME_A_COFFEE_URL": ""}):
             result = self.client.get("/api/client-config")
         self.assertEqual(result.json(), {
             "long_wait_warning_ms": 4000,

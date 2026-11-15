@@ -7,7 +7,12 @@ from api import public_client_config, public_donation_url
 
 
 class DonationConfigTests(unittest.TestCase):
-    def test_optional_link_is_off_by_default(self):
+    def test_owner_profile_is_default_when_unconfigured(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(public_donation_url(), "https://buymeacoffee.com/subuday")
+            self.assertEqual(public_client_config()["donation_url"], "https://buymeacoffee.com/subuday")
+
+    def test_explicit_empty_url_disables_donation_link(self):
         with patch.dict(os.environ, {"BUY_ME_A_COFFEE_URL": ""}):
             self.assertIsNone(public_donation_url())
             self.assertNotIn("donation_url", public_client_config())

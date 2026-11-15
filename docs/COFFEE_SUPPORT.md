@@ -3,18 +3,21 @@
 The start screen has a button **About the game** inline with the
 **Ready to play?** title, and a separate coffee support row under the intro.
 
-The coffee button stays disabled until the owner has registered a personal
-Buy Me a Coffee page. The app does **not** process payments, accept payment
+The owner registered the public support page at
+`https://buymeacoffee.com/subuday`, now the default donation destination. The app does **not** process payments, accept payment
 information, or grant stars for donations.
 
-## Enabling the CTA (after owner verifies profile and payouts)
+## Configuring or disabling the CTA
 
-Add exactly one variable in the running Quiz backend's private `.env`:
+By default the backend returns the owner's URL even when the optional
+variable has not been configured on an existing VPS. To override it, add
+a variable in the Quiz backend's private `.env`:
 
 ```dotenv
-BUY_ME_A_COFFEE_URL=https://buymeacoffee.com/YOUR_PROFILE
+BUY_ME_A_COFFEE_URL=https://buymeacoffee.com/subuday
 ```
 
+Set `BUY_ME_A_COFFEE_URL=` (empty) to deliberately hide the enabled link.
 Only HTTPS personal profile URLs under `buymeacoffee.com` or
 `www.buymeacoffee.com` are accepted. Invalid or blank values return
 no `donation_url` field in the existing `GET /api/client-config` and keep
@@ -32,5 +35,4 @@ but future donation URL changes are backend-config-only.
 Texts come from `backend/localization/en.json` and the normal AI Localizer
 dictionary pipeline. Check Russian and RTL layouts in the next browser E2E.
 
-Do not deploy this feature to public production before the configured URL is
-under the owner's control. No DB migration required.
+Check that the Buy Me a Coffee page and payouts are ready before public launch. No DB migration required.
