@@ -88,6 +88,14 @@ class AccountEmailToken(Base):
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AuthRateBucket(Base):
+    """Aggregate anonymous account-request counts for a 15-minute window."""
+    __tablename__ = "auth_rate_buckets"
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class AuthSession(Base):
     __tablename__ = "auth_sessions"
     id = id_column()
