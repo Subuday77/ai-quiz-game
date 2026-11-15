@@ -67,6 +67,9 @@ class EmailAccountFlowTests(unittest.TestCase):
         unknown = self.client.post("/api/auth/password/forgot", json={"email": "no-one@example.com"})
         self.assertEqual(forgotten.json(), unknown.json())
         reset_token = self.sent[-1][1]
+        # A second link for the same account must be revoked after one succeeds.
+        self.client.post("/api/auth/password/forgot", json={"email": "first@example.com"})
+        second_token = self.sent[-1][1]
         changed = self.client.post("/api/auth/password/reset", json={
             "token": reset_token, "new_password": "new corrected password!"
         })
@@ -74,6 +77,9 @@ class EmailAccountFlowTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
         self.assertEqual(self.client.post("/api/auth/password/reset", json={
             "token": reset_token, "new_password": "different good password"
+        }).status_code, 400)
+        self.assertEqual(self.client.post("/api/auth/password/reset", json={
+            "token": second_token, "new_password": "another adequate password"
         }).status_code, 400)
         signed = self.client.post("/api/auth/email/login", json={
             "email": "FIRST@example.com", "password": "new corrected password!"
