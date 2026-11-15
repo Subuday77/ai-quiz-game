@@ -1,0 +1,11 @@
+[Unit]
+Description=AI Quiz Game - daily PostgreSQL backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+Unit=quiz-pg-backup.service
+
+[Install]
+WantedBy=timers.target
