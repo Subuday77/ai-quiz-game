@@ -10,7 +10,7 @@ class DonationConfigTests(unittest.TestCase):
     def test_optional_link_is_off_by_default(self):
         with patch.dict(os.environ, {"BUY_ME_A_COFFEE_URL": ""}):
             self.assertIsNone(public_donation_url())
-            self.assertIsNone(public_client_config()["donation_url"])
+            self.assertNotIn("donation_url", public_client_config())
 
     def test_accepts_only_personal_https_bmac_profile(self):
         for url in ("https://buymeacoffee.com/squizthebot",
@@ -35,7 +35,7 @@ class DonationConfigTests(unittest.TestCase):
         for url in invalid:
             with self.subTest(url=url), patch.dict(os.environ, {"BUY_ME_A_COFFEE_URL": url}):
                 self.assertIsNone(public_donation_url())
-                self.assertIsNone(public_client_config()["donation_url"])
+                self.assertNotIn("donation_url", public_client_config())
 
 
 if __name__ == "__main__":
