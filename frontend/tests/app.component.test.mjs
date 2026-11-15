@@ -161,7 +161,7 @@ test('lifetime count includes only correct answers, not incorrect attempts', () 
 });
 
 test('password length hint is only used when registering', () => {
-  assert.match(source, /hint\('quiz-auth-password', 'auth.passwordHint'\)/);
+  assert.match(source, /passwordInput\.placeholder = this\.locale\.t\('auth\.passwordHint'\)/);
   assert.match(source, /if \(isRegister\) \{/);
   assert.doesNotMatch(source, /maxlength="256" placeholder="At least 8 characters"/);
 });
@@ -2445,7 +2445,7 @@ test('profile settings are above complaint history and have two independently sa
   assert.equal(english['settings.currentPassword'], 'Current password');
   assert.equal(english['settings.newPassword'], 'New password');
   assert.equal(english['settings.repeatPassword'], 'Repeat new password');
-  assert.match(source, /this\.http\.patch<Account>\([\s\S]*?'\/api\/auth\/username'/);
+  assert.match(source, /this\.http\.patch<Account>\([\s\S]*?'\/api\/auth\/display-name'/);
   assert.match(source, /this\.http\.patch<void>\([\s\S]*?'\/api\/auth\/password'/);
   assert.match(source, /new_password !== confirm_password/);
   assert.match(source, /new_password === current_password/);
