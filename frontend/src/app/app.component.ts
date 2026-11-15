@@ -20,7 +20,7 @@ const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
-const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{2,29}$/;
+const EMAIL_PATTERN = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
 interface AboutBonusClaim {
@@ -33,6 +33,8 @@ interface Account {
   id: string;
   username: string;
   display_name: string | null;
+  email?: string | null;
+  email_verified?: boolean;
   preferred_language: string;
   ui_language: string;
   theme_key: string;
@@ -503,6 +505,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    void this.consumeAccountLink();
     this.locale.load('en');
     this.subscriptions.add(this.http.get<{
       long_wait_warning_ms: number; request_timeout_ms: number;
@@ -1210,13 +1213,13 @@ export class AppComponent implements OnInit, OnDestroy {
       html: '<div class="quiz-auth-fields">' +
         '<label id="settings-username-label" for="settings-username-input"></label>' +
         '<input id="settings-username-input" class="swal2-input" type="text" ' +
-        'autocomplete="username" maxlength="30"></div>',
+        'autocomplete="nickname" maxlength="80"></div>',
       didOpen: () => {
         const popup = Swal.getPopup();
         const label = popup?.querySelector<HTMLElement>('#settings-username-label');
         if (label) label.textContent = this.locale.t('auth.username');
         const input = popup?.querySelector<HTMLInputElement>('#settings-username-input');
-        if (input) input.value = this.account?.username || '';
+        if (input) input.value = this.account?.display_name || this.account?.username || '';
       },
       customClass: { popup: 'quiz-auth-popup quiz-settings-popup' },
       background: '#1b1e3e', color: '#f1f3ff',
@@ -1228,21 +1231,20 @@ export class AppComponent implements OnInit, OnDestroy {
       preConfirm: async () => {
         const username = (Swal.getPopup()?.querySelector<HTMLInputElement>(
           '#settings-username-input')?.value || '').trim();
-        if (!USERNAME_PATTERN.test(username)) {
-          Swal.showValidationMessage(this.locale.t('auth.usernameInvalid'));
+        if (!username || username.length > 80) {
+          Swal.showValidationMessage('Enter a display name (up to 80 characters).');
           return false;
         }
         try {
           return await firstValueFrom(this.http.patch<Account>(
-            '/api/auth/username', { username },
+            '/api/auth/display-name', { display_name: username },
           ).pipe(timeout(15000)));
         } catch (error: unknown) {
           if (this.isUnauthorized(error)) {
             this.sessionExpired();
             return false;
           }
-          const key = error instanceof HttpErrorResponse && error.status === 409
-            ? 'auth.usernameTaken' : 'settings.updateFailed';
+          const key = 'settings.updateFailed';
           Swal.showValidationMessage(this.locale.t(key));
           return false;
         }
@@ -1401,7 +1403,7 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  // SweetAlert2 is lazy-loaded only when the user opens a sign-in form.
+  // New accounts use email; legacy username login remains available for migration.
   async openAuthDialog(mode: AuthMode): Promise<void> {
     if (this.authBusy || this.loading || this.authLoading) return;
     this.authBusy = true;
@@ -1411,129 +1413,160 @@ export class AppComponent implements OnInit, OnDestroy {
       const isRegister = mode === 'register';
       const result = await Swal.fire({
         titleText: this.locale.t(isRegister ? 'auth.titleRegister' : 'auth.titleLogin'),
-        // Labels are populated via textContent, never by interpolating AI text into HTML.
-        html:
-          '<div class="quiz-auth-fields">' +
-            '<label id="quiz-label-username" for="quiz-auth-username"></label>' +
-            '<input id="quiz-auth-username" class="swal2-input" type="text" autocomplete="username" maxlength="30">' +
-            (isRegister ? '<div id="quiz-username-suggestions" class="quiz-username-suggestions" role="status"></div>' : '') +
-            '<label id="quiz-label-password" for="quiz-auth-password"></label>' +
-            '<input id="quiz-auth-password" class="swal2-input" type="password" ' +
-              'autocomplete="' + (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
-            (isRegister ?
-              '<label id="quiz-label-confirm" for="quiz-auth-confirm"></label>' +
-              '<input id="quiz-auth-confirm" class="swal2-input" type="password" ' +
-                'autocomplete="new-password" maxlength="256">'
-              : '') +
+        html: '<div class="quiz-auth-fields">' +
+          (isRegister ? '<label for="quiz-display-name">Display name</label>' +
+            '<input id="quiz-display-name" class="swal2-input" autocomplete="nickname" maxlength="80">' : '') +
+          '<label for="quiz-auth-email">Email' + (isRegister ? '' : ' or legacy username') + '</label>' +
+          '<input id="quiz-auth-email" class="swal2-input" autocomplete="username" maxlength="254">' +
+          '<label for="quiz-auth-password">Password</label>' +
+          '<input id="quiz-auth-password" class="swal2-input" type="password" autocomplete="' +
+            (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
+          (isRegister ? '<label for="quiz-auth-confirm">Confirm password</label>' +
+            '<input id="quiz-auth-confirm" class="swal2-input" type="password" autocomplete="new-password" maxlength="256">' :
+            '<button id="quiz-forgot-password" type="button" class="outline-button">Forgot password?</button>') +
           '</div>',
         didOpen: () => {
-          const popup = Swal.getPopup();
-          const label = (id: string, key: string) => {
-            const element = popup?.querySelector<HTMLElement>('#' + id);
-            if (element) element.textContent = this.locale.t(key);
-          };
-          const hint = (id: string, key: string) => {
-            const element = popup?.querySelector<HTMLInputElement>('#' + id);
-            if (element) element.placeholder = this.locale.t(key);
-          };
-          label('quiz-label-username', 'auth.username');
-          label('quiz-label-password', 'auth.password');
-          hint('quiz-auth-username', 'auth.usernamePlaceholder');
-          if (isRegister) {
-            popup?.querySelector<HTMLInputElement>('#quiz-auth-username')?.addEventListener('input', () => {
-              popup?.querySelector<HTMLElement>('#quiz-username-suggestions')?.replaceChildren();
-            });
-            label('quiz-label-confirm', 'auth.confirm');
-            hint('quiz-auth-password', 'auth.passwordHint');
-            hint('quiz-auth-confirm', 'auth.repeatPlaceholder');
-          }
+          Swal.getPopup()?.querySelector<HTMLButtonElement>('#quiz-forgot-password')
+            ?.addEventListener('click', () => { Swal.close(); void this.requestPasswordReset(); });
         },
-        customClass: {
-          popup: 'quiz-auth-popup',
-          confirmButton: 'quiz-auth-confirm',
-        },
-        background: '#1b1e3e',
-        color: '#f1f3ff',
+        customClass: { popup: 'quiz-auth-popup', confirmButton: 'quiz-auth-confirm' },
+        background: '#1b1e3e', color: '#f1f3ff',
         confirmButtonText: this.locale.t(isRegister ? 'auth.submitRegister' : 'auth.submitLogin'),
         confirmButtonColor: '#8170d8',
-        showCancelButton: true,
-        cancelButtonText: this.locale.t('auth.cancel'),
-        focusConfirm: false,
-        showLoaderOnConfirm: true,
+        showCancelButton: true, cancelButtonText: this.locale.t('auth.cancel'),
+        focusConfirm: false, showLoaderOnConfirm: true,
         allowOutsideClick: () => !Swal.isLoading(),
-        allowEscapeKey: () => !Swal.isLoading(),
         preConfirm: async () => {
-          const popup = Swal.getPopup();
-          const username = (popup?.querySelector<HTMLInputElement>('#quiz-auth-username')?.value ?? '').trim();
-          const password = popup?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value ?? '';
-          const confirmation = popup?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value ?? '';
-
-          if (!USERNAME_PATTERN.test(username)) {
-            Swal.showValidationMessage(this.locale.t('auth.usernameInvalid'));
+          const value = (id: string) => Swal.getPopup()?.querySelector<HTMLInputElement>('#' + id)?.value.trim() || '';
+          const identifier = value('quiz-auth-email');
+          const display_name = value('quiz-display-name');
+          const password = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value || '';
+          const confirm = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value || '';
+          if ((isRegister && (!display_name || !EMAIL_PATTERN.test(identifier))) || !identifier) {
+            Swal.showValidationMessage('Enter a valid email and display name.');
             return false;
           }
-          if (password.length < 8 || password.length > 256) {
+          if (password.length < 8 || password.length > 256 || (isRegister && confirm !== password)) {
             Swal.showValidationMessage(this.locale.t('auth.passwordInvalid'));
             return false;
           }
-          if (isRegister && confirmation !== password) {
-            Swal.showValidationMessage(this.locale.t('auth.passwordMismatch'));
-            return false;
-          }
           try {
-            return await firstValueFrom(this.http.post<Account>(
-              isRegister ? '/api/auth/register' : '/api/auth/login',
-              { username, password },
-            ).pipe(timeout(15000)));
+            const url = isRegister ? '/api/auth/email/register'
+              : (identifier.includes('@') ? '/api/auth/email/login' : '/api/auth/login');
+            const payload = isRegister ? { email: identifier, display_name, password }
+              : (identifier.includes('@') ? { email: identifier, password } : { username: identifier, password });
+            return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
-            if (isRegister && error instanceof HttpErrorResponse && error.status === 409) {
-              const host = Swal.getPopup()?.querySelector<HTMLElement>('#quiz-username-suggestions');
-              if (host) {
-                host.replaceChildren();
-                try {
-                  const response = await firstValueFrom(this.http.get<{ suggestions: string[] }>(
-                    '/api/auth/username-suggestions', { params: { username } }
-                  ).pipe(timeout(10000)));
-                  const popup = Swal.getPopup();
-                  if (popup && host.isConnected && response.suggestions.length) {
-                    const caption = document.createElement('p');
-                    caption.textContent = this.locale.t('auth.suggestionsIntro');
-                    host.appendChild(caption);
-                    for (const suggestion of response.suggestions) {
-                      const button = document.createElement('button');
-                      button.type = 'button';
-                      button.className = 'quiz-username-option';
-                      button.textContent = suggestion;
-                      button.addEventListener('click', () => {
-                        const field = popup.querySelector<HTMLInputElement>('#quiz-auth-username');
-                        if (field) {
-                          field.value = suggestion;
-                          field.focus();
-                        }
-                        host.replaceChildren();
-                        Swal.resetValidationMessage();
-                      });
-                      host.appendChild(button);
-                    }
-                  }
-                } catch {
-                  // Registration still reports the original collision;
-                  // name suggestions are an optional enhancement.
-                }
-              }
-            }
-            Swal.showValidationMessage(this.locale.t(this.authErrorMessage(error, mode)));
+            const message = error instanceof HttpErrorResponse && error.status === 409
+              ? 'This email is already registered.' :
+              error instanceof HttpErrorResponse && error.status === 503
+              ? 'Email delivery is not configured yet.' : this.locale.t(this.authErrorMessage(error, mode));
+            Swal.showValidationMessage(message);
             return false;
           }
         },
       });
-      if (result.isConfirmed && result.value) {
-        this.signedIn(result.value as Account);
-      }
+      if (result.isConfirmed && result.value) this.signedIn(result.value as Account);
     } catch {
       this.error = 'auth.modalFailed';
     } finally {
       this.authBusy = false;
+    }
+  }
+
+  private async requestPasswordReset(): Promise<void> {
+    const { default: Swal } = await import('sweetalert2');
+    const result = await Swal.fire({
+      titleText: 'Reset password',
+      input: 'email', inputPlaceholder: 'Email address',
+      showCancelButton: true, confirmButtonText: 'Send reset link',
+      background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8',
+      showLoaderOnConfirm: true,
+      preConfirm: async (email: string) => {
+        try {
+          await firstValueFrom(this.http.post('/api/auth/password/forgot', { email }).pipe(timeout(15000)));
+          return true;
+        } catch {
+          Swal.showValidationMessage('Could not request password reset. Try again later.');
+          return false;
+        }
+      },
+    });
+    if (result.isConfirmed && result.value)
+      await Swal.fire({ text: 'If this verified email exists, a password reset link has been sent.',
+                        background: '#1b1e3e', color: '#f1f3ff' });
+  }
+
+  async claimAccountEmail(): Promise<void> {
+    if (!this.account || this.account.email_verified) return;
+    const { default: Swal } = await import('sweetalert2');
+    const existingEmail = this.account.email;
+    if (existingEmail) {
+      const res = await Swal.fire({ titleText: 'Verify your email',
+        text: 'Send another verification link to ' + existingEmail + '?',
+        showCancelButton: true, background: '#1b1e3e', color: '#f1f3ff' });
+      if (!res.isConfirmed) return;
+      try {
+        await firstValueFrom(this.http.post('/api/auth/email/resend', {}).pipe(timeout(15000)));
+        await Swal.fire({ text: 'Verification link sent.', background: '#1b1e3e', color: '#f1f3ff' });
+      } catch { await Swal.fire({ text: 'Unable to send verification link.', background: '#1b1e3e', color: '#f1f3ff' }); }
+      return;
+    }
+    const result = await Swal.fire({ titleText: 'Add a recovery email',
+      input: 'email', inputPlaceholder: 'Your email address', showCancelButton: true,
+      background: '#1b1e3e', color: '#f1f3ff', showLoaderOnConfirm: true,
+      preConfirm: async (email: string) => {
+        try {
+          await firstValueFrom(this.http.post('/api/auth/email/claim', { email }).pipe(timeout(15000)));
+          return email;
+        } catch {
+          Swal.showValidationMessage('Email unavailable or delivery not configured.');
+          return false;
+        }
+      },
+    });
+    if (result.isConfirmed && result.value) {
+      this.account.email = result.value as string;
+      await Swal.fire({ text: 'Please confirm the link sent to your email.', background: '#1b1e3e', color: '#f1f3ff' });
+    }
+  }
+
+  private async consumeAccountLink(): Promise<void> {
+    const query = new URLSearchParams(window.location.search);
+    const verification = query.get('verify_email');
+    const reset = query.get('reset_password');
+    if (!verification && !reset) return;
+    query.delete('verify_email'); query.delete('reset_password');
+    const clean = window.location.pathname + (query.toString() ? '?' + query.toString() : '') + window.location.hash;
+    window.history.replaceState(null, '', clean);
+    const { default: Swal } = await import('sweetalert2');
+    if (verification) {
+      try {
+        await firstValueFrom(this.http.post('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
+        if (this.account) this.account.email_verified = true;
+        await Swal.fire({ titleText: 'Email verified', icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
+      } catch { await Swal.fire({ titleText: 'Invalid or expired verification link',
+                                  icon: 'error', background: '#1b1e3e', color: '#f1f3ff' }); }
+    }
+    if (reset) {
+      const result = await Swal.fire({ titleText: 'Choose a new password', input: 'password',
+        inputAttributes: { minlength: '8', maxlength: '256', autocomplete: 'new-password' },
+        showCancelButton: true, background: '#1b1e3e', color: '#f1f3ff',
+        showLoaderOnConfirm: true,
+        preConfirm: async (new_password: string) => {
+          if (!new_password || new_password.length < 8) { Swal.showValidationMessage('Minimum 8 characters'); return false; }
+          try {
+            await firstValueFrom(this.http.post('/api/auth/password/reset',
+              { token: reset, new_password }).pipe(timeout(20000)));
+            return true;
+          } catch { Swal.showValidationMessage('Invalid or expired reset link.'); return false; }
+        },
+      });
+      if (result.isConfirmed && result.value) {
+        this.clearAccount();
+        await Swal.fire({ titleText: 'Password updated', text: 'Please sign in again.',
+                          background: '#1b1e3e', color: '#f1f3ff' });
+      }
     }
   }
 
