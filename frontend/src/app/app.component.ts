@@ -20,7 +20,7 @@ const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
-const EMAIL_PATTERN = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const emptyStars = (): StarCounts => ({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
 
 interface AboutBonusClaim {
