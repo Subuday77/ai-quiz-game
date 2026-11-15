@@ -38,7 +38,9 @@ class User(Base):
 
     id = id_column()
     username: Mapped[str] = mapped_column(String(30), nullable=False)
-    username_key: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    username_key: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)  # legacy login key
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True, unique=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     display_name: Mapped[str | None] = mapped_column(String(80))
     preferred_language: Mapped[str] = mapped_column(String(25), nullable=False, default="English")
     ui_language: Mapped[str] = mapped_column(String(20), nullable=False, default="en")
@@ -67,6 +69,23 @@ class AuthIdentity(Base):
     failed_logins: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at = datetime_column()
+
+
+class AccountEmailToken(Base):
+    __tablename__ = "account_email_tokens"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('verify_email', 'reset_password')",
+                        name="ck_account_email_token_purpose"),
+    )
+    id = id_column()
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    email: Mapped[str] = mapped_column(String(254), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at = datetime_column()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuthSession(Base):
