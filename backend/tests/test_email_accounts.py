@@ -106,6 +106,28 @@ class EmailAccountFlowTests(unittest.TestCase):
         self.assertEqual(renamed.status_code, 200, renamed.text)
         self.assertEqual(renamed.json()["id"], old_id)
 
+    def test_correct_unverified_email_invalidates_old_link(self):
+        original = self.register("typo@example.com")
+        self.assertEqual(original.status_code, 201, original.text)
+        original_id = original.json()["id"]
+        old_token = self.sent[-1][1]
+        wrong_password = self.client.post("/api/auth/email/replace-unverified", json={
+            "email": "correct@example.com", "current_password": "wrong-password"
+        })
+        self.assertEqual(wrong_password.status_code, 401)
+        corrected = self.client.post("/api/auth/email/replace-unverified", json={
+            "email": "correct@example.com", "current_password": "correct horse battery staple"
+        })
+        self.assertEqual(corrected.status_code, 200, corrected.text)
+        self.assertEqual(corrected.json()["id"], original_id)
+        self.assertEqual(corrected.json()["email"], "correct@example.com")
+        self.assertEqual(self.client.post("/api/auth/email/verify", json={"token": old_token}).status_code, 400)
+        new_token = self.sent[-1][1]
+        self.assertEqual(self.client.post("/api/auth/email/verify", json={"token": new_token}).status_code, 200)
+        self.assertEqual(self.client.post("/api/auth/email/replace-unverified", json={
+            "email": "another@example.com", "current_password": "correct horse battery staple"
+        }).status_code, 409)
+
     def test_unverified_emails_cannot_reset(self):
         self.register("noverify@example.com")
         n = len(self.sent)
