@@ -147,7 +147,11 @@ def public_donation_url() -> str | None:
 @app.get("/api/client-config")
 def public_client_config() -> dict[str, int | str | None]:
     try:
-        return {**client_settings(), "donation_url": public_donation_url()}
+        settings = client_settings()
+        donation_url = public_donation_url()
+        if donation_url:
+            settings["donation_url"] = donation_url
+        return settings
     except ValueError:
         raise HTTPException(status_code=503, detail="Invalid client timing configuration") from None
 
