@@ -276,13 +276,19 @@ def forgot(payload: EmailInput, request: Request, db: Session = Depends(get_db))
 @router.post("/password/reset")
 def reset(payload: ResetPassword, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
-    row = db.scalar(select(AccountEmailToken).where(
-        AccountEmailToken.token_hash == token_digest(payload.token),
-        AccountEmailToken.purpose == "reset_password").with_for_update())
-    if not row or row.used_at or aware(row.expires_at) <= utc_now():
+    digest = token_digest(payload.token)
+    candidate = db.scalar(select(AccountEmailToken).where(
+        AccountEmailToken.token_hash == digest,
+        AccountEmailToken.purpose == "reset_password"))
+    if not candidate:
         raise HTTPException(status_code=400, detail="Invalid or expired link")
-    user = db.scalar(select(User).where(User.id == row.user_id).with_for_update())
-    if not user or user.email != row.email or not user.email_verified_at:
+    # Lock the user FIRST: two different valid reset links must not race.
+    user = db.scalar(select(User).where(User.id == candidate.user_id).with_for_update())
+    row = db.scalar(select(AccountEmailToken).where(
+        AccountEmailToken.token_hash == digest,
+        AccountEmailToken.purpose == "reset_password").with_for_update())
+    if (not user or not row or row.used_at or aware(row.expires_at) <= utc_now()
+            or user.email != row.email or not user.email_verified_at):
         raise HTTPException(status_code=400, detail="Invalid or expired link")
     identity = db.scalar(select(AuthIdentity).where(
         AuthIdentity.user_id == user.id, AuthIdentity.provider == "password").with_for_update())
@@ -291,7 +297,12 @@ def reset(payload: ResetPassword, request: Request, db: Session = Depends(get_db
     identity.password_hash = HASHER.hash(payload.new_password)
     identity.failed_logins = 0
     identity.locked_until = None
-    row.used_at = utc_now()
+    changed_at = utc_now()
+    db.execute(update(AccountEmailToken).where(
+        AccountEmailToken.user_id == user.id,
+        AccountEmailToken.purpose == "reset_password",
+        AccountEmailToken.used_at.is_(None),
+    ).values(used_at=changed_at))
     db.execute(update(AuthSession).where(
         AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None)
     ).values(revoked_at=utc_now()))
