@@ -1414,18 +1414,29 @@ export class AppComponent implements OnInit, OnDestroy {
       const result = await Swal.fire({
         titleText: this.locale.t(isRegister ? 'auth.titleRegister' : 'auth.titleLogin'),
         html: '<div class="quiz-auth-fields">' +
-          (isRegister ? '<label for="quiz-display-name">Display name</label>' +
+          (isRegister ? '<label id="quiz-display-name-label" for="quiz-display-name"></label>' +
             '<input id="quiz-display-name" class="swal2-input" autocomplete="nickname" maxlength="80">' : '') +
-          '<label for="quiz-auth-email">Email' + (isRegister ? '' : ' or legacy username') + '</label>' +
+          '<label id="quiz-auth-email-label" for="quiz-auth-email"></label>' +
           '<input id="quiz-auth-email" class="swal2-input" autocomplete="username" maxlength="254">' +
-          '<label for="quiz-auth-password">Password</label>' +
+          '<label id="quiz-auth-password-label" for="quiz-auth-password"></label>' +
           '<input id="quiz-auth-password" class="swal2-input" type="password" autocomplete="' +
             (isRegister ? 'new-password' : 'current-password') + '" maxlength="256">' +
-          (isRegister ? '<label for="quiz-auth-confirm">Confirm password</label>' +
+          (isRegister ? '<label id="quiz-auth-confirm-label" for="quiz-auth-confirm"></label>' +
             '<input id="quiz-auth-confirm" class="swal2-input" type="password" autocomplete="new-password" maxlength="256">' :
-            '<button id="quiz-forgot-password" type="button" class="outline-button">Forgot password?</button>') +
+            '<button id="quiz-forgot-password" type="button" class="outline-button"></button>') +
           '</div>',
         didOpen: () => {
+          const popup = Swal.getPopup();
+          const label = (id: string, key: string) => {
+            const element = popup?.querySelector<HTMLElement>('#' + id);
+            if (element) element.textContent = this.locale.t(key);
+          };
+          label('quiz-auth-email-label', isRegister ? 'auth.email' : 'auth.emailOrUsername');
+          label('quiz-display-name-label', 'auth.displayName');
+          label('quiz-auth-password-label', 'auth.password');
+          label('quiz-auth-confirm-label', 'auth.confirm');
+          const forgot = popup?.querySelector<HTMLButtonElement>('#quiz-forgot-password');
+          if (forgot) forgot.textContent = this.locale.t('auth.forgotPassword');
           if (isRegister) {
             const passwordInput = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password');
             if (passwordInput) passwordInput.placeholder = this.locale.t('auth.passwordHint');
@@ -1447,7 +1458,7 @@ export class AppComponent implements OnInit, OnDestroy {
           const password = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value || '';
           const confirm = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value || '';
           if ((isRegister && (!display_name || !EMAIL_PATTERN.test(identifier))) || !identifier) {
-            Swal.showValidationMessage('Enter a valid email and display name.');
+            Swal.showValidationMessage(this.locale.t('auth.invalidEmailName'));
             return false;
           }
           if (password.length < 8 || password.length > 256 || (isRegister && confirm !== password)) {
@@ -1462,9 +1473,9 @@ export class AppComponent implements OnInit, OnDestroy {
             return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
             const message = error instanceof HttpErrorResponse && error.status === 409
-              ? 'This email is already registered.' :
+              ? this.locale.t('auth.emailTaken') :
               error instanceof HttpErrorResponse && error.status === 503
-              ? 'Email delivery is not configured yet.' : this.locale.t(this.authErrorMessage(error, mode));
+              ? this.locale.t('auth.emailDeliveryUnavailable') : this.locale.t(this.authErrorMessage(error, mode));
             Swal.showValidationMessage(message);
             return false;
           }
