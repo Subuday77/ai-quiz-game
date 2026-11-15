@@ -6,6 +6,8 @@ Do not deploy publicly before persistent storage, authentication and quotas.
 
 import hashlib
 import json
+import os
+from urllib.parse import urlsplit
 import random
 from dataclasses import dataclass, field
 from threading import Lock
@@ -125,10 +127,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def public_donation_url() -> str | None:
+    """A configurable link, never an arbitrary frontend redirect destination."""
+    url = os.environ.get("BUY_ME_A_COFFEE_URL", "").strip()
+    if not url:
+        return None
+    parsed = urlsplit(url)
+    # Only a personal Buy Me a Coffee page, not a generic signup or arbitrary URL.
+    if (parsed.scheme != "https"
+            or parsed.netloc not in {"buymeacoffee.com", "www.buymeacoffee.com"}
+            or not parsed.path.startswith("/")
+            or len(parsed.path.strip("/").split("/")) != 1
+            or not parsed.path.strip("/").replace("-", "").replace("_", "").isalnum()
+            or parsed.query or parsed.fragment):
+        return None
+    return url
+
+
 @app.get("/api/client-config")
-def public_client_config() -> dict[str, int]:
+def public_client_config() -> dict[str, int | str | None]:
     try:
-        return client_settings()
+        return {**client_settings(), "donation_url": public_donation_url()}
     except ValueError:
         raise HTTPException(status_code=503, detail="Invalid client timing configuration") from None
 
