@@ -12,7 +12,7 @@ Old usernames continue to be accepted in `POST /api/auth/login` during migration
 
 ## What PR #38 implements
 
-- Migration `backend/migrations/versions/0015_email_accounts.py`: nullable case-insensitive canonical email, `email_verified_at` and one-time token records; no rekeying.
+- Migrations `0015_email_accounts.py` and `0016_auth_rate_buckets.py`: nullable canonical email, `email_verified_at`, one-time token records and persistent anti-spam counters; no rekeying.
 - Unique email canonicalization with IDNA domains and case-insensitive mailbox policy. No provider-specific dot or plus folding.
 - `POST /api/auth/email/register` — verified-email flow begins for a new `email`, `display_name`, `password`.
 - `POST /api/auth/email/login` — email/password sign-in; pending verification does **not** block game access but password recovery and external purchases require verification.
@@ -40,15 +40,17 @@ AUTH_SMTP_HOST=YOUR_PROVIDER_SMTP_HOST
 AUTH_SMTP_PORT=587
 AUTH_SMTP_USERNAME=YOUR_PROVIDER_USERNAME
 AUTH_SMTP_PASSWORD=YOUR_PRIVATE_PASSWORD
+# Set to exact peer IP of a trusted reverse proxy only, otherwise leave empty.
+AUTH_TRUSTED_PROXY_IPS=
 ```
 
 Port 587 uses STARTTLS, port 465 SSL. The sender domain must be configured with SPF/DKIM/DMARC with the mail provider. Never commit actual secrets, send tokens to logs, or use an unverified sender. New email signup/verification intentionally fail closed if email transport is unconfigured. Do not publish the updated front-end without the updated backend and DB schema.
 
 ## Safe rollout order
 
-1. Confirm final HTTPS Quiz domain and configure/test sender, SPF/DKIM/DMARC, rate limits/abuse protection.
+1. Confirm final HTTPS Quiz domain, configure/test sender and SPF/DKIM/DMARC. Configure `AUTH_TRUSTED_PROXY_IPS` only for the immediate known proxy. An incorrect value can make all users share the same rate bucket.
 2. Back up production PostgreSQL and rehearse restore on a separate copy. Record existing Alembic revision and counts of `users`, sessions, runs, appeals, star ledger entries.
-3. Test Alembic `0015_email_accounts` on that restored copy; check no existing UUID or FK changes.
+3. Test Alembic `0015_email_accounts` and `0016_auth_rate_buckets` on that restored copy; check no existing UUID or FK changes.
 4. Configure SMTP and `AUTH_PUBLIC_URL` privately; run the coordinated backend/frontend release; create NO webhook.
 5. E2E: create two accounts with identical display names and distinct emails, receive and verify messages; old username login/claim; wrong address correction; expired/reused links; reset revokes sessions; UI locales and RTL; refresh and resume active games.
 6. Compare pre/post DB record counts and exact UUID references. Roll back application safely if needed, keeping the additive DB schema until compatibility is established.
@@ -58,7 +60,7 @@ Port 587 uses STARTTLS, port 465 SSL. The sender domain must be configured with 
 ## Known release blockers / follow-ups
 
 - Live SMTP provider, secrets, sender reputation and an actual mailbox delivery test are unavailable in this PR.
-- API anti-abuse protection still needs a deployment-aware **IP and email rate limiter** beyond the current per-account one-hour cap for verification/reset sends. Respect trusted proxy headers; don't treat the shared Caddy reverse-proxy IP as a user.
+- An atomic database-backed **per-client-IP 15-minute limiter** is implemented for email endpoints, plus per-account hourly caps on mail sends. Validate `AUTH_TRUSTED_PROXY_IPS` against the real Caddy/backend connection, and schedule `python -m scripts.cleanup_auth_rate_buckets` daily so old counters don't accumulate. Add production alerting for delivery errors and throttling.
 - Review accessibility and localization in all supported languages, not only canonical English. Test RU/EN and RTL in browser.
 - Add real Postgres concurrency tests for competing email claims and reset requests, as well as a production backup/restore rehearsal.
 - Do not merge, deploy to VPS, or accept money for these benefits until all release checks are complete.
