@@ -17,8 +17,8 @@ BUY_ME_A_COFFEE_URL=https://buymeacoffee.com/YOUR_PROFILE
 
 Only HTTPS personal profile URLs under `buymeacoffee.com` or
 `www.buymeacoffee.com` are accepted. Invalid or blank values return
-`donation_url: null` from the existing `GET /api/client-config` and keep
-the button disabled. The frontend independently verifies the hostname and
+no `donation_url` field in the existing `GET /api/client-config` and keep
+the button disabled (the optional `donation_url` field is omitted from the client config). The frontend independently verifies the hostname and
 single profile path. Configure an actual verified owner URL, never a guessed
 user name or generic provider homepage.
 
