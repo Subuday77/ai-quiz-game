@@ -1,0 +1,13 @@
+[Unit]
+Description=AI Quiz Game - create a validated PostgreSQL backup
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/srv/ai-quiz-game/source/compose.yaml
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+TimeoutStartSec=30min
+ExecStart=/usr/local/sbin/quiz-pg-backup
