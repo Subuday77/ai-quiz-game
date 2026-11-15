@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from persistence.account_email import canonical_email, create_one_time_token, token_digest, token_expiry
+from persistence.account_rate_limit import limit_email_action
 from persistence.auth import (HASHER, authenticated_user, aware, session_digest,
                               start_session, utc_now, validate_origin)
 from persistence.database import get_db
@@ -138,6 +139,7 @@ def account_response(user: User):
 @router.post("/email/register", status_code=201)
 def register(payload: EmailRegister, request: Request, response: Response, db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "register", 8)
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Email delivery unavailable")
     try:
@@ -166,6 +168,7 @@ def register(payload: EmailRegister, request: Request, response: Response, db: S
 @router.post("/email/login")
 def login(payload: EmailLogin, request: Request, response: Response, db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "login", 50)
     try:
         email = canonical_email(payload.email)
     except ValueError:
@@ -201,6 +204,7 @@ def login(payload: EmailLogin, request: Request, response: Response, db: Session
 def claim(payload: EmailInput, request: Request, user: User = Depends(authenticated_user),
           db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "claim", 12)
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Email delivery unavailable")
     if user.email:
@@ -229,6 +233,7 @@ def claim(payload: EmailInput, request: Request, user: User = Depends(authentica
 def resend(request: Request, user: User = Depends(authenticated_user),
            db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "resend", 12)
     if not user.email or user.email_verified_at:
         raise HTTPException(status_code=409, detail="Email verification unavailable")
     if not throttle(db, user, "verify_email"):
@@ -269,6 +274,7 @@ def replace_unverified(payload: ReplaceUnverifiedEmail, request: Request,
                        user: User = Depends(authenticated_user),
                        db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "replace-unverified", 12)
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Email delivery unavailable")
     try:
@@ -320,6 +326,7 @@ def replace_unverified(payload: ReplaceUnverifiedEmail, request: Request,
 @router.post("/password/forgot")
 def forgot(payload: EmailInput, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "forgot", 20)
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Email delivery unavailable")
     try:
@@ -341,6 +348,7 @@ def forgot(payload: EmailInput, request: Request, db: Session = Depends(get_db))
 @router.post("/password/reset")
 def reset(payload: ResetPassword, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
+    limit_email_action(db, request, "reset", 30)
     digest = token_digest(payload.token)
     candidate = db.scalar(select(AccountEmailToken).where(
         AccountEmailToken.token_hash == digest,
