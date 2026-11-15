@@ -1538,11 +1538,14 @@ export class AppComponent implements OnInit, OnDestroy {
   private async consumeAccountLink(): Promise<void> {
     if (typeof window === 'undefined') return;
     const query = new URLSearchParams(window.location.search);
-    const verification = query.get('verify_email');
-    const reset = query.get('reset_password');
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const verification = fragment.get('verify_email') || query.get('verify_email');
+    const reset = fragment.get('reset_password') || query.get('reset_password');
     if (!verification && !reset) return;
     query.delete('verify_email'); query.delete('reset_password');
-    const clean = window.location.pathname + (query.toString() ? '?' + query.toString() : '') + window.location.hash;
+    fragment.delete('verify_email'); fragment.delete('reset_password');
+    const clean = window.location.pathname + (query.toString() ? '?' + query.toString() : '') +
+      (fragment.toString() ? '#' + fragment.toString() : '');
     window.history.replaceState(null, '', clean);
     const { default: Swal } = await import('sweetalert2');
     if (verification) {
