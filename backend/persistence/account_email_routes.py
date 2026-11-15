@@ -5,7 +5,7 @@ Strictly opt-in during rollout: existing users and sessions retain their UUIDs.
 from __future__ import annotations
 
 import os
-import secrets
+import ssl
 import smtplib
 from datetime import timedelta
 from email.message import EmailMessage
@@ -76,10 +76,12 @@ def send_account_email(recipient: str, token: str, *, purpose: str):
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Email delivery unavailable")
     base = os.environ["AUTH_PUBLIC_URL"].strip().rstrip("/")
-    if not base.startswith("https://") and not base.startswith("http://localhost"):
+    from urllib.parse import urlsplit, quote
+    parsed = urlsplit(base)
+    if (parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in {'localhost', '127.0.0.1'})) or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise HTTPException(status_code=503, detail="Invalid public email URL")
-    import urllib.parse
-    link = base + ("/?verify_email=" if purpose == "verify_email" else "/?reset_password=") + urllib.parse.quote(token)
+    # URL fragments are not sent to the web server, proxy logs, or referrer headers.
+    link = base + ("/#verify_email=" if purpose == "verify_email" else "/#reset_password=") + quote(token)
     msg = EmailMessage()
     msg["From"] = os.environ["AUTH_FROM_EMAIL"]
     msg["To"] = recipient
@@ -96,7 +98,7 @@ def send_account_email(recipient: str, token: str, *, purpose: str):
             client = smtplib.SMTP(os.environ["AUTH_SMTP_HOST"], port, timeout=10)
         with client as smtp:
             if port == 587:
-                smtp.starttls()
+                smtp.starttls(context=ssl.create_default_context())
             if os.environ.get("AUTH_SMTP_USERNAME"):
                 smtp.login(os.environ["AUTH_SMTP_USERNAME"], os.environ["AUTH_SMTP_PASSWORD"])
             smtp.send_message(msg)
