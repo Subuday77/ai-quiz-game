@@ -38,7 +38,7 @@ into `origin/master`:
 
 ```bash
 cd /srv/ai-quiz-game/source
-git fetch origin master
+git fetch origin master:refs/remotes/origin/master
 sudo install -d -m 0700 -o deploy -g deploy /home/deploy/quiz-backups
 
 git show origin/master:ops/backup/quiz-pg-backup.sh | sudo tee /usr/local/sbin/quiz-pg-backup >/dev/null
