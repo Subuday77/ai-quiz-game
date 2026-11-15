@@ -112,6 +112,10 @@
   "auth.invalidEmailName": "Enter a valid email and display name.",
   "auth.displayNameInvalid": "Enter a display name (up to 80 characters).",
   "auth.emailClaimUnavailable": "Email unavailable or delivery not configured.",
+  "auth.changeUnverifiedEmail": "Correct email address",
+  "auth.currentPassword": "Current password",
+  "auth.correctedEmail": "New verification link sent to the corrected email.",
+
 
   "auth.repeatPlaceholder": "Repeat password",
   "auth.submitLogin": "Sign in",
