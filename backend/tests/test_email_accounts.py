@@ -128,6 +128,17 @@ class EmailAccountFlowTests(unittest.TestCase):
             "email": "another@example.com", "current_password": "correct horse battery staple"
         }).status_code, 409)
 
+    def test_forgot_password_rate_limit_ignores_spoofed_forwarded_for(self):
+        for index in range(20):
+            response = self.client.post("/api/auth/password/forgot",
+                json={"email": "unknown@example.com"},
+                headers={"X-Forwarded-For": f"192.0.2.{index + 1}"})
+            self.assertEqual(response.status_code, 200, response.text)
+        blocked = self.client.post("/api/auth/password/forgot",
+            json={"email": "unknown@example.com"},
+            headers={"X-Forwarded-For": "203.0.113.99"})
+        self.assertEqual(blocked.status_code, 429)
+
     def test_unverified_emails_cannot_reset(self):
         self.register("noverify@example.com")
         n = len(self.sent)
