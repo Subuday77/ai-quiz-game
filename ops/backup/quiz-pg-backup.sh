@@ -24,7 +24,8 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 name="quiz-backup-${stamp}.dump"
 archive="$BACKUP_DIR/$name"
 partial="$(mktemp "$BACKUP_DIR/.quiz-backup-${stamp}.XXXXXXXX.partial")"
-trap 'rm -f -- "$partial"' EXIT
+hash_partial=''
+trap 'rm -f -- "$partial" "$hash_partial"' EXIT
 
 # Pipe only the dump's stdout into the restricted temporary file. Failure must
 # stop the script, rather than publish a truncated backup as successful.
@@ -38,11 +39,14 @@ docker compose exec -T db pg_restore --list < "$partial" > /dev/null
 ln -- "$partial" "$archive"
 rm -- "$partial"
 partial=''
+hash_partial="$(mktemp "$BACKUP_DIR/.quiz-checksum-${stamp}.XXXXXXXX.partial")"
 (
   cd "$BACKUP_DIR"
-  sha256sum "$name" > "$name.sha256.tmp"
-  mv -- "$name.sha256.tmp" "$name.sha256"
-)
+  sha256sum "$name"
+) > "$hash_partial"
+ln -- "$hash_partial" "$archive.sha256"
+rm -- "$hash_partial"
+hash_partial=''
 chmod 0600 "$archive" "$archive.sha256"
 chown deploy:deploy "$archive" "$archive.sha256"
 printf 'BACKUP OK: %s (%s bytes); checksum: %s\n' \
