@@ -54,6 +54,8 @@ class AccountOut(BaseModel):
     id: UUID
     username: str
     display_name: str | None = None
+    email: str | None = None
+    email_verified: bool = False
     preferred_language: str
     ui_language: str
     theme_key: str
@@ -210,7 +212,12 @@ def login(payload: Credentials, request: Request, response: Response,
 
 @router.get("/me", response_model=AccountOut)
 def me(user: User = Depends(authenticated_user)):
-    return user
+    return AccountOut.model_validate({
+        "id": user.id, "username": user.username, "display_name": user.display_name,
+        "email": user.email, "email_verified": user.email_verified_at is not None,
+        "preferred_language": user.preferred_language, "ui_language": user.ui_language,
+        "theme_key": user.theme_key,
+    })
 
 
 class UsernameChange(BaseModel):
