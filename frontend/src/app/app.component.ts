@@ -1426,6 +1426,10 @@ export class AppComponent implements OnInit, OnDestroy {
             '<button id="quiz-forgot-password" type="button" class="outline-button">Forgot password?</button>') +
           '</div>',
         didOpen: () => {
+          if (isRegister) {
+            const passwordInput = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password');
+            if (passwordInput) passwordInput.placeholder = this.locale.t('auth.passwordHint');
+          }
           Swal.getPopup()?.querySelector<HTMLButtonElement>('#quiz-forgot-password')
             ?.addEventListener('click', () => { Swal.close(); void this.requestPasswordReset(); });
         },
@@ -1532,6 +1536,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private async consumeAccountLink(): Promise<void> {
+    if (typeof window === 'undefined') return;
     const query = new URLSearchParams(window.location.search);
     const verification = query.get('verify_email');
     const reset = query.get('reset_password');
