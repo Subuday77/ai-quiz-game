@@ -45,6 +45,12 @@ class EmailInput(BaseModel):
     email: str
 
 
+class ReplaceUnverifiedEmail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str
+    current_password: str = Field(min_length=1, max_length=256)
+
+
 class TokenInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=20, max_length=256)
@@ -238,18 +244,77 @@ def resend(request: Request, user: User = Depends(authenticated_user),
 @router.post("/email/verify")
 def verify(payload: TokenInput, request: Request, db: Session = Depends(get_db)):
     validate_origin(request)
-    row = db.scalar(select(AccountEmailToken).where(
-        AccountEmailToken.token_hash == token_digest(payload.token),
-        AccountEmailToken.purpose == "verify_email").with_for_update())
-    if not row or row.used_at or aware(row.expires_at) <= utc_now():
+    digest = token_digest(payload.token)
+    candidate = db.scalar(select(AccountEmailToken).where(
+        AccountEmailToken.token_hash == digest,
+        AccountEmailToken.purpose == "verify_email"))
+    if not candidate:
         raise HTTPException(status_code=400, detail="Invalid or expired link")
-    user = db.scalar(select(User).where(User.id == row.user_id).with_for_update())
-    if not user or user.email != row.email:
+    # Account lock first, then token lock, to serialize email corrections.
+    user = db.scalar(select(User).where(User.id == candidate.user_id).with_for_update())
+    row = db.scalar(select(AccountEmailToken).where(
+        AccountEmailToken.token_hash == digest,
+        AccountEmailToken.purpose == "verify_email").with_for_update())
+    if (not user or not row or row.used_at or aware(row.expires_at) <= utc_now()
+            or user.email != row.email):
         raise HTTPException(status_code=400, detail="Invalid or expired link")
     user.email_verified_at = utc_now()
     row.used_at = utc_now()
     db.commit()
     return {"message": "Email verified"}
+
+
+@router.post("/email/replace-unverified")
+def replace_unverified(payload: ReplaceUnverifiedEmail, request: Request,
+                       user: User = Depends(authenticated_user),
+                       db: Session = Depends(get_db)):
+    validate_origin(request)
+    if not mail_configured():
+        raise HTTPException(status_code=503, detail="Email delivery unavailable")
+    try:
+        email = canonical_email(payload.email)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid email") from None
+    account = db.scalar(select(User).where(User.id == user.id).with_for_update())
+    if not account or account.email_verified_at is not None or not account.email:
+        raise HTTPException(status_code=409, detail="Cannot change a verified email here")
+    if account.email == email:
+        raise HTTPException(status_code=409, detail="Email is unchanged")
+    if not throttle(db, account, "verify_email"):
+        raise HTTPException(status_code=429, detail="Please try again later")
+    identity = db.scalar(select(AuthIdentity).where(
+        AuthIdentity.user_id == account.id,
+        AuthIdentity.provider == "password").with_for_update())
+    from argon2 import exceptions
+    if not identity:
+        raise HTTPException(status_code=409, detail="Password login not configured")
+    if identity.locked_until and aware(identity.locked_until) > utc_now():
+        raise HTTPException(status_code=429, detail="Please try again later")
+    try:
+        HASHER.verify(identity.password_hash, payload.current_password)
+    except (exceptions.VerifyMismatchError, exceptions.VerificationError):
+        identity.failed_logins += 1
+        if identity.failed_logins >= 5:
+            identity.locked_until = utc_now() + timedelta(minutes=15)
+            identity.failed_logins = 0
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid credentials") from None
+    identity.failed_logins = 0
+    identity.locked_until = None
+    account.email = email
+    db.execute(update(AccountEmailToken).where(
+        AccountEmailToken.user_id == account.id,
+        AccountEmailToken.purpose == "verify_email",
+        AccountEmailToken.used_at.is_(None),
+    ).values(used_at=utc_now()))
+    token = new_token(db, account, "verify_email")
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Email already registered") from None
+    send_account_email(email, token, purpose="verify_email")
+    return account_response(account)
 
 
 @router.post("/password/forgot")
