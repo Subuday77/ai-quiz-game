@@ -1,91 +1,64 @@
-# Email-first accounts — migration contract (draft)
+# AI Quiz Game — Email-first accounts
 
-Status: **implementation plan**, not enabled in production.
-Scope: AI Quiz Game accounts. Do not deploy schema/model changes separately from their migrations.
+**Status: implemented in draft PR #38, NOT deployed or released.**
+Updated: 2026-11-16.
+Scope: account identity, password recovery, verified email and duplicate display names; no Buy Me a Coffee webhook.
 
-## Current state verified in code (2026-11-16)
+## Preserve existing accounts
 
-- `users.id` already is a UUID and is the stable FK used by the game, star/economy and appeal data.
-- `users.username_key` has a UNIQUE constraint; registration rejects duplicates and offers suffix suggestions.
-- `auth_identities` uses `provider='password'` and the normalized username as `provider_subject`.
-- Passwords already use Argon2id; `auth_sessions` stores digests of opaque cookie tokens.
-- Therefore **do not regenerate user UUIDs or migrate game FKs**. Preserve all user IDs and existing history.
+The repository already uses UUID `users.id` and all game/economy/appeal references link to this UUID. Keep all existing IDs intact. Existing Argon2id password hashes and database-backed browser sessions also remain intact.
 
-## Target model (approved product requirements)
+Old usernames continue to be accepted in `POST /api/auth/login` during migration. The unique `username_key` is retained only as an internal legacy key; **do not remove it until no legacy login still depends on it**. New accounts get internal machine-generated usernames, but show a user-chosen `display_name` (nonunique, Unicode, 1–80 chars). Never use display names as login credentials.
 
-`users`:
-- `id` UUID PK **unchanged**.
-- `display_name` TEXT/VARCHAR(80), NOT UNIQUE, required for newly created accounts; may repeat across any number of players; Unicode supported.
-- `email` (or separate `user_emails` table) canonical address, **unique case-insensitively** and verified before use for account recovery or external purchase claims.
-- `email_verified_at` UTC nullable for legacy accounts until verified.
-- `username` and `username_key` remain as **legacy, internal migration fields** until the old login path is retired; do not rename or reuse them as public display names.
-- `preferred_language`, `ui_language`, `theme_key`, `created_at`, `disabled_at` unchanged.
+## What PR #38 implements
 
-`auth_identities`:
-- Preserve existing Argon2id `password_hash`; do not re-encrypt passwords or derive them from display names.
-- During migration, preserve existing `provider_subject` legacy usernames to allow fallback login.
-- New email login resolves a verified email to `users.id`, then verifies the password identity **by user_id**.
-- Never use display_name to authenticate.
+- Migration `backend/migrations/versions/0015_email_accounts.py`: nullable case-insensitive canonical email, `email_verified_at` and one-time token records; no rekeying.
+- Unique email canonicalization with IDNA domains and case-insensitive mailbox policy. No provider-specific dot or plus folding.
+- `POST /api/auth/email/register` — verified-email flow begins for a new `email`, `display_name`, `password`.
+- `POST /api/auth/email/login` — email/password sign-in; pending verification does **not** block game access but password recovery and external purchases require verification.
+- `POST /api/auth/email/claim` — existing authenticated legacy user binds an email to the same UUID.
+- `POST /api/auth/email/resend` — resend verification to a pending user.
+- `POST /api/auth/email/replace-unverified` — correct a mistyped unverified email after verifying the current password; invalidates prior verification links.
+- `POST /api/auth/email/verify` — redeem one-time verification.
+- `POST /api/auth/password/forgot` — uniform outward response for present and absent emails; only verified addresses get mail.
+- `POST /api/auth/password/reset` — one-time password reset; resets Argon2id credentials; invalidates all other reset links and all sessions.
+- `PATCH /api/auth/display-name` — authenticated change of nonunique name, preserving UUID, stars and history.
+- `GET /api/auth/me` reports verified-email state; legacy login remains operational.
+- Angular account dialogs for new email registration/login, old username fallback, recovery, email verification, pending email correction and nonunique name.
+- New canonical English localization keys; translations follow the normal AI Localizer pipeline.
 
-`email_verification_tokens` and `password_reset_tokens` (or a single scoped token table):
-- `id` UUID, `user_id` UUID FK, `purpose` ('verify_email' | 'reset_password' | 'change_email'), `token_hash` unique, `expires_at`, `used_at`, `created_at`.
-- Store SHA-256 digests of cryptographically random >=256-bit tokens, **never plaintext**. One-time and expiring; rate limited.
-- Store email target digest / explicit target email for verification if email-change flows are introduced, so old links cannot verify a newly changed address.
+Tokens are generated with cryptographic randomness, only SHA-256 digests are stored, and expire after 30 minutes. Links place tokens in URL fragments, which are removed immediately by the client; tokens must never appear in server logs or analytics.
 
-## Rollout in phases
+## Server configuration (not yet supplied or deployed)
 
-1. **Expand DB**: add nullable email columns and token tables; preserve all current constraints and auth paths. Back up DB, rehearse on a restored copy before production.
-2. **Email claim for legacy users**: authenticated old-session user enters email, receives verification link, confirms it, and the address becomes uniquely bound to the same UUID. Prevent account takeover with verified email; never automatically merge users.
-3. **New registration and login**: require email, display name, password. No uniqueness checks on display_name. Send verification. Require verified email for password reset and BMAC linking; choose an explicit policy for access to game while verification pending.
-4. **Password recovery**: public request endpoint always returns the same response regardless of email existence. On a verified address, send short-lived single-use reset link. Consume token atomically, change Argon2id hash, revoke all existing sessions and reset tokens. Rate limit by IP and target hash, avoid leaking tokens in logs/referrers.
-5. **Deprecate old login**: only after all relevant legacy users have a verified email or a safe account-recovery process. Drop `users.username_key` uniqueness **only after all code paths stop relying on it**. Remove suffix suggestions from UI; username/display name may repeat.
-6. **Premium**: verified game email can suggest a candidate BMAC match but cannot by itself prove purchase ownership. Bind authenticated user UUID to provider subscription ID after verified claim/checkout. No webhook or payment logic in this migration.
+Configure privately (see `.env.example` and `.env.production.example`):
 
-## Proposed HTTP contracts
+```dotenv
+AUTH_PUBLIC_URL=https://YOUR_FINAL_QUIZ_DOMAIN
+AUTH_FROM_EMAIL=YOUR_VERIFIED_SENDER
+AUTH_SMTP_HOST=YOUR_PROVIDER_SMTP_HOST
+AUTH_SMTP_PORT=587
+AUTH_SMTP_USERNAME=YOUR_PROVIDER_USERNAME
+AUTH_SMTP_PASSWORD=YOUR_PRIVATE_PASSWORD
+```
 
-- `POST /api/auth/register` {email, display_name, password}
-- `POST /api/auth/login` {email, password}
-- `POST /api/auth/email/request-verification` (authenticated)
-- `POST /api/auth/email/verify` {token}
-- `POST /api/auth/password/forgot` {email} (always same outward response)
-- `POST /api/auth/password/reset` {token, new_password}
-- `PATCH /api/auth/display-name` {display_name} (authenticated)
-- `GET /api/auth/me` includes email_verified and display_name, but never token/hash.
+Port 587 uses STARTTLS, port 465 SSL. The sender domain must be configured with SPF/DKIM/DMARC with the mail provider. Never commit actual secrets, send tokens to logs, or use an unverified sender. New email signup/verification intentionally fail closed if email transport is unconfigured. Do not publish the updated front-end without the updated backend and DB schema.
 
-Exact routes can be adapted to existing frontend endpoints as long as backward compatibility is tested.
+## Safe rollout order
 
-## Database and security invariants
+1. Confirm final HTTPS Quiz domain and configure/test sender, SPF/DKIM/DMARC, rate limits/abuse protection.
+2. Back up production PostgreSQL and rehearse restore on a separate copy. Record existing Alembic revision and counts of `users`, sessions, runs, appeals, star ledger entries.
+3. Test Alembic `0015_email_accounts` on that restored copy; check no existing UUID or FK changes.
+4. Configure SMTP and `AUTH_PUBLIC_URL` privately; run the coordinated backend/frontend release; create NO webhook.
+5. E2E: create two accounts with identical display names and distinct emails, receive and verify messages; old username login/claim; wrong address correction; expired/reused links; reset revokes sessions; UI locales and RTL; refresh and resume active games.
+6. Compare pre/post DB record counts and exact UUID references. Roll back application safely if needed, keeping the additive DB schema until compatibility is established.
+7. After legacy players have claimed email, **separately** deprecate old username registration/login and remove old suggestions/unique-username code. Do not drop legacy fields prematurely.
+8. Only after independent payment verification design, add Buy Me a Coffee subscription linking. Email equality alone cannot authenticate ownership of a purchase.
 
-- Every existing `users.id` survives unchanged. Existing `game_runs`, `auth_sessions`, star ledger, appeals, question votes, helper records and localization remain associated with that UUID.
-- Canonical email must enforce unique identity in DB. Conservative normalization: trim surrounding whitespace, Unicode domain to IDNA, casefold domain; case-insensitive mailbox handling as product policy, **no Gmail-specific dot or plus folding**.
-- Display names may duplicate exactly, including different users having the same spelling and case. Names must never be authorization keys.
-- Existing verified email cannot be silently reassigned; registration and claim flows handle concurrent duplicate claims with DB uniqueness.
-- Never email existing passwords; never give tokens through query logs, analytics, exception traces or API response.
-- Password reset invalidates authenticated sessions and is transactional and single-use.
-- CSRF/origin checks apply to cookie-authenticated mutations.
-- Fail closed if email transport is not configured; no fake success that claims email was sent.
+## Known release blockers / follow-ups
 
-## Acceptance tests before production
-
-- Create two distinct UUID users with exactly identical display_name and distinct emails, both login successfully.
-- Same email with case variation rejected by database uniqueness; racing registrations cannot bypass constraint.
-- Two pre-migration accounts with same display name retain separate star balances, history, appeals, active rounds and sessions.
-- Legacy sign-in and email claim work during migration.
-- Verification link: valid, expired, reused and tampered; verify wrong-target rejection.
-- Password reset: existent/nonexistent email get same public response; expired/reused tokens rejected; concurrent redemption single-use; previous sessions revoked.
-- Email account change and Premium purchase cannot be claimed solely by matching customer-provided email.
-- Functional frontend E2E: signup, sign-in, sign-out, password recovery, account rename, refresh/resume, duplicate display names, RU/EN and RTL.
-- PostgreSQL backup/restore rehearsal + rollback strategy; only deploy after full test suite.
-
-## Decisions made
-
-- Email becomes the unique login identifier; display names are nonunique.
-- Preserve existing UUIDs and Argon2id credential system.
-- Do not create Buy Me a Coffee webhook until accounts are ready.
-
-## Unresolved engineering implementation details
-
-- Mail transport (SMTP/API), sender domain, deliverability (SPF/DKIM/DMARC).
-- Account access policy before verification.
-- Final retention/deletion window for old username login.
-- Exact migration revision and sequencing after inspecting current Alembic head and production DB.
+- Live SMTP provider, secrets, sender reputation and an actual mailbox delivery test are unavailable in this PR.
+- API anti-abuse protection still needs a deployment-aware **IP and email rate limiter** beyond the current per-account one-hour cap for verification/reset sends. Respect trusted proxy headers; don't treat the shared Caddy reverse-proxy IP as a user.
+- Review accessibility and localization in all supported languages, not only canonical English. Test RU/EN and RTL in browser.
+- Add real Postgres concurrency tests for competing email claims and reset requests, as well as a production backup/restore rehearsal.
+- Do not merge, deploy to VPS, or accept money for these benefits until all release checks are complete.
