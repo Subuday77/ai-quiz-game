@@ -570,7 +570,24 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 }
 
 /* Release candidate: About page and the one-time reading gift. */
-.about-open-button { margin: 4px 0 18px; }
+.setup-heading { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+.setup-heading h1 { margin: 0; }
+.setup-heading .about-open-button { flex: 0 0 auto; padding: 11px 18px; }
+.coffee-support {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 14px; width: min(100%, 650px); box-sizing: border-box;
+  background: rgba(70, 75, 123, .24);
+  border: 1px solid rgba(171, 178, 223, .36);
+  border-radius: 13px; padding: 13px 16px; margin: 6px 0 18px;
+}
+.coffee-prompt { font-weight: 650; line-height: 1.5; color: #f1f2ff; }
+.coffee-button { display: inline-flex; gap: 9px; align-items: center; justify-content: center; white-space: nowrap; padding: 12px 16px; text-decoration: none; }
+.coffee-button:disabled { opacity: .56; }
+@media (max-width: 640px) {
+  .setup-heading { align-items: flex-start; gap: 12px; }
+  .setup-heading .about-open-button { margin: 0; }
+  .coffee-support { align-items: flex-start; }
+}
 .about-backdrop { position: fixed; inset: 0; z-index: 1100; background: #080b20dd; display: grid; place-items: center; padding: 16px; }
 .about-panel { background: #1b1e3e; border: 1px solid #737bb2; border-radius: 18px; padding: 28px; width: min(710px, 100%); max-height: 88vh; overflow-y: auto; color: #f1f3ff; position: relative; }
 .about-panel h2 { margin-top: 0; padding-inline-end: 28px; }

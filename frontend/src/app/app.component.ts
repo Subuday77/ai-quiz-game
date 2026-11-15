@@ -318,6 +318,8 @@ export class AppComponent implements OnInit, OnDestroy {
   aboutBusy = false;
   aboutError = '';
   readonly aboutReward: StarCounts = { bronze: 50, silver: 40, gold: 30, platinum: 20 };
+  // Public donation URL comes from the server only after the owner registers a page.
+  donationUrl = '';
   resetEnabled = false;
   resetBusy = false;
   resetError = '';
@@ -504,11 +506,15 @@ export class AppComponent implements OnInit, OnDestroy {
     this.locale.load('en');
     this.subscriptions.add(this.http.get<{
       long_wait_warning_ms: number; request_timeout_ms: number;
-      late_question_timeout_ms?: number;
+      late_question_timeout_ms?: number; donation_url?: string | null;
     }>('/api/client-config').pipe(
       timeout(5000), finalize(() => { this.configLoading = false; }),
     ).subscribe({
       next: (settings) => {
+        // Defense-in-depth: accept only a Buy Me a Coffee profile link.
+        this.donationUrl = typeof settings.donation_url === 'string' &&
+          /^https:\/\/(?:www\.)?buymeacoffee\.com\/[A-Za-z0-9_-]+\/?$/.test(settings.donation_url)
+          ? settings.donation_url : '';
         if (Number.isFinite(settings.long_wait_warning_ms) &&
             Number.isFinite(settings.request_timeout_ms) &&
             settings.long_wait_warning_ms > 0 &&
