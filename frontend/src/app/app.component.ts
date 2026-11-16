@@ -1613,11 +1613,21 @@ export class AppComponent implements OnInit, OnDestroy {
     if (verification) {
       try {
         await firstValueFrom(this.http.post('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
-        if (this.account) {
-          this.account.email_verified = true;
-          // Resume checks and game controls were intentionally unavailable
-          // while the email-first account was not verified.
-          this.restoreActiveGame();
+        // The emailed link may be opened after a full page reload, before
+        // the initial /me request finishes. Refresh the authoritative status
+        // so game access unlocks immediately in the current browser.
+        try {
+          const refreshed = await firstValueFrom(
+            this.http.get<Account>('/api/auth/me').pipe(timeout(10000))
+          );
+          this.signedIn(refreshed);
+        } catch {
+          // Opening the link in another browser may have no session cookie;
+          // the user can sign in normally with the now-verified account.
+          if (this.account) {
+            this.account.email_verified = true;
+            this.restoreActiveGame();
+          }
         }
         await Swal.fire({ titleText: this.locale.t('auth.emailVerified'), icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
       } catch { await Swal.fire({ titleText: this.locale.t('auth.verificationInvalid'),
