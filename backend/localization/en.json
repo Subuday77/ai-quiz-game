@@ -105,6 +105,8 @@
   "auth.verificationSent": "Please check your email and confirm the link.",
   "auth.verificationFailed": "Unable to send verification email.",
   "auth.emailVerified": "Email verified",
+  "auth.emailVerifiedSameAccount": "{{email}} is confirmed. You can now play.",
+  "auth.emailVerifiedOtherBrowser": "{{email}} is confirmed. This browser remains signed in to its existing player. Return to the browser where you registered and refresh the page to play.",
   "auth.verificationInvalid": "Invalid or expired verification link",
   "auth.chooseNewPassword": "Choose a new password",
   "auth.resetInvalid": "Invalid or expired reset link",
