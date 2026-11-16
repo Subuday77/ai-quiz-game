@@ -69,7 +69,7 @@ class SignupAndAboutBonusTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(first.json()["newly_claimed"], True)
         self.assertEqual(first.json()["balances"],
-                         {"bronze": 50, "silver": 40, "gold": 30, "platinum": 20})
+                         {"bronze": 5, "silver": 4, "gold": 3, "platinum": 2})
         again = self.client.post("/api/v2/stars/about-bonus")
         self.assertEqual(again.status_code, 200, again.text)
         self.assertFalse(again.json()["newly_claimed"])
