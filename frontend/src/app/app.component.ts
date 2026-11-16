@@ -254,6 +254,7 @@ interface AnswerFeedback {
 
 @Component({
   selector: 'app-root',
+  host: { '[class.loss-mode]': 'lossModeActive' },
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './app.component.html',
@@ -337,6 +338,10 @@ export class AppComponent implements OnInit, OnDestroy {
   resetError = '';
   restoringGame = false;
   finishedPhase: 'lost' | 'completed' | null = null;
+  // Apply the loss palette on answer feedback, results and restored lost rounds.
+  get lossModeActive(): boolean {
+    return this.finishedPhase === 'lost' && (this.screen === 'feedback' || this.screen === 'done');
+  }
   pendingResults: GameInfo | null = null;
   statsLoading = false;
   statsError = '';
