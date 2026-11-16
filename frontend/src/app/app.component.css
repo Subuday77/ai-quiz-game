@@ -750,3 +750,15 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 @media (max-width: 640px) {
   .email-verification-gate { padding: 20px 16px; }
 }
+
+/* Loss mode uses a fixed, click-through visual layer rather than filtering the
+   app root. This preserves the layout/positioning of fixed dialogs and controls. */
+:host(.loss-mode)::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  pointer-events: none;
+  -webkit-backdrop-filter: grayscale(97%);
+  backdrop-filter: grayscale(97%);
+}
