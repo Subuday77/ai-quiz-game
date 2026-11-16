@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from persistence.account_email import canonical_email, create_one_time_token, token_digest, token_expiry
 from persistence.account_rate_limit import limit_email_action
-from persistence.auth import (HASHER, authenticated_user, aware, session_digest,
+from persistence.auth import (HASHER, authenticated_user, aware,
                               start_session, utc_now, validate_origin)
 from persistence.database import get_db
 from persistence.models import AccountEmailToken, AuthIdentity, AuthSession, User
@@ -90,13 +90,13 @@ def send_account_email(recipient: str, token: str, *, purpose: str):
     # URL fragments are not sent to the web server, proxy logs, or referrer headers.
     link = base + ("/#verify_email=" if purpose == "verify_email" else "/#reset_password=") + quote(token)
     msg = EmailMessage()
-    msg["From"] = os.environ["AUTH_FROM_EMAIL"]
+    msg["From"] = os.environ["AUTH_FROM_EMAIL"].strip()
     msg["To"] = recipient
     msg["Subject"] = "AI Quiz Game — Verify your email" if purpose == "verify_email" else "AI Quiz Game — Reset your password"
     msg.set_content("Open this one-time link within 30 minutes:\n\n" + link +
                     "\n\nIf you did not request this, you can ignore this message.")
     port = int(os.environ.get("AUTH_SMTP_PORT", "587"))
-    if port not in (465, 587):
+    if port not in (465, 587, 2525):
         raise HTTPException(status_code=503, detail="Invalid SMTP port")
     try:
         if port == 465:
@@ -104,7 +104,7 @@ def send_account_email(recipient: str, token: str, *, purpose: str):
         else:
             client = smtplib.SMTP(os.environ["AUTH_SMTP_HOST"], port, timeout=10)
         with client as smtp:
-            if port == 587:
+            if port in (587, 2525):
                 smtp.starttls(context=ssl.create_default_context())
             if os.environ.get("AUTH_SMTP_USERNAME"):
                 smtp.login(os.environ["AUTH_SMTP_USERNAME"], os.environ["AUTH_SMTP_PASSWORD"])
