@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer,
+    JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, BigInteger,
     LargeBinary, SmallInteger, String, Text, UniqueConstraint, Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -105,6 +105,39 @@ class AuthSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+
+class PremiumMembership(Base):
+    """Provider subscription tracked by immutable provider ID, never display name."""
+    __tablename__ = "premium_memberships"
+    id = id_column()
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
+                            nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="buymeacoffee")
+    provider_subscription_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_supporter_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    plan: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at = datetime_column()
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_subscription_id", name="uq_premium_provider_subscription"),
+        CheckConstraint("plan IN ('month','year')", name="ck_premium_plan"),
+        CheckConstraint("status IN ('active','cancelled','paused')", name="ck_premium_status"),
+    )
+
+
+class PremiumWebhookEvent(Base):
+    """Durable idempotency marker; no raw payment/customer payload stored."""
+    __tablename__ = "premium_webhook_events"
+    provider_event_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    received_at = datetime_column()
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+
 
 
 class Topic(Base):

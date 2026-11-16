@@ -39,6 +39,14 @@ interface Account {
   ui_language: string;
   theme_key: string;
 }
+interface PremiumStatus {
+  active: boolean;
+  checkout_ready: boolean;
+  free_appeals_per_month: number;
+  gold_to_platinum: boolean;
+  star_discount_percent: number;
+  priority_questions: boolean;
+}
 interface ProfileStats {
   games_played: number;
   total_score: number;
@@ -302,6 +310,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
 
   profileMenuOpen = false;
+  premium: PremiumStatus | null = null;
   appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
   appealMessage = '';
@@ -2290,10 +2299,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.refreshStats();
     this.refreshAppealAllowance();
+    this.refreshPremium();
     if (!this.needsEmailVerification) this.restoreActiveGame();
   }
 
   private clearAccount(): void {
+    this.premium = null;
     this.statsVersion++;
     this.appealAllowance = null;
     this.resetEnabled = false;
@@ -2610,6 +2621,43 @@ export class AppComponent implements OnInit, OnDestroy {
         this.current = current;
         if (this.isUnauthorized(err)) this.sessionExpired();
         else this.perksError = 'perks.actionFailed';
+      },
+    }));
+  }
+
+  private refreshPremium(): void {
+    const accountId = this.account?.id;
+    if (!accountId) { this.premium = null; return; }
+    this.subscriptions.add(this.http.get<PremiumStatus>('/api/v2/premium').pipe(
+      timeout(10000),
+    ).subscribe({
+      next: (premium) => {
+        if (this.account?.id === accountId) this.premium = premium;
+      },
+      error: () => { if (this.account?.id === accountId) this.premium = null; },
+    }));
+  }
+
+  openPremium(): void {
+    if (!this.account) return;
+    const url = this.donationUrl;
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  premiumGoldToPlatinum(): void {
+    if (!this.account || this.perksBusy || !this.premium?.active ||
+        this.spendableStars.gold < 10) return;
+    this.perksBusy = true;
+    this.perksError = '';
+    this.subscriptions.add(this.http.post<StarCounts>(
+      STARS_API + '/premium/gold-to-platinum',
+      {source: 'gold', target: 'platinum', amount: 10, request_id: crypto.randomUUID()},
+    ).pipe(timeout(15000), finalize(() => { this.perksBusy = false; })).subscribe({
+      next: (balance) => { this.spendableStars = balance; },
+      error: (err: unknown) => {
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.perksError = 'perks.exchangeFailed';
       },
     }));
   }

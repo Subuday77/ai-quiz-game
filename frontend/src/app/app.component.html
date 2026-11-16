@@ -36,6 +36,14 @@
                       (click)="claimAccountEmail()" [disabled]="authBusy || loading">
                 {{ locale.t(player.email ? 'auth.verifyEmail' : 'auth.claimEmail') }}
               </button>
+              <button class="account-button premium-account-button" type="button"
+                      (click)="openPremium()" [disabled]="!donationUrl || (!premium?.active && !premium?.checkout_ready)"
+                      [title]="locale.t('premium.sameEmail')">
+                ✦ {{ locale.t(premium?.active ? 'premium.active' : 'premium.join') }}
+              </button>
+              <small class="premium-email-note" *ngIf="!premium?.active">
+                {{ locale.t('premium.sameEmail') }}
+              </small>
               <button class="account-button" type="button"
                       (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
                 {{ locale.t('appeals.myComplaints') }}
@@ -86,6 +94,15 @@
             <span class="star-icon" aria-hidden="true">★</span>
             <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
             <strong class="star-number">{{ spendableStars[tier.key] }}</strong>
+          </div>
+          <div class="exchange-pair" *ngIf="tier.key === 'gold' && premium?.active">
+            <button type="button" class="exchange-arrow"
+                    (click)="premiumGoldToPlatinum()"
+                    [disabled]="perksBusy || loading || spendableStars.gold < 10"
+                    [attr.title]="locale.t('premium.convertGold')"
+                    [attr.aria-label]="locale.t('premium.convertGold')">
+              <span aria-hidden="true">→</span><small>10:1</small>
+            </button>
           </div>
           <div class="exchange-pair" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
             <ng-container *ngIf="tier.key === 'bronze'">

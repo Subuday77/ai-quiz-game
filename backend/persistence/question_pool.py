@@ -164,6 +164,7 @@ def offer_approved_pool_question(
     replace_attempt_id: UUID | None = None,
     replace_manual: bool = False,
     category_operation_key: str | None = None,
+    quality_priority: bool = False,
 ) -> tuple[QuestionAttempt, Question] | None:
     """Find an already reviewed question and atomically offer it to this user.
 
@@ -317,7 +318,9 @@ def offer_approved_pool_question(
             # Window ordering is randomized within each category.
             ranked = eligible_query.add_columns(
                 func.row_number().over(
-                    partition_by=Topic.slug, order_by=func.random(),
+                    partition_by=Topic.slug,
+                    order_by=(Question.working_vote_score.desc() if quality_priority
+                              else func.random()),
                 ).label("pool_rank"),
             ).subquery()
             records = db.execute(
@@ -328,7 +331,8 @@ def offer_approved_pool_question(
         else:
             records = db.execute(
                 eligible_query.where(Topic.slug == category_key)
-                .order_by(func.random()).limit(max_candidates)
+                .order_by(Question.working_vote_score.desc() if quality_priority else func.random())
+                .limit(max_candidates)
             ).all()
         ids_by_category = {slug: [] for slug in category_by_slug}
         for question_id, slug in records:
@@ -397,7 +401,9 @@ def offer_approved_pool_question(
             if rating_filter:
                 event("db_admitted", count=len(admitted), center=center, scale=scale)
         if admitted:
-            saved = random.choice(admitted) if rating_filter else admitted[0]
+            saved = (max(admitted, key=lambda item: item.working_vote_score)
+                     if quality_priority else
+                     random.choice(admitted) if rating_filter else admitted[0])
             # The community threshold can be crossed by another player while
             # the pool is scanning. Lock and re-read before assigning the ID.
             saved = db.scalar(select(Question).where(
