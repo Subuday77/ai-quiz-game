@@ -38,11 +38,13 @@ from persistence.analytics import router as profile_router  # noqa: E402
 from localization.routes import router as localization_router  # noqa: E402
 from localization.dev_tools import router as localization_dev_router  # noqa: E402
 from persistence.premium import router as premium_router  # noqa: E402
+from persistence.star_shop import router as star_shop_router  # noqa: E402
 from persistence.appeal_scheduler import appeal_lifespan  # noqa: E402
 
 app = FastAPI(title="AI Quiz Game", version="0.1.0", lifespan=appeal_lifespan)
 app.include_router(auth_router)  # Legacy username login during safe migration.
 app.include_router(premium_router)
+app.include_router(star_shop_router)
 app.include_router(email_account_router)  # Email-first account endpoints.
 app.include_router(profile_router)  # Derived statistics are initially empty until game DB migration.
 app.include_router(localization_router)
