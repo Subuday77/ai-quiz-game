@@ -29,19 +29,19 @@ About reward claim idempotency keys are unchanged.
 2. Create a separate Shop webhook in BMC Integrations. Subscribe to events
    extra_purchase.created and extra_purchase.refunded and copy its signing
    secret. Do not reuse the existing Premium webhook secret.
-3. Create a 20% Shop discount code for Premium players. Entered at BMC's
-   checkout, this code is not automatically attached to AI Quiz Premium status.
-   Coupon sharing is possible: the provider does not bind codes to an AI
-   Quiz Premium account. The backend displays the coupon only to Premium
-   members but fulfils any successfully paid valid Shop receipt at the exact
-   20%-off amount, even if the code was shared. Do not promise that the
-   Premium code is exclusive; consider a different payment provider if
-   enforcing exclusivity becomes a requirement.
+3. For **each Shop Extra**, open Advanced settings and enable
+   **Special price for members**. Enter its member price from the table
+   above (20% lower than normal). No discount coupon is needed. Leave
+   **Allow buyer to choose a quantity** OFF. Buy Me a Coffee decides
+   which buyer qualifies for member pricing at checkout; the Quiz game
+   displays the Premium quote but never overrides the provider's decision.
+   Ensure the Buy Me a Coffee membership and Quiz registration use the
+   same verified email. Verify the actual paid amount in a signed Shop
+   event before enabling purchases.
 4. Set these backend environment variables (illustrative placeholders only):
 
     BMC_STAR_SHOP_ENABLED=false
     BMC_STAR_WEBHOOK_SIGNING_SECRET=<secret>
-    BMC_STAR_PREMIUM_COUPON=<real BMC Shop code>
     BMC_STAR_SHOP_ITEMS={"30":{"extra_id":<id>,"url":"<real url>"},"100":{"extra_id":<id>,"url":"<real url>"},"250":{"extra_id":<id>,"url":"<real url>"},"500":{"extra_id":<id>,"url":"<real url>"},"1000":{"extra_id":<id>,"url":"<real url>"}}
 
    IDs must be unique positive integers; links must be valid HTTPS
@@ -55,7 +55,7 @@ About reward claim idempotency keys are unchanged.
    have zero credits and invalid signatures return 401. Confirm receipt
    validation and idempotence in staging.
 8. Enable the BMC Shop webhook and BMC_STAR_SHOP_ENABLED=true only after
-   actual five item IDs, prices and the Premium code have been verified.
+   all five item IDs and both price fields (regular/member) have been verified.
    Complete a controlled real purchase and refund test before announcement.
 
 ## Security and reconciliation
@@ -71,6 +71,11 @@ About reward claim idempotency keys are unchanged.
   Credit and receipt are committed together under a per-user row lock.
 - Test events, coffee donations, memberships, Shop updates and retries
   can never create a second star credit.
+- A signed successful Shop payment is eligible only at the exact full price
+  or exact built-in member price; neither the browser nor any coupon is
+  accepted as evidence of payment. If BMC recognizes someone as a member
+  even while Quiz membership sync is delayed, the verified paid order is
+  still fulfilled without taking money and withholding stars.
 - A signed refund reverses the credit **only if the purchased bronze balance
   remains available**. Otherwise it records refund_pending for operator
   reconciliation without creating a negative in-game balance. A refund
