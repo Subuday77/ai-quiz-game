@@ -606,9 +606,69 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .about-prose { line-height: 1.7; color: #e0e4fb; }
 .about-prose p { margin: 0 0 1.1rem; }
 .about-gift { border-top: 1px solid #737bb2; margin-top: 2.5rem; padding-top: 1.5rem; }
-.about-gift-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 18px 0; }
-.about-gift-tier { display: flex; align-items: center; flex-direction: column; gap: 5px; background: #ffffff10; padding: 12px 4px; border-radius: 10px; font-size: 12px; text-align: center; }
-.about-gift-tier strong { font-size: 24px; }
+/* The reward cards use the same four metal colors as the live star counters. */
+.about-gift-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.about-gift-tier {
+  --gift-tone: #c2d3e8;
+  --gift-halo: #c2d3e833;
+  --gift-outline: #c2d3e844;
+  --gift-surface: #c2d3e811;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 17px 8px 15px;
+  border: 1px solid var(--gift-outline);
+  border-radius: 14px;
+  background: linear-gradient(165deg, var(--gift-surface), #ffffff06 80%);
+  box-shadow: inset 0 1px 0 #ffffff12, 0 8px 20px #090b1d24;
+  text-align: center;
+}
+.about-gift-tier.bronze {
+  --gift-tone: #d6996e;
+  --gift-halo: #d6996e55;
+  --gift-outline: #d6996e66;
+  --gift-surface: #d6996e24;
+}
+.about-gift-tier.silver {
+  --gift-tone: #c2d3e8;
+  --gift-halo: #c2d3e855;
+  --gift-outline: #c2d3e866;
+  --gift-surface: #c2d3e81c;
+}
+.about-gift-tier.gold {
+  --gift-tone: #ffd26f;
+  --gift-halo: #ffd26f55;
+  --gift-outline: #ffd26f66;
+  --gift-surface: #ffd26f23;
+}
+.about-gift-tier.platinum {
+  --gift-tone: #a9f1f5;
+  --gift-halo: #a9f1f555;
+  --gift-outline: #a9f1f566;
+  --gift-surface: #a9f1f522;
+}
+.about-gift-tier .star-icon {
+  color: var(--gift-tone);
+  font-size: 31px;
+  line-height: 1;
+  text-shadow: 0 0 14px var(--gift-halo);
+}
+.about-gift-tier strong {
+  color: var(--gift-tone);
+  font-size: 26px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.about-gift-tier > span:last-child {
+  color: #e9edfa;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
 .quiz-username-suggestions { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px 8px; }
 .quiz-username-suggestions p { width: 100%; font-size: 12px; margin: 4px 0; color: #f0d5a6; }
 .quiz-username-option { background: #32375d; color: #eef5ff; border: 1px solid #7d96c3; border-radius: 7px; padding: 7px 10px; cursor: pointer; }
