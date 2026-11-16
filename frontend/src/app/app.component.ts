@@ -310,6 +310,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
 
   profileMenuOpen = false;
+  premiumDialogOpen = false;
   premium: PremiumStatus | null = null;
   appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
@@ -2304,6 +2305,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private clearAccount(): void {
+    this.premiumDialogOpen = false;
     this.premium = null;
     this.statsVersion++;
     this.appealAllowance = null;
@@ -2639,10 +2641,23 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   openPremium(): void {
-    if (!this.account) return;
-    const url = this.donationUrl;
-    if (!url) return;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    if (!this.account || !this.donationUrl ||
+        (!this.premium?.active && !this.premium?.checkout_ready)) return;
+    this.profileMenuOpen = false;
+    this.premiumDialogOpen = true;
+  }
+
+  closePremium(): void {
+    this.premiumDialogOpen = false;
+  }
+
+  confirmPremium(): void {
+    if (!this.premiumDialogOpen || !this.account?.email_verified ||
+        !this.account.email || !this.donationUrl || this.premium?.active) return;
+    // Open in the direct click handler to avoid popup blockers. The account
+    // email is displayed in the dialog, but is never added to the URL.
+    window.open(this.donationUrl, '_blank', 'noopener,noreferrer');
+    this.closePremium();
   }
 
   premiumGoldToPlatinum(): void {
