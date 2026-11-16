@@ -17,6 +17,7 @@ from sqlalchemy import select, update, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from localization.catalog import LANGUAGES
 from persistence.account_email import canonical_email, create_one_time_token, token_digest, token_expiry
 from persistence.account_rate_limit import limit_email_action
 from persistence.auth import (HASHER, authenticated_user, aware,
@@ -33,6 +34,8 @@ class EmailRegister(BaseModel):
     email: str = Field(max_length=254)
     display_name: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=8, max_length=256)
+    # Optional for older clients; the supported UI language is stored on creation.
+    ui_language: str = Field(default="en", max_length=20)
 
 
 class EmailLogin(BaseModel):
@@ -160,10 +163,13 @@ def register(payload: EmailRegister, request: Request, response: Response, db: S
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid email") from None
     name = normalized_name(payload.display_name)
+    ui_language = payload.ui_language.lower()
+    if ui_language not in LANGUAGES:
+        raise HTTPException(status_code=422, detail="Unsupported UI language")
     user_id = uuid4()
     legacy = "u" + user_id.hex[:29]
     user = User(id=user_id, username=legacy, username_key=legacy,
-                display_name=name, email=email)
+                display_name=name, email=email, ui_language=ui_language)
     try:
         db.add(user)
         # Persist the parent row before inserting its FK-dependent identity/token.
