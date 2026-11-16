@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('../src/app/localization/about-copy.ts', import.meta.url), 'utf8');
 const component = readFileSync(new URL('../src/app/app.component.ts', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../src/app/app.component.html', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../src/app/app.component.css', import.meta.url), 'utf8');
 const english = JSON.parse(readFileSync(new URL('../../backend/localization/en.json', import.meta.url), 'utf8'));
 
 function aboutSections() {
@@ -57,4 +58,24 @@ test('About has a bottom close control after the gift for every visitor', () => 
   assert.match(button, /\[disabled\]="aboutBusy"/);
   assert.match(button, /locale\.t\('about\.close'\)/);
   assert.ok(!button.includes('*ngIf'), 'close button must not depend on gift status');
+});
+
+test('gift stars have separate bronze, silver, gold and platinum styles', () => {
+  assert.match(html, /class="about-gift-tier" \[ngClass\]="tier\.key"/);
+  assert.match(html, /class="star-icon" aria-hidden="true">★<\/span>/);
+  const tones = new Map([
+    ['bronze', '#d6996e'],
+    ['silver', '#c2d3e8'],
+    ['gold', '#ffd26f'],
+    ['platinum', '#a9f1f5'],
+  ]);
+  for (const [tier, tone] of tones) {
+    const selector = '.about-gift-tier.' + tier + ' {';
+    const start = css.indexOf(selector);
+    assert.ok(start >= 0, 'missing style for ' + tier);
+    const block = css.slice(start, css.indexOf('}', start));
+    assert.ok(block.includes('--gift-tone: ' + tone), 'incorrect ' + tier + ' color');
+  }
+  assert.match(css, /\.about-gift-tier \.star-icon \{[^}]*color: var\(--gift-tone\)/s);
+  assert.match(css, /\.about-gift-tier strong \{[^}]*color: var\(--gift-tone\)/s);
 });
