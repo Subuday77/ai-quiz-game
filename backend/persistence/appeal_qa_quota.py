@@ -31,6 +31,9 @@ def allowance(db: Session, *, user_id: UUID, now: datetime,
               submitted: int) -> dict:
     """Derived shared values for quote, UI allowance, and transactional filing.
 
+    'submitted' means quota-consuming filings (all statuses except 'upheld'),
+    not the historical number of complaints ever submitted this month.
+    Upheld complaints restore a free slot or the previous paid fee step.
     Free allowance expands from 5 to 5 + QA grants. Paid filing fees begin
     only after those additional credits are consumed. A separate star deposit
     is STILL required for every complaint.

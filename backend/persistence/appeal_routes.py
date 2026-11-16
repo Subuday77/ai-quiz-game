@@ -227,7 +227,8 @@ def monthly_appeal_allowance(user: User = Depends(authenticated_user),
         "free_remaining": quota["free_appeals_remaining"],
         "free_total": quota["free_appeals_total"],
         "refresh_at": quota["free_appeals_refresh_at"],
-        "filed_this_month": count,
+        "filed_this_month": _filings_this_month(
+            db, user_id=user.id, now=now, include_upheld=True),
         "next_filing_fee_bronze": quota["filing_fee_bronze"],
     }
 

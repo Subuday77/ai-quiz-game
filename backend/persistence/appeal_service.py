@@ -51,12 +51,25 @@ def _eligible_attempt(db: Session, *, run: GameRun, question_id: UUID
     return attempt, db.get(Question, question_id), False
 
 
-def _filings_this_month(db: Session, *, user_id: UUID, now: datetime) -> int:
+def _filings_this_month(db: Session, *, user_id: UUID, now: datetime,
+                        include_upheld: bool = False) -> int:
+    """Count quota-consuming filings in the current UTC month.
+
+    An upheld appeal never consumes a free filing or advances the escalating
+    paid-filing fee. Keep its record and any original nonrefundable fee intact.
+    include_upheld=True is only for the historical 'filed_this_month' metric.
+    Pending, rejected and technically unresolved appeals still count.
+    """
     start, end = month_bounds(now)
-    return int(db.scalar(select(func.count(QuestionAppeal.id)).where(
+    conditions = [
         QuestionAppeal.user_id == user_id,
         QuestionAppeal.submitted_at >= start,
         QuestionAppeal.submitted_at < end,
+    ]
+    if not include_upheld:
+        conditions.append(QuestionAppeal.status != "upheld")
+    return int(db.scalar(select(func.count(QuestionAppeal.id)).where(
+        *conditions,
     )) or 0)
 
 
