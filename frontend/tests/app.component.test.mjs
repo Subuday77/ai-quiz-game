@@ -1434,6 +1434,8 @@ test('email-first sign-in accepts only email, without a username option', () => 
   assert.match(dialog, /'\/api\/auth\/email\/login'/);
   assert.doesNotMatch(dialog, /'\/api\/auth\/login'/);
   assert.doesNotMatch(dialog, /emailOrUsername/);
+  assert.match(dialog, /locale\.t\('auth.invalidEmail'\)/);
+  assert.doesNotMatch(dialog, /locale\.t\('auth.invalidEmailName'\)/);
 });
 
 test('template wires login, PostgreSQL rewards and question retries', () => {

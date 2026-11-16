@@ -1257,7 +1257,7 @@ export class AppComponent implements OnInit, OnDestroy {
       didOpen: () => {
         const popup = Swal.getPopup();
         const label = popup?.querySelector<HTMLElement>('#settings-username-label');
-        if (label) label.textContent = this.locale.t('auth.username');
+        if (label) label.textContent = this.locale.t('auth.displayName');
         const input = popup?.querySelector<HTMLInputElement>('#settings-username-input');
         if (input) input.value = this.account?.display_name || this.account?.username || '';
       },
@@ -1497,8 +1497,12 @@ export class AppComponent implements OnInit, OnDestroy {
           const display_name = value('quiz-display-name');
           const password = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value || '';
           const confirm = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value || '';
-          if (!EMAIL_PATTERN.test(identifier) || (isRegister && !display_name)) {
-            Swal.showValidationMessage(this.locale.t('auth.invalidEmailName'));
+          if (!EMAIL_PATTERN.test(identifier)) {
+            Swal.showValidationMessage(this.locale.t('auth.invalidEmail'));
+            return false;
+          }
+          if (isRegister && !display_name) {
+            Swal.showValidationMessage(this.locale.t('auth.displayNameInvalid'));
             return false;
           }
           if (password.length < 8 || password.length > 256 || (isRegister && confirm !== password)) {
