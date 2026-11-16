@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer,
+    JSON, Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, BigInteger,
     LargeBinary, SmallInteger, String, Text, UniqueConstraint, Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -121,7 +121,7 @@ class PremiumMembership(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_event_created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_event_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_event_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     updated_at = datetime_column()
     __table_args__ = (
         UniqueConstraint("provider", "provider_subscription_id", name="uq_premium_provider_subscription"),
