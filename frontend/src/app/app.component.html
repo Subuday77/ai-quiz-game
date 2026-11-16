@@ -148,7 +148,7 @@
           {{ locale.t('premium.close') }}
         </button>
         <button type="button" class="premium-dialog-primary bronze-shop-refresh"
-                (click)="refreshSpendableStars()" [disabled]="starShopLoading || !account">
+                (click)="refreshStarShopBalance()" [disabled]="starShopLoading || !account">
           {{ locale.t('shop.refreshBalance') }}
         </button>
       </div>
