@@ -46,6 +46,8 @@ def status(db: Session, user_id: UUID) -> dict:
     active = premium_active(db, user_id)
     return {
         "active": active,
+        "checkout_ready": bool(os.environ.get("BMC_WEBHOOK_SIGNING_SECRET")
+                               and os.environ.get("BMC_PREMIUM_LEVEL_ID", "").strip().isdecimal()),
         "free_appeals_per_month": MONTHLY_FREE_APPEALS if active else 5,
         "gold_to_platinum": active,
         "star_discount_percent": DISCOUNT_PERCENT if active else 0,
