@@ -2724,6 +2724,10 @@ export class AppComponent implements OnInit, OnDestroy {
     this.starShopOpen = false;
   }
 
+  refreshStarShopBalance(): void {
+    if (this.account) this.refreshSpendableStars();
+  }
+
   shopUsd(cents: number): string {
     return '$' + (cents / 100).toFixed(2);
   }
