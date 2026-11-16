@@ -271,15 +271,16 @@
       <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
     </div>
 
-    <div *ngIf="screen === 'setup' && needsEmailVerification" class="setup email-verification-gate">
-      <div class="question-actions">
-        <button class="primary" type="button" (click)="claimAccountEmail()" [disabled]="authBusy">
-          {{ locale.t('game.verifyEmailToPlay') }}
-        </button>
-      </div>
-      <p class="intro">{{ locale.t('game.verifyEmailInstructions') }}</p>
-      <p class="intro">{{ account?.email }}</p>
-    </div>
+    <section *ngIf="screen === 'setup' && needsEmailVerification"
+             class="setup email-verification-gate" aria-labelledby="email-verification-heading">
+      <h2 id="email-verification-heading">{{ locale.t('game.verifyEmailHeading') }}</h2>
+      <p class="email-verification-lead">{{ locale.t('game.verifyEmailSentTo') }}</p>
+      <strong class="email-verification-address" dir="ltr">{{ account?.email }}</strong>
+      <p class="email-verification-instructions">{{ locale.t('game.verifyEmailInstructions') }}</p>
+      <p class="email-verification-help">
+        {{ locale.format('game.verifyEmailProfileHelp', { action: locale.t('auth.verifyEmail') }) }}
+      </p>
+    </section>
     <div *ngIf="bonusDecisionAvailable && screen === 'setup' && !needsEmailVerification" class="bonus-decision">
       <h2>{{ locale.t('helper.bonusChoiceTitle') }}</h2>
       <p>{{ locale.t('helper.bonusRisk') }}</p>

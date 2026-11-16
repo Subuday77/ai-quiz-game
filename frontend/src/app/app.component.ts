@@ -254,6 +254,7 @@ interface AnswerFeedback {
 
 @Component({
   selector: 'app-root',
+  host: { '[class.loss-mode]': 'lossModeActive' },
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './app.component.html',
@@ -337,6 +338,10 @@ export class AppComponent implements OnInit, OnDestroy {
   resetError = '';
   restoringGame = false;
   finishedPhase: 'lost' | 'completed' | null = null;
+  // Apply the loss palette on answer feedback, results and restored lost rounds.
+  get lossModeActive(): boolean {
+    return this.finishedPhase === 'lost' && (this.screen === 'feedback' || this.screen === 'done');
+  }
   pendingResults: GameInfo | null = null;
   statsLoading = false;
   statsError = '';
@@ -1521,7 +1526,8 @@ export class AppComponent implements OnInit, OnDestroy {
           }
           try {
             const url = isRegister ? '/api/auth/email/register' : '/api/auth/email/login';
-            const payload = isRegister ? { email: identifier, display_name, password }
+            const payload = isRegister ? { email: identifier, display_name, password,
+              ui_language: this.locale.code }
               : { email: identifier, password };
             return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
@@ -1534,7 +1540,21 @@ export class AppComponent implements OnInit, OnDestroy {
           }
         },
       });
-      if (result.isConfirmed && result.value) this.signedIn(result.value as Account);
+      if (result.isConfirmed && result.value) {
+        const newAccount = result.value as Account;
+        this.signedIn(newAccount);
+        if (isRegister && newAccount.email) {
+          await Swal.fire({
+            titleText: this.locale.t('auth.registrationEmailSentTitle'),
+            text: this.locale.format('auth.registrationEmailSentBody', { email: newAccount.email }),
+            icon: 'success',
+            width: 420,
+            confirmButtonText: this.locale.t('auth.gotIt'),
+            confirmButtonColor: '#8170d8',
+            background: '#1b1e3e', color: '#f1f3ff',
+          });
+        }
+      }
     } catch {
       this.error = 'auth.modalFailed';
     } finally {
