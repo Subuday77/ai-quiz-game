@@ -47,6 +47,15 @@ interface PremiumStatus {
   star_discount_percent: number;
   priority_questions: boolean;
 }
+interface StarShopPackage {
+  bronze: number; base_price_cents: number; price_cents: number;
+  checkout_url: string | null;
+}
+interface StarShopCatalog {
+  ready: boolean; configured: boolean; verified_email: string | null;
+  premium: boolean;
+  packages: StarShopPackage[];
+}
 interface ProfileStats {
   games_played: number;
   total_score: number;
@@ -332,6 +341,10 @@ export class AppComponent implements OnInit, OnDestroy {
   profileMenuOpen = false;
   premiumDialogOpen = false;
   premium: PremiumStatus | null = null;
+  starShopOpen = false;
+  starShop: StarShopCatalog | null = null;
+  starShopLoading = false;
+  starShopError = '';
   appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
   appealMessage = '';
@@ -349,7 +362,7 @@ export class AppComponent implements OnInit, OnDestroy {
   aboutStatusLoading = false;
   aboutBusy = false;
   aboutError = '';
-  readonly aboutReward: StarCounts = { bronze: 50, silver: 40, gold: 30, platinum: 20 };
+  readonly aboutReward: StarCounts = { bronze: 5, silver: 4, gold: 3, platinum: 2 };
   // Public donation URL comes from the server only after the owner registers a page.
   donationUrl = '';
   resetEnabled = false;
@@ -2348,6 +2361,10 @@ export class AppComponent implements OnInit, OnDestroy {
   private clearAccount(): void {
     this.premiumDialogOpen = false;
     this.premium = null;
+    this.starShopOpen = false;
+    this.starShop = null;
+    this.starShopLoading = false;
+    this.starShopError = '';
     this.statsVersion++;
     this.appealAllowance = null;
     this.resetEnabled = false;
@@ -2681,6 +2698,52 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  openStarShop(): void {
+    if (!this.account || this.starShopLoading) return;
+    this.profileMenuOpen = false;
+    this.starShopOpen = true;
+    this.starShopLoading = true;
+    this.starShopError = '';
+    this.starShop = null;
+    const accountId = this.account.id;
+    this.subscriptions.add(this.http.get<StarShopCatalog>('/api/v2/star-shop').pipe(
+      timeout(10000), finalize(() => {
+        if (this.account?.id === accountId) this.starShopLoading = false;
+      }),
+    ).subscribe({
+      next: catalog => {
+        if (this.account?.id === accountId) this.starShop = catalog;
+      },
+      error: () => {
+        if (this.account?.id === accountId) this.starShopError = 'shop.failed';
+      },
+    }));
+  }
+
+  closeStarShop(): void {
+    this.starShopOpen = false;
+  }
+
+  refreshStarShopBalance(): void {
+    if (this.account) this.refreshSpendableStars();
+  }
+
+  shopUsd(cents: number): string {
+    return '$' + (cents / 100).toFixed(2);
+  }
+
+  checkoutStarPack(pack: StarShopPackage): void {
+    if (!this.starShopOpen || !this.starShop?.ready ||
+        !this.starShop.verified_email || !pack.checkout_url ||
+        !this.starShop.packages.includes(pack)) return;
+    // Only server-configured BMC URLs are opened. No email, stars, user ID
+    // or payment claim is appended to the checkout URL.
+    const parsed = new URL(pack.checkout_url);
+    if (parsed.protocol !== 'https:' ||
+        !['buymeacoffee.com', 'www.buymeacoffee.com'].includes(parsed.hostname)) return;
+    window.open(pack.checkout_url, '_blank', 'noopener,noreferrer');
+  }
+
   openPremium(): void {
     if (!this.account || !this.donationUrl ||
         (!this.premium?.active && !this.premium?.checkout_ready)) return;
@@ -2695,6 +2758,7 @@ export class AppComponent implements OnInit, OnDestroy {
   @HostListener('document:keydown.escape')
   onPremiumEscape(): void {
     if (this.premiumDialogOpen) this.closePremium();
+    if (this.starShopOpen) this.closeStarShop();
   }
 
   confirmPremium(): void {

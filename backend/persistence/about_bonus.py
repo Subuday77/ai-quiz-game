@@ -10,10 +10,10 @@ from persistence.models import WalletTransaction
 from persistence.star_economy import lock_user_stars, star_balances
 
 ABOUT_BONUS_AMOUNTS = {
-    "bronze": 50,
-    "silver": 40,
-    "gold": 30,
-    "platinum": 20,
+    "bronze": 5,
+    "silver": 4,
+    "gold": 3,
+    "platinum": 2,
 }
 BONUS_VERSION = "about-read-v1"
 

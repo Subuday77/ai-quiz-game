@@ -139,6 +139,38 @@ class PremiumWebhookEvent(Base):
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class StarShopPurchase(Base):
+    """One BMC Shop payment, never identified by a browser-supplied value.
+
+    A refunded-before-created tombstone, unmatched email and disputed receipts
+    remain in PostgreSQL for manual reconciliation rather than granting stars.
+    """
+    __tablename__ = "star_shop_purchases"
+    id = id_column()
+    provider_purchase_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
+                            nullable=True, index=True)
+    provider_extra_id: Mapped[str | None] = mapped_column(String(100))
+    bronze_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at = datetime_column()
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("status IN ('credited','unmatched','needs_review','refunded',"
+                        "'refund_pending','refunded_before_credit')", name="ck_star_shop_status"),
+        CheckConstraint("bronze_amount >= 0 AND price_cents >= 0", name="ck_star_shop_values"),
+    )
+
+
+class StarShopWebhookEvent(Base):
+    """Signed webhook event idempotency, scoped by test/live mode."""
+    __tablename__ = "star_shop_webhook_events"
+    provider_event_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    received_at = datetime_column()
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+
 
 class Topic(Base):
     __tablename__ = "topics"

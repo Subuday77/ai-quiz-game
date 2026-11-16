@@ -4,12 +4,15 @@
 
 The signed membership webhook and game entitlements are implemented in this branch.
 **Do not enable checkout before migrating and configuring the webhook.**
-No star-pack real-money checkout is currently deployed; the 20% Premium discount is
-represented by the server-side price-quote helper and status API, but cannot
-automatically change prices of externally configured Buy Me a Coffee Shop items.
-Do not advertise the star-shop discount as already redeemable until that shop
-and its Premium-priced products are configured and their purchase webhooks
-verified. The coffee donation button remains separate and grants no rewards.
+The Bronze Star Shop is implemented but OFF by default. A real checkout is not
+deployed or accepting money until five BMC Extras, their exact IDs and URLs,
+a signed Shop webhook, and the **Special price for members** field set
+to 20% off on each Shop item. BMC automatically applies this member price
+for buyers it recognizes as members; there is no coupon code.
+The game delivers confirmed purchases at exactly either the regular
+or BMC member price. Read docs/BRONZE_STAR_SHOP.md.
+Do not advertise Shop purchasing as ready until the signed purchase/refund
+webhooks and a controlled real order have been verified. The coffee donation button remains separate and grants no rewards.
 
 ## Existing Premium rules
 
@@ -20,15 +23,18 @@ verified. The coffee donation button remains separate and grants no rewards.
 - Quality preference: among eligible, fully reviewed pool questions of the
   same requested difficulty, prefer higher community-rated questions. Do not
   bypass validation, deduplication or the global difficulty gate.
-- Intended 20% reduction on purchased star packs, implemented in
-  `discounted_price_cents()` for server-computed future checkout quotes.
-  No cash purchase endpoint exists yet.
+- Intended 20% reduction on purchased Bronze packs, implemented in
+  `discounted_price_cents()` for a server-computed Shop quote. The Shop
+  catalog and signed webhook endpoints are staged and disabled by default.
+  A real BMC checkout requires the owner's verified Shop Extras and
+  configured regular and member prices.
 
 ## Deploy (VPS)
 
 1. Back up the PostgreSQL volume without touching the existing users and run
    `docker compose run --rm backend python -m alembic upgrade head`
-   from the project root. Only new Premium tables are created.
+   from the project root. This includes the staged 0018 Shop receipt tables
+   if not already applied. Verify with `alembic current`.
 2. Buy Me a Coffee creator dashboard → Integrations → New webhook:
    - URL: `https://squizthebot.com/api/v2/premium/webhook`
    - Events: `membership.started`, `membership.updated`,
