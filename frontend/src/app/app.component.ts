@@ -180,6 +180,25 @@ export function appealHistoryRefundRows(
   return rows;
 }
 
+/** A confirmed complaint restores either its free slot or its paid price step.
+ *  Do not display a quota refund for rejected, pending or technical cases.
+ *  A paid complaint's original non-refundable filing fee is never returned.
+ */
+export function appealHistoryQuotaRefund(
+  status: string, filingFeeBronze: number,
+): { labelKey: string; valueKey: string } | null {
+  if (status !== 'upheld') return null;
+  return filingFeeBronze > 0
+    ? {
+        labelKey: 'appeals.historyPaidFeeStep',
+        valueKey: 'appeals.historyPaidFeeNotIncreased',
+      }
+    : {
+        labelKey: 'appeals.historyFreeComplaint',
+        valueKey: 'appeals.historyFreeComplaintRestored',
+      };
+}
+
 /** Dates in this browser's local timezone; both date endpoints are inclusive. */
 function appealLocalDate(value: string): string {
   const time = new Date(value);
@@ -1087,6 +1106,7 @@ export class AppComponent implements OnInit, OnDestroy {
           field(labelKey, safe('+' + amount + ' ' + this.locale.t('stars.' + tier)));
         const refundFields = appealHistoryRefundRows(item.expenses_refunded).map(row =>
           fieldRefund(row.labelKey, row.tier, row.amount)).join('');
+        const quotaRefund = appealHistoryQuotaRefund(item.status, item.filing_fee_bronze);
         return '<details class="appeal-history-item" data-history-index="' + index + '">' +
           '<summary title="' + safe(question) + '">' +
             '<span class="appeal-history-heading">' +
@@ -1136,6 +1156,7 @@ export class AppComponent implements OnInit, OnDestroy {
                   safe(this.locale.t(item.bonus_wager_refunded ? 'appeals.yes' : 'appeals.no')))
                 : '') +
               refundFields +
+              (quotaRefund ? field(quotaRefund.labelKey, localized(quotaRefund.valueKey)) : '') +
             '</div>' +
           '</div></details>';
       }).join('');
