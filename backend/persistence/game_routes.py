@@ -614,6 +614,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     from persistence.premium import premium_active
     quality_priority = premium_active(db, user.id)
     tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
+    # Premium searches the validated, highly-rated question pool first even
+    # when ordinary accounts are configured AI-first. If the safe pool misses,
+    # the existing generator and quality gates remain the fallback.
+    if quality_priority and tagged:
+        source_order = "pool_first"
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
         from tagging.repository import history_for_user
