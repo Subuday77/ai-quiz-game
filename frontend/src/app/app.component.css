@@ -861,10 +861,13 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .game-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(304px, 344px);
-  align-items: start;
+  align-items: stretch;
   gap: clamp(16px, 2vw, 26px);
 }
 .game-stage, .game-sidebar { min-width: 0; }
+.game-stage { display: flex; flex-direction: column; }
+.game-stage .card { flex: 1 1 auto; }
+.game-sidebar { align-self: stretch; }
 .game-stage .brand {
   display: flex;
   min-height: 38px;
@@ -1093,97 +1096,130 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   letter-spacing: .065em;
   margin-bottom: 12px;
 }
-.game-sidebar .star-items:not(.star-items-exchange) {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+.game-sidebar .star-items {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
 }
 .game-sidebar .star-item {
   box-sizing: border-box;
-  background: #ffffff09;
-  border: 1px solid #a3a6cb43;
-  padding: 10px 7px;
-  min-width: 0;
-}
-.game-sidebar .star-items:not(.star-items-exchange) .star-item {
-  min-height: 83px;
-  flex-direction: column;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
   flex-wrap: nowrap;
-  justify-content: center;
-  background: linear-gradient(150deg, #51437642, #2d345052);
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 13px;
+  border: 1px solid #a3a6cb43;
+  border-radius: 11px;
+  background: linear-gradient(115deg, #4e477141, #33375d57);
 }
-.game-sidebar .star-label {
-  font-size: 11px;
+.game-sidebar .star-item .star-icon {
+  flex: 0 0 23px;
+  font-size: 21px;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 0 7px currentColor);
+}
+.game-sidebar .star-item .star-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: start;
+  font-size: 12px;
+  font-weight: 550;
   line-height: 1.35;
   color: #e2e3fa;
+  overflow-wrap: normal;
+  word-break: normal;
 }
-.game-sidebar .star-number {
-  font-size: 19px;
-  line-height: 1.25;
+.game-sidebar .star-item .star-number {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: #fbfaff;
+  font-size: 18px;
+  line-height: 1;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-}
-.game-sidebar .star-icon {
-  font-size: 22px;
-  filter: drop-shadow(0 0 7px currentColor);
 }
 .game-sidebar .star-item.bronze { border-color: #d6996e6e; }
 .game-sidebar .star-item.silver { border-color: #c2d3e86e; }
 .game-sidebar .star-item.gold { border-color: #ffd26f78; }
 .game-sidebar .star-item.platinum { border-color: #a9f1f57a; }
 
+/* All four wallet tiers use the same full width.
+   Conversion controls sit over each junction, not in a competing grid column.
+   Natural-height rows remain usable with long localized star names. */
 .game-sidebar .star-items-exchange {
-  /* Each tier is its own row. Never put Platinum in the converter column. */
-  display: grid;
+  display: flex;
+  flex-direction: column;
   direction: ltr;
-  grid-template-columns: minmax(0, 1fr) 61px;
-  grid-template-rows: repeat(4, minmax(52px, auto));
-  grid-auto-flow: row;
-  gap: 7px 8px;
   align-items: stretch;
+  gap: 9px;
+  overflow: visible;
 }
-.game-sidebar .star-items-exchange > .star-item.bronze { grid-column: 1; grid-row: 1; }
-.game-sidebar .star-items-exchange > .star-item.silver { grid-column: 1; grid-row: 2; }
-.game-sidebar .star-items-exchange > .star-item.gold { grid-column: 1; grid-row: 3; }
-.game-sidebar .star-items-exchange > .star-item.platinum { grid-column: 1; grid-row: 4; }
-.game-sidebar .star-items-exchange > .exchange-pair.bronze { grid-column: 2; grid-row: 1; }
-.game-sidebar .star-items-exchange > .exchange-pair.silver { grid-column: 2; grid-row: 2; }
-.game-sidebar .star-items-exchange > .exchange-pair.gold { grid-column: 2; grid-row: 3; }
-.game-sidebar .star-items-exchange > .star-item.wallet-wide { grid-column: 1 / -1; }
 .game-sidebar .star-items-exchange .star-item {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 52px;
+}
+.game-sidebar .star-items-exchange .exchange-pair {
+  position: relative;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
+  margin-block: -19px -16px;
+  margin-inline: 0 11px;
   display: flex;
   flex-direction: row;
-  min-width: 0;
-  min-height: 52px;
-  gap: 9px;
-  padding: 10px;
-  justify-content: flex-start;
   flex-wrap: nowrap;
   align-items: center;
-  background: linear-gradient(115deg, #4e477141, #33375d57);
+  justify-content: flex-end;
+  gap: 6px;
+  pointer-events: none;
 }
-.game-sidebar .star-items-exchange .star-icon { flex: 0 0 auto; font-size: 21px; }
-.game-sidebar .star-items-exchange .star-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  text-align: start;
-  overflow-wrap: normal;
-  word-break: normal;
-  hyphens: auto;
-  font-size: 11px;
-}
-.game-sidebar .star-items-exchange .star-number {
+.game-sidebar .star-items-exchange .exchange-arrow {
+  display: inline-flex;
+  flex-direction: row;
   flex: 0 0 auto;
-  font-size: 18px;
-}
-.game-sidebar .exchange-pair { min-width: 0; gap: 3px; }
-.game-sidebar .exchange-arrow {
-  min-height: 23px;
-  border-color: #8c80b275;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 62px;
+  min-height: 26px;
+  height: 26px;
+  padding: 2px 8px;
+  border: 1px solid #9681d0;
+  border-radius: 999px;
   background: #3d3467;
+  box-shadow: 0 3px 9px #0c0b24c0;
+  color: #f7f2ff;
+  font-weight: 750;
+  pointer-events: auto;
 }
-.game-sidebar .exchange-arrow span { font-size: 15px; line-height: 13px; }
-.game-sidebar .exchange-arrow small { font-size: 8px; color: #dad3fa; }
+.game-sidebar .exchange-arrow span {
+  font-size: 15px;
+  line-height: 1;
+}
+.game-sidebar .exchange-arrow small {
+  font-size: 9px;
+  line-height: 1;
+  color: #e2dcfa;
+}
+.game-sidebar .star-items-exchange .exchange-arrow:hover:not(:disabled),
+.game-sidebar .star-items-exchange .exchange-arrow:focus-visible {
+  border-color: #c6b0ff;
+  background: #65519b;
+  box-shadow: 0 0 11px #a18bff66;
+}
+.game-sidebar .star-items-exchange .exchange-arrow:disabled {
+  opacity: .47;
+  box-shadow: 0 2px 6px #0c0b2466;
+}
 .game-sidebar .stats-caption {
   padding-top: 12px;
   line-height: 1.5;
