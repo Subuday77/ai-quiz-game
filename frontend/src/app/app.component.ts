@@ -1521,7 +1521,8 @@ export class AppComponent implements OnInit, OnDestroy {
           }
           try {
             const url = isRegister ? '/api/auth/email/register' : '/api/auth/email/login';
-            const payload = isRegister ? { email: identifier, display_name, password }
+            const payload = isRegister ? { email: identifier, display_name, password,
+              ui_language: this.locale.code }
               : { email: identifier, password };
             return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
