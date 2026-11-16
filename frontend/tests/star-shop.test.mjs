@@ -24,7 +24,7 @@ test('Shop has five responsive pack buttons, no checkout until ready and verifie
   assert.match(html, /starShop\?\.verified_email/);
   assert.match(html, /locale\.t\('shop\.sameEmailRule'\)/);
   assert.match(html, /locale\.t\('shop\.premiumDiscount'\)/);
-  assert.match(html, /starShop\?\.premium_coupon/);
+  assert.doesNotMatch(html, /premium_coupon|discountCode|enterCode/);
   assert.match(html, /locale\.t\('shop\.notReady'\)/);
   assert.match(html, /\(click\)="openStarShop\(\)"/);
   assert.match(css, /grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/);
@@ -34,8 +34,7 @@ test('Shop has five responsive pack buttons, no checkout until ready and verifie
 test('Shop and reduced About reward use canonical English dictionary', () => {
   const keys = [
     'open', 'title', 'intro', 'email', 'verifyEmail', 'premiumDiscount',
-    'discountCode', 'enterCode', 'loading', 'failed', 'notReady',
-    'premiumSetup', 'sameEmailRule', 'refreshBalance',
+    'loading', 'failed', 'notReady', 'sameEmailRule', 'refreshBalance',
   ];
   for (const name of keys) {
     assert.ok(english['shop.' + name], name + ' missing from English dictionary');
