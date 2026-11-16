@@ -97,6 +97,15 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
       }
+      if (url === '/api/v2/premium') {
+        // Premium loads during ngOnInit. It must not sit in the same pending
+        // requests queue as question/game HTTP calls in these offline tests.
+        return of({
+          active: false, checkout_ready: false, free_appeals_per_month: 5,
+          gold_to_platinum: false, star_discount_percent: 0,
+          priority_questions: false,
+        });
+      }
       if (url === '/api/v2/appeals/allowance') {
         return of({ free_remaining: 5, free_total: 5, filed_this_month: 0,
                     next_filing_fee_bronze: 0 });
