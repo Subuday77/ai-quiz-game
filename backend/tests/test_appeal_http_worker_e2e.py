@@ -196,6 +196,9 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
 
     def test_q10_http_to_worker_history_and_exactly_once_silver_payout(self):
         run_id, question_id, _ = self.fixture(10)
+        starting_quota = self.client.get("/api/v2/appeals/allowance")
+        self.assertEqual(starting_quota.status_code, 200, starting_quota.text)
+        self.assertEqual(starting_quota.json()["free_remaining"], 5)
         quote = self.client.get(
             f"/api/v2/games/{run_id}/appeals/{question_id}/quote")
         self.assertEqual(quote.status_code, 200, quote.text)
@@ -217,6 +220,13 @@ class AppealsHttpWorkerE2ETests(unittest.TestCase):
         self.assertEqual(case["answer_key"], "B")
         self.assertEqual(case["compensation"], {"tier": "silver", "amount": 1})
         self.assertTrue(case["deposit"]["refunded"])
+        # The upheld complaint is still in audit history but is invisible to
+        # the quota/fee step used by the next player's filing.
+        restored_quota = self.client.get("/api/v2/appeals/allowance")
+        self.assertEqual(restored_quota.status_code, 200, restored_quota.text)
+        self.assertEqual(restored_quota.json()["free_remaining"], 5)
+        self.assertEqual(restored_quota.json()["filed_this_month"], 1)
+        self.assertEqual(restored_quota.json()["next_filing_fee_bronze"], 0)
 
         expected = {
             "deposit": ("silver", -1),
