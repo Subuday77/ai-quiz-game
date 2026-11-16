@@ -80,6 +80,35 @@ class PersistentGameAPITests(unittest.TestCase):
         return response.json()["game_id"]
 
 
+    def test_question_language_preference_persists_independently_of_ui(self):
+        user_id = UUID(self.register("LanguageTester"))
+        initial = self.client.get("/api/auth/me").json()
+        self.assertEqual(initial["preferred_language"], "English")
+        self.assertEqual(initial["ui_language"], "en")
+
+        selected = self.client.patch("/api/v2/games/language-preference",
+                                     json={"language": "Russian"})
+        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertEqual(selected.json()["preferred_language"], "Russian")
+        self.assertEqual(self.client.get("/api/auth/me").json()["preferred_language"], "Russian")
+
+        started = self.client.post("/api/v2/games", json={"language": "German"})
+        self.assertEqual(started.status_code, 201, started.text)
+        run_id = started.json()["game_id"]
+        self.assertEqual(self.client.get("/api/auth/me").json()["preferred_language"], "German")
+        changed = self.client.patch(f"/api/v2/games/{run_id}/language",
+                                    json={"language": "Russian"})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        account = self.client.get("/api/auth/me").json()
+        self.assertEqual(account["preferred_language"], "Russian")
+        self.assertEqual(account["ui_language"], "en")
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, UUID(run_id)).language, "Russian")
+        invalid = self.client.patch("/api/v2/games/language-preference",
+                                    json={"language": "Klingon"})
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(self.client.get("/api/auth/me").json()["preferred_language"], "Russian")
+
     def test_finished_round_stars_are_read_from_own_awards_after_f5(self):
         user_id = UUID(self.register("Alice"))
         win_id = UUID(self.start("Russian"))

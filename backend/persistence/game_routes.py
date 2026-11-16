@@ -371,6 +371,19 @@ def _generation_metadata() -> tuple[str, str]:
     return provider, model or "unknown"
 
 
+@router.patch("/language-preference")
+def save_question_language_preference(payload: NewGame, request: Request,
+                                      user: User = Depends(authenticated_user),
+                                      db: Session = Depends(get_db)):
+    """Save a question-language selection before a game has been allocated."""
+    validate_origin(request)
+    if payload.language not in LANGUAGE_DICT.values():
+        raise HTTPException(status_code=422, detail="Unsupported language")
+    user.preferred_language = payload.language
+    db.commit()
+    return {"preferred_language": user.preferred_language}
+
+
 @router.post("", response_model=GameInfo, status_code=201)
 def new_game(payload: NewGame, request: Request,
              user: User = Depends(authenticated_user),
@@ -386,6 +399,7 @@ def new_game(payload: NewGame, request: Request,
     if _active_run(db, user.id) is not None:
         db.rollback()
         raise HTTPException(status_code=409, detail="Active game already exists")
+    user.preferred_language = payload.language
     run = create_game(db, user_id=user.id, language=payload.language)
     return _game_info(db, run)
 
@@ -421,6 +435,7 @@ def replay_game(run_id: UUID, payload: NewGame, request: Request,
             id=successor_id, user_id=user.id,
             language=payload.language, status="main",
         )
+        user.preferred_language = payload.language
         db.add(successor)
         db.flush()
         result = _game_info(db, successor)
@@ -487,6 +502,7 @@ def replace_game(run_id: UUID, payload: NewGame, request: Request,
             id=successor_id, user_id=user.id,
             language=payload.language, status="main",
         )
+        user.preferred_language = payload.language
         db.add(successor)
         db.flush()
         result = _game_info(db, successor)
@@ -527,6 +543,7 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
         if run.status != "main" or issued:
             raise HTTPException(status_code=409, detail="Question language is locked after Q1")
         run.language = payload.language
+        user.preferred_language = payload.language
         db.commit()
         return _game_info(db, run)
     except GameNotFound:
