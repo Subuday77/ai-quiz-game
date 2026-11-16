@@ -38,11 +38,13 @@ def allowance(db: Session, *, user_id: UUID, now: datetime,
     if submitted < 0:
         raise ValueError("Monthly complaint count cannot be negative")
     grant = extra_free_for_month(db, user_id=user_id, now=now)
+    from persistence.premium import premium_active, MONTHLY_FREE_APPEALS
+    base = MONTHLY_FREE_APPEALS if premium_active(db, user_id, now=now) else FREE_MONTHLY_APPEALS
     _, refresh_at = month_bounds(now)
-    total = FREE_MONTHLY_APPEALS + grant
+    total = base + grant
     return {
         "free_appeals_remaining": max(0, total - submitted),
         "free_appeals_total": total,
         "free_appeals_refresh_at": refresh_at.isoformat(),
-        "filing_fee_bronze": appeal_fee_bronze(max(0, submitted - grant)),
+        "filing_fee_bronze": appeal_fee_bronze(max(0, submitted - grant) - (base - FREE_MONTHLY_APPEALS)) if submitted >= grant + base else 0,
     }
