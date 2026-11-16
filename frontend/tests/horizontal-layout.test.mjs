@@ -54,14 +54,35 @@ test('layout has a wide desktop grid and narrow viewport fallback', () => {
   assert.match(styles, /\.game-sidebar \.star-items-exchange\s*\{/);
 });
 
-test('wallet keeps all four tiers readable and gives converter buttons separate slots', () => {
-  assert.match(rail, /\[class\.wallet-wide\]="tier\.key === 'platinum'/);
+test('both star panels use same-size full-width rows; exchange controls bridge tiers', () => {
+  assert.match(rail, /<div class="star-items">/);
+  assert.match(rail, /<div class="star-items star-items-exchange">/);
+  assert.doesNotMatch(rail, /wallet-wide/);
+  assert.match(styles, /\.game-sidebar \.star-items \{\s*display: flex;\s*flex-direction: column;/);
+  assert.match(styles, /\.game-sidebar \.star-item \{[^}]*width: 100%;[^}]*min-height: 52px;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \{[^}]*display: flex;[^}]*flex-direction: column;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -19px -16px;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*z-index: 3;/s);
   assert.match(rail, /class="exchange-pair gold"/);
   assert.match(rail, /class="exchange-pair" \[ngClass\]="tier\.key"/);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.star-item\.platinum \{ grid-column: 1; grid-row: 4; \}/);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.star-item\.wallet-wide \{ grid-column: 1 \/ -1; \}/);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.bronze \{ grid-column: 2; grid-row: 1; \}/);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.silver \{ grid-column: 2; grid-row: 2; \}/);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.gold \{ grid-column: 2; grid-row: 3; \}/);
-  assert.match(styles, /word-break: normal;/);
+  assert.match(rail, /exchangeBetween\('bronze', 'silver'\)/);
+  assert.match(rail, /exchangeBetween\('silver', 'bronze'\)/);
+  assert.match(rail, /exchangeBetween\('silver', 'gold'\)/);
+  assert.match(rail, /exchangeBetween\('gold', 'silver'\)/);
+  assert.match(rail, /premiumGoldToPlatinum\(\)/);
+});
+
+test('game stage stretches to sidebar height on wide layouts', () => {
+  assert.match(styles, /\.game-layout \{\s*display: grid;[\s\S]*?align-items: stretch;/);
+  assert.match(styles, /\.game-stage \{ display: flex; flex-direction: column; \}/);
+  assert.match(styles, /\.game-stage \.card \{ flex: 1 1 auto; \}/);
+});
+
+test('player-facing locale dictionary does not mention database implementation', () => {
+  const en = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
+  assert.match(en['stars.account'], /your account/);
+  assert.ok(!Object.values(en).some(value =>
+    typeof value === 'string' && /postgresql/i.test(value)
+  ));
+  assert.doesNotMatch(en['footer.note'], /postgresql/i);
 });
