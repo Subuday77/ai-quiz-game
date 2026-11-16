@@ -1436,7 +1436,7 @@ export class AppComponent implements OnInit, OnDestroy {
             const element = popup?.querySelector<HTMLElement>('#' + id);
             if (element) element.textContent = this.locale.t(key);
           };
-          label('quiz-auth-email-label', isRegister ? 'auth.email' : 'auth.emailOrUsername');
+          label('quiz-auth-email-label', 'auth.email');
           label('quiz-display-name-label', 'auth.displayName');
           label('quiz-auth-password-label', 'auth.password');
           label('quiz-auth-confirm-label', 'auth.confirm');
@@ -1462,7 +1462,7 @@ export class AppComponent implements OnInit, OnDestroy {
           const display_name = value('quiz-display-name');
           const password = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value || '';
           const confirm = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value || '';
-          if ((isRegister && (!display_name || !EMAIL_PATTERN.test(identifier))) || !identifier) {
+          if (!EMAIL_PATTERN.test(identifier) || (isRegister && !display_name)) {
             Swal.showValidationMessage(this.locale.t('auth.invalidEmailName'));
             return false;
           }
@@ -1471,10 +1471,9 @@ export class AppComponent implements OnInit, OnDestroy {
             return false;
           }
           try {
-            const url = isRegister ? '/api/auth/email/register'
-              : (identifier.includes('@') ? '/api/auth/email/login' : '/api/auth/login');
+            const url = isRegister ? '/api/auth/email/register' : '/api/auth/email/login';
             const payload = isRegister ? { email: identifier, display_name, password }
-              : (identifier.includes('@') ? { email: identifier, password } : { username: identifier, password });
+              : { email: identifier, password };
             return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
             const message = error instanceof HttpErrorResponse && error.status === 409
