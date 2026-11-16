@@ -94,6 +94,67 @@
     </section>
   </div>
 
+  <div class="premium-dialog-backdrop" *ngIf="starShopOpen" (click)="closeStarShop()">
+    <section class="premium-dialog bronze-shop-dialog" role="dialog" aria-modal="true"
+             [attr.aria-label]="locale.t('shop.title')" (click)="$event.stopPropagation()">
+      <button class="premium-dialog-close" type="button" (click)="closeStarShop()"
+              [attr.aria-label]="locale.t('premium.close')">×</button>
+      <div class="premium-dialog-emblem bronze-shop-emblem" aria-hidden="true">★</div>
+      <h2>{{ locale.t('shop.title') }}</h2>
+      <p class="premium-dialog-intro">{{ locale.t('shop.intro') }}</p>
+      <div class="premium-dialog-email">
+        <span class="premium-dialog-email-label">{{ locale.t('shop.email') }}</span>
+        <strong *ngIf="starShop?.verified_email; else shopVerifyEmail"
+                class="premium-dialog-email-value" dir="ltr">{{ starShop?.verified_email }}</strong>
+        <ng-template #shopVerifyEmail>
+          <span class="premium-dialog-email-warning">{{ locale.t('shop.verifyEmail') }}</span>
+        </ng-template>
+      </div>
+      <p *ngIf="starShop?.premium" class="bronze-shop-premium">
+        {{ locale.t('shop.premiumDiscount') }}
+      </p>
+      <p *ngIf="starShop?.premium_coupon" class="bronze-shop-coupon">
+        {{ locale.t('shop.discountCode') }}: <strong dir="ltr">{{ starShop?.premium_coupon }}</strong>
+        <span>{{ locale.t('shop.enterCode') }}</span>
+      </p>
+      <p *ngIf="starShopLoading" role="status" class="bronze-shop-status">{{ locale.t('shop.loading') }}</p>
+      <p *ngIf="starShopError" role="alert" class="bronze-shop-status">{{ locale.t(starShopError) }}</p>
+      <div *ngIf="starShop as catalog" class="bronze-shop-packages">
+        <button type="button" class="bronze-shop-pack" *ngFor="let pack of catalog.packages"
+                (click)="checkoutStarPack(pack)"
+                [disabled]="!catalog.ready || !pack.checkout_url">
+          <span class="bronze-shop-pack-star" aria-hidden="true">★</span>
+          <span class="bronze-shop-pack-count">{{ pack.bronze }}</span>
+          <span class="bronze-shop-pack-label">{{ locale.t('stars.bronze') }}</span>
+          <span *ngIf="catalog.premium" class="bronze-shop-old-price">
+            {{ shopUsd(pack.base_price_cents) }}
+          </span>
+          <strong class="bronze-shop-price">{{ shopUsd(pack.price_cents) }}</strong>
+        </button>
+      </div>
+      <p class="bronze-shop-status" *ngIf="starShop && !starShop.configured">
+        {{ locale.t('shop.notReady') }}
+      </p>
+      <p class="bronze-shop-status" *ngIf="starShop?.configured && !starShop?.verified_email">
+        {{ locale.t('shop.verifyEmail') }}
+      </p>
+      <p class="bronze-shop-status" *ngIf="starShop?.configured && starShop?.verified_email &&
+                                              starShop?.premium && !starShop?.premium_coupon">
+        {{ locale.t('shop.premiumSetup') }}
+      </p>
+      <p class="premium-dialog-note">{{ locale.t('shop.sameEmailRule') }}</p>
+      <div class="premium-dialog-actions">
+        <button type="button" class="premium-dialog-secondary" (click)="closeStarShop()">
+          {{ locale.t('premium.close') }}
+        </button>
+        <button type="button" class="premium-dialog-primary bronze-shop-refresh"
+                (click)="refreshSpendableStars()" [disabled]="starShopLoading || !account">
+          {{ locale.t('shop.refreshBalance') }}
+        </button>
+      </div>
+    </section>
+  </div>
+
   <section class="star-dashboard" aria-label="Star rewards">
     <div class="star-panel">
       <div class="star-panel-title">{{ locale.t('stars.thisGame') }}</div>
@@ -111,9 +172,14 @@
       </div>
     </div>
     <div class="star-panel">
-      <div class="star-panel-title">
-        {{ locale.t('perks.balance') }}
-        <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
+      <div class="star-panel-title star-shop-wallet-heading">
+        <span>{{ locale.t('perks.balance') }}
+          <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
+        </span>
+        <button *ngIf="account" type="button" class="bronze-shop-open"
+                (click)="openStarShop()" [disabled]="authBusy || loading">
+          <span aria-hidden="true">★</span> {{ locale.t('shop.open') }}
+        </button>
       </div>
       <div class="star-items star-items-exchange">
         <ng-container *ngFor="let tier of starTiers">
