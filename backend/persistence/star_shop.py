@@ -252,10 +252,12 @@ async def purchase_webhook(request: Request, db: Session = Depends(get_db)):
     elif eligible and user is not None:
         base_price = PACK_PRICES[bronze]
         discounted = discounted_price_cents(base_price, active=True)
-        premium = premium_active(db, user.id)
-        # Do not grant a discounted order to a non-Premium account.
+        # BMC discount codes are not cryptographically bound to our accounts.
+        # If BMC successfully charged the published 20%-off price, deliver
+        # purchased stars even if a customer shared a coupon. Refusing
+        # delivery after a real charge is worse than losing exclusivity.
         price_ok = paid == base_price or (
-            premium and bool(_coupon()) and paid == discounted
+            bool(_coupon()) and paid == discounted
         )
         if price_ok:
             lock_user_stars(db, user.id)
