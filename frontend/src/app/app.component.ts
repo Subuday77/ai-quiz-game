@@ -1257,7 +1257,7 @@ export class AppComponent implements OnInit, OnDestroy {
       didOpen: () => {
         const popup = Swal.getPopup();
         const label = popup?.querySelector<HTMLElement>('#settings-username-label');
-        if (label) label.textContent = this.locale.t('auth.username');
+        if (label) label.textContent = this.locale.t('auth.displayName');
         const input = popup?.querySelector<HTMLInputElement>('#settings-username-input');
         if (input) input.value = this.account?.display_name || this.account?.username || '';
       },
