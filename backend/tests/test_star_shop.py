@@ -49,7 +49,6 @@ class StarShopTests(unittest.TestCase):
             "BMC_STAR_SHOP_ENABLED": "true",
             "BMC_STAR_WEBHOOK_SIGNING_SECRET": SECRET,
             "BMC_STAR_SHOP_ITEMS": json.dumps(PRODUCTS),
-            "BMC_STAR_PREMIUM_COUPON": "PREMIUM20",
         }))
         self.sent = []
         self.enterContext(patch(
@@ -199,13 +198,13 @@ class StarShopTests(unittest.TestCase):
         self.assertEqual(self.orders()[0].status, "refund_pending")
         self.assertEqual(self.balance(), 5)
 
-    def test_provider_accepted_coupon_still_delivers_to_verified_nonpremium(self):
+    def test_provider_member_price_delivers_to_verified_buyer(self):
         discounted = self.send(event_id=876, purchase_id=5555, amount=2.4)
         self.assertEqual(discounted.status_code, 200, discounted.text)
         self.assertTrue(discounted.json()["applied"])
         self.assertEqual(self.balance(), 30)
 
-    def test_premium_coupon_price_requires_active_premium(self):
+    def test_bmc_member_price_is_quoted_to_active_premium(self):
         with Session(self.engine) as db:
             db.add(PremiumMembership(
                 user_id=self.user_id, provider="buymeacoffee",
@@ -218,15 +217,14 @@ class StarShopTests(unittest.TestCase):
         catalog = self.client.get("/api/v2/star-shop").json()
         self.assertTrue(catalog["premium"])
         self.assertTrue(catalog["ready"])
-        self.assertEqual(catalog["premium_coupon"], "PREMIUM20")
         self.assertEqual(catalog["packages"][0]["price_cents"], 240)
         response = self.send(event_id=888, purchase_id=7777, amount=2.4)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["applied"])
-        with patch.dict("os.environ", {"BMC_STAR_PREMIUM_COUPON": ""}):
-            gated = self.client.get("/api/v2/star-shop").json()
-            self.assertFalse(gated["ready"])
-            self.assertTrue(all(p["checkout_url"] is None for p in gated["packages"]))
+        # No discount code is needed: the provider's member pricing applies
+        # at checkout, while our backend only validates the signed amount.
+        self.assertNotIn("premium_coupon", catalog)
+        self.assertTrue(all(p["checkout_url"] for p in catalog["packages"]))
 
     def test_money_parsing_does_not_round_or_accept_invalid_values(self):
         for raw in (True, None, {}, "oops", "2.999", 0, -1, 1e20):
