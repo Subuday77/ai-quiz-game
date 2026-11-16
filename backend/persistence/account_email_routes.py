@@ -294,7 +294,7 @@ def verify(payload: TokenInput, request: Request, db: Session = Depends(get_db))
     user.email_verified_at = utc_now()
     row.used_at = utc_now()
     db.commit()
-    return {"message": "Email verified"}
+    return {"message": "Email verified", "user_id": str(user.id), "email": user.email}
 
 
 @router.post("/email/replace-unverified")
