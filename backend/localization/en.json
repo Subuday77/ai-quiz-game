@@ -99,7 +99,7 @@
   "auth.sendReset": "Send reset link",
   "auth.resetRequested": "If this verified email exists, a reset link has been sent.",
   "auth.resetRequestFailed": "Could not request a reset link. Try again later.",
-  "auth.claimEmail": "Add recovery email",
+  "auth.claimEmail": "Link email address",
   "auth.verifyEmail": "Verify email",
   "auth.sendVerification": "Send verification link",
   "auth.verificationSent": "Please check your email and confirm the link.",
