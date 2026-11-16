@@ -139,6 +139,18 @@ class EmailAccountFlowTests(unittest.TestCase):
             headers={"X-Forwarded-For": "203.0.113.99"})
         self.assertEqual(blocked.status_code, 429)
 
+    def test_missing_smtp_secret_fails_before_account_creation(self):
+        with patch.dict("os.environ", {
+            "AUTH_SMTP_USERNAME": "mail-user",
+            "AUTH_SMTP_PASSWORD": "",
+        }):
+            response = self.register("unsent@example.com")
+            self.assertEqual(response.status_code, 503, response.text)
+            with Session(self.engine) as db:
+                self.assertIsNone(db.scalar(
+                    select(User).where(User.email == "unsent@example.com")
+                ))
+
     def test_unverified_emails_cannot_reset(self):
         self.register("noverify@example.com")
         n = len(self.sent)
