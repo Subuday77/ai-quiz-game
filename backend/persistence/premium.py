@@ -101,7 +101,9 @@ async def membership_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid event id")
     if not isinstance(event_type, str) or len(event_type) > 60:
         raise HTTPException(status_code=400, detail="Invalid event type")
-    key = str(event_id)
+    # Dashboard test deliveries reuse event_id=1; never let a test receipt
+    # collide with a real charge bearing the same provider event ID.
+    key = f"{'live' if payload.get('live_mode') is True else 'test'}:{event_id}"
     # Serialize deliveries by event ID; unlike a SELECT-before-INSERT this is
     # safe against simultaneous retries in separate API workers.
     if db.get(PremiumWebhookEvent, key) is not None:
