@@ -41,6 +41,7 @@ interface Account {
 }
 interface PremiumStatus {
   active: boolean;
+  checkout_ready: boolean;
   free_appeals_per_month: number;
   gold_to_platinum: boolean;
   star_discount_percent: number;
