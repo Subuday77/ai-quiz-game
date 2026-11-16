@@ -1,5 +1,13 @@
 # Bronze Star Shop — Buy Me a Coffee
 
+> **Compliance hold / DRAFT ONLY.** No items have been published or saved in
+> the BMC editor by this PR, no payments are accepted and the PR must not be
+> merged as a live shop. Written BMC policy confirmation is needed regarding
+> non-cash game currency and the optional bonus-question star stake. The
+> BMC Shop currently displays an unlisted/identity-verification warning.
+> See [the five listing drafts and support request](BRONZE_SHOP_LISTINGS_DRAFT.md).
+> Sending the prepared support email is a separate owner decision.
+
 The feature is **OFF by default**. A donation, membership or unrecognised
 Shop Extra can never credit stars. Only signed BMC Shop purchase notifications
 for the allowlisted product ID may credit one bronze pack.
@@ -54,9 +62,11 @@ About reward claim idempotency keys are unchanged.
 7. Use the provider test event tool to verify that signed test deliveries
    have zero credits and invalid signatures return 401. Confirm receipt
    validation and idempotence in staging.
-8. Enable the BMC Shop webhook and BMC_STAR_SHOP_ENABLED=true only after
-   all five item IDs and both price fields (regular/member) have been verified.
-   Complete a controlled real purchase and refund test before announcement.
+8. **Do not enable live payments before written BMC policy clearance**, verification
+   of the creator's identity and Shop publication eligibility, successful CI,
+   backup/migration, and confirmation of the real five item IDs and both price
+   fields (regular/member). Complete controlled real purchase and refund
+   checks before public announcement.
 
 ## Security and reconciliation
 
@@ -90,3 +100,8 @@ Official BMC docs:
 https://help.buymeacoffee.com/en/articles/15743173-how-to-setup-and-use-buy-me-a-coffee-webhooks
 https://cdn.buymeacoffee.com/assets/integrations/bmc-webhooks-openapi.json
 https://help.buymeacoffee.com/en/articles/9403699-how-do-you-add-discounts-on-your-shop-items
+
+Policy references:
+https://help.buymeacoffee.com/en/articles/3364212-what-do-we-restrict-on-buy-me-a-coffee
+https://buymeacoffee.com/community-guidelines
+https://help.buymeacoffee.com/en/articles/9037311-product-guidelines-for-buy-me-a-coffee-shop
