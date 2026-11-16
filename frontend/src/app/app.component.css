@@ -625,3 +625,11 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 /* Closing at the end of the long About article must not require scrolling back. */
 .about-bottom-actions { display: flex; justify-content: center; margin-top: 24px; padding-top: 18px; border-top: 1px solid #737bb2; }
 .about-bottom-close { min-width: 160px; }
+
+.profile-menu .premium-email-note {
+  display: block;
+  padding: 3px 7px 8px;
+  font-size: .72rem;
+  line-height: 1.35;
+  color: #d5c5fc;
+}
