@@ -441,7 +441,6 @@
           <div class="star-items star-items-exchange">
             <ng-container *ngFor="let tier of starTiers">
               <div class="star-item" [ngClass]="tier.key"
-                   [class.wallet-wide]="tier.key === 'platinum' || (tier.key === 'gold' && !premium?.active)"
                    [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + spendableStars[tier.key]">
                 <span class="star-icon" aria-hidden="true">★</span>
                 <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
