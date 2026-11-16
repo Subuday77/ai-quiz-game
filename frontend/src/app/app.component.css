@@ -822,3 +822,200 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   -webkit-backdrop-filter: grayscale(97%);
   backdrop-filter: grayscale(97%);
 }
+
+/* Horizontal desktop game: question is primary, account and wallet form a right rail.
+   The grid itself stays LTR so the rail remains physically on the right; each
+   region gets its own interface direction from the Angular template. */
+.shell {
+  box-sizing: border-box;
+  max-width: 1480px;
+  padding: 30px clamp(16px, 3vw, 42px) 24px;
+}
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(304px, 344px);
+  align-items: start;
+  gap: clamp(16px, 2vw, 26px);
+}
+.game-stage, .game-sidebar { min-width: 0; }
+.game-stage .brand {
+  min-height: 38px;
+  margin: 0 0 18px;
+  font-size: 17px;
+  letter-spacing: .11em;
+}
+.game-stage .card {
+  min-height: 560px;
+  padding: clamp(24px, 3.3vw, 46px);
+  border-color: #a79bde45;
+  background: linear-gradient(145deg, #202247ed, #171b39ed 75%);
+  box-shadow: 0 25px 70px #05091c80, inset 0 1px 0 #ffffff13;
+}
+.game-stage .card h1 { font-size: clamp(30px, 3.5vw, 46px); }
+.game-stage .question h2 {
+  max-width: 850px;
+  font-size: clamp(22px, 2.2vw, 29px);
+  line-height: 1.5;
+}
+.game-stage .answers { gap: 14px; }
+.game-stage .answers button { min-width: 0; min-height: 78px; }
+
+.game-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 56px;
+}
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid #858bbc4a;
+  border-radius: 17px;
+  padding: 17px;
+  background: linear-gradient(155deg, #252747e8, #1a1d3add);
+  box-shadow: 0 12px 32px #05091c50, inset 0 1px 0 #ffffff0a;
+}
+.game-sidebar .sidebar-profile {
+  border-color: #a29ae56b;
+  background: linear-gradient(150deg, #302c58e8, #1b203edb);
+}
+.game-sidebar .account-controls {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  gap: 8px;
+  justify-content: stretch;
+}
+.game-sidebar .account-controls .profile-controls { flex: 1 1 150px; min-width: 0; }
+.game-sidebar .account-controls .player-name {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: none;
+  text-align: start;
+}
+.game-sidebar .account-controls .account-button { min-height: 40px; }
+.game-sidebar .account-controls > .account-button { flex: 1 1 auto; }
+.game-sidebar .profile-menu {
+  min-width: min(240px, 85vw);
+  max-width: min(300px, 85vw);
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+}
+.game-sidebar .dev-translation-tools { margin-top: 10px; }
+.game-sidebar .dev-reset-button { width: 100%; }
+
+.game-sidebar .ui-language-control {
+  margin: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.game-sidebar .ui-language-control label { white-space: normal; color: #cbd2f5; }
+.game-sidebar .ui-language-control select {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-height: 41px;
+  background: #282b4d;
+  border-color: #8589b6;
+}
+
+.game-sidebar .star-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin: 0;
+}
+.game-sidebar .star-panel { padding: 18px 16px; }
+.game-sidebar .star-panel-title {
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: .065em;
+  color: #d8def5;
+}
+.game-sidebar .star-items:not(.star-items-exchange) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.game-sidebar .star-item {
+  box-sizing: border-box;
+  background: #ffffff09;
+  border: 1px solid #a3a6cb33;
+  padding: 11px 7px;
+  min-width: 0;
+}
+.game-sidebar .star-items:not(.star-items-exchange) .star-item {
+  min-height: 76px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+.game-sidebar .star-label { font-size: 11px; line-height: 1.35; }
+.game-sidebar .star-number { font-size: 18px; font-variant-numeric: tabular-nums; }
+.game-sidebar .star-icon { font-size: 22px; }
+.game-sidebar .star-item.bronze { border-color: #d6996e44; }
+.game-sidebar .star-item.silver { border-color: #c2d3e844; }
+.game-sidebar .star-item.gold { border-color: #ffd26f55; }
+.game-sidebar .star-item.platinum { border-color: #a9f1f555; }
+.game-sidebar .star-items-exchange {
+  direction: ltr;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 65px;
+  gap: 7px 9px;
+  align-items: stretch;
+}
+.game-sidebar .star-items-exchange .star-item {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 10px;
+  min-height: 50px;
+}
+.game-sidebar .star-items-exchange .star-icon { flex: 0 0 auto; font-size: 20px; }
+.game-sidebar .star-items-exchange .star-label {
+  flex: 1 1 auto;
+  text-align: start;
+}
+.game-sidebar .star-items-exchange .star-number { flex: 0 0 auto; font-size: 16px; }
+.game-sidebar .exchange-pair { min-width: 0; gap: 3px; }
+.game-sidebar .exchange-arrow { min-height: 22px; }
+.game-sidebar .exchange-arrow span { font-size: 15px; line-height: 14px; }
+.game-sidebar .exchange-arrow small { font-size: 8px; }
+.game-sidebar .stats-caption { padding-top: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.game-sidebar .round-summary { gap: 6px; }
+
+@media (max-width: 1080px) {
+  .shell { max-width: 920px; }
+  .game-layout { grid-template-columns: minmax(0, 1fr); }
+  .game-stage .card { min-height: 440px; }
+  .game-sidebar {
+    padding-top: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .game-sidebar .star-dashboard {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 680px) {
+  .shell { padding: 22px 14px; }
+  .game-stage .brand { margin-bottom: 16px; font-size: 15px; }
+  .game-stage .card { padding: 22px 18px; min-height: 0; }
+  .game-sidebar { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .game-sidebar .star-dashboard { grid-column: auto; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .game-sidebar .sidebar-section, .game-sidebar .star-panel { padding: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-stage .card, .game-sidebar .sidebar-section, .game-sidebar .star-panel {
+    scroll-behavior: auto;
+  }
+}
