@@ -32,3 +32,28 @@ test('Coffee UI uses canonical localization and a fail-closed profile link', () 
   assert.match(css, /\.setup-heading/);
   assert.match(css, /\.coffee-support/);
 });
+
+test('Premium menu is compact and checkout opens a localized confirmation modal', () => {
+  const menu = html.slice(html.indexOf('class="profile-menu"'), html.indexOf('</div>', html.indexOf('class="profile-menu"')));
+  assert.match(menu, /premium-account-button/);
+  assert.doesNotMatch(menu, /premium-email-note|premium\.sameEmail/);
+  assert.match(component, /premiumDialogOpen = true/);
+  assert.match(component, /premiumDialogOpen = false/);
+  assert.match(html, /role="dialog" aria-modal="true"/);
+  assert.match(html, /locale\.t\('premium\.dialogTitle'\)/);
+  assert.match(html, /locale\.t\('premium\.dialogIntro'\)/);
+  assert.match(html, /locale\.t\('premium\.verifiedEmail'\)/);
+  assert.match(html, /account\?\.email_verified && account\?\.email/);
+  assert.match(html, /dir="ltr">\{\{ account\?\.email \}\}/);
+  assert.match(html, /locale\.t\('premium\.membershipOnly'\)/);
+  assert.match(html, /\(click\)="confirmPremium\(\)"/);
+  assert.match(component, /!this\.account\?\.email_verified/);
+  assert.match(component, /window\.open\(this\.donationUrl, '_blank', 'noopener,noreferrer'\)/);
+  assert.match(css, /\.premium-dialog-backdrop/);
+  assert.match(css, /\.premium-dialog-email-value/);
+  for (const key of ['premium.dialogTitle', 'premium.dialogIntro', 'premium.verifiedEmail',
+    'premium.emailNotVerified', 'premium.membershipOnly', 'premium.continue',
+    'premium.close', 'premium.activeDescription']) {
+    assert.ok(english[key], key);
+  }
+});
