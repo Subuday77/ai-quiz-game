@@ -54,11 +54,22 @@ class AccountOut(BaseModel):
     id: UUID
     username: str
     display_name: str | None = None
+    email: str | None = None
+    email_verified: bool = False
     preferred_language: str
     ui_language: str
     theme_key: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def public_account(user: User) -> AccountOut:
+    return AccountOut.model_validate({
+        "id": user.id, "username": user.username, "display_name": user.display_name,
+        "email": user.email, "email_verified": user.email_verified_at is not None,
+        "preferred_language": user.preferred_language, "ui_language": user.ui_language,
+        "theme_key": user.theme_key,
+    })
 
 
 def utc_now():
@@ -171,7 +182,7 @@ def register(payload: Credentials, request: Request, response: Response,
         db.rollback()
         raise HTTPException(status_code=409, detail="Username unavailable") from None
     start_session(db, user, response)
-    return user
+    return public_account(user)
 
 
 @router.post("/login", response_model=AccountOut)
@@ -205,12 +216,12 @@ def login(payload: Credentials, request: Request, response: Response,
         raise HTTPException(status_code=401, detail="Invalid credentials")
     db.commit()
     start_session(db, user, response)
-    return user
+    return public_account(user)
 
 
 @router.get("/me", response_model=AccountOut)
 def me(user: User = Depends(authenticated_user)):
-    return user
+    return public_account(user)
 
 
 class UsernameChange(BaseModel):

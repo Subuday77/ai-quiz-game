@@ -1,0 +1,54 @@
+name: Email account PostgreSQL migration rehearsal
+
+on:
+  pull_request:
+    paths:
+      - 'backend/migrations/**'
+      - 'backend/persistence/models.py'
+      - 'backend/scripts/check_email_migration_postgres.py'
+      - '.github/workflows/email-account-postgres-migration.yml'
+  workflow_dispatch:
+
+jobs:
+  migrate-existing-uuid:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: quiz
+          POSTGRES_USER: quiz
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quiz -d quiz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg://quiz:ci-only-password@127.0.0.1:5432/quiz
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Upgrade to pre-email schema (0014)
+        run: python -m alembic upgrade 0014_attempt_choice_order
+      - name: Seed representative legacy user and session
+        run: python -m scripts.check_email_migration_postgres seed
+      - name: Apply additive email migrations
+        run: python -m alembic upgrade head
+      - name: Confirm legacy data and references survived
+        run: python -m scripts.check_email_migration_postgres validate
+      - name: Verify at expected Alembic head
+        run: |
+          python -m alembic current
+          python -m alembic heads
