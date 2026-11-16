@@ -177,7 +177,14 @@ def register(payload: EmailRegister, request: Request, response: Response, db: S
     except IntegrityError as exc:
         db.rollback()
         constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
-        if constraint == "uq_users_email":
+        # PostgreSQL exposes the constraint name; SQLite reports column text
+        # instead. Keep duplicate-email semantics in both production and tests.
+        sqlite_duplicate_email = (
+            db.bind is not None
+            and db.bind.dialect.name == "sqlite"
+            and "UNIQUE constraint failed: users.email" in str(exc.orig)
+        )
+        if constraint == "uq_users_email" or sqlite_duplicate_email:
             raise HTTPException(status_code=409, detail="Email already registered") from None
         # Other integrity failures are server bugs, not evidence of a claimed email.
         raise
