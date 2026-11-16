@@ -149,7 +149,7 @@ class StarShopTests(unittest.TestCase):
 
     def test_strict_price_extra_currency_quantity_and_verified_email(self):
         scenarios = [
-            {"amount": 2.9}, {"amount": 2.4}, {"amount": 3.5},
+            {"amount": 2.9}, {"amount": 3.5},
             {"product_id": 987654}, {"quantity": 2}, {"currency": "EUR"},
             {"status": "pending"}, {"refunded": "true"},
             {"email": "unknown@example.com"},
@@ -198,6 +198,12 @@ class StarShopTests(unittest.TestCase):
         self.assertFalse(response.json()["applied"])
         self.assertEqual(self.orders()[0].status, "refund_pending")
         self.assertEqual(self.balance(), 5)
+
+    def test_provider_accepted_coupon_still_delivers_to_verified_nonpremium(self):
+        discounted = self.send(event_id=876, purchase_id=5555, amount=2.4)
+        self.assertEqual(discounted.status_code, 200, discounted.text)
+        self.assertTrue(discounted.json()["applied"])
+        self.assertEqual(self.balance(), 30)
 
     def test_premium_coupon_price_requires_active_premium(self):
         with Session(self.engine) as db:
