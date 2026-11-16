@@ -113,10 +113,6 @@
       <p *ngIf="starShop?.premium" class="bronze-shop-premium">
         {{ locale.t('shop.premiumDiscount') }}
       </p>
-      <p *ngIf="starShop?.premium_coupon" class="bronze-shop-coupon">
-        {{ locale.t('shop.discountCode') }}: <strong dir="ltr">{{ starShop?.premium_coupon }}</strong>
-        <span>{{ locale.t('shop.enterCode') }}</span>
-      </p>
       <p *ngIf="starShopLoading" role="status" class="bronze-shop-status">{{ locale.t('shop.loading') }}</p>
       <p *ngIf="starShopError" role="alert" class="bronze-shop-status">{{ locale.t(starShopError) }}</p>
       <div *ngIf="starShop as catalog" class="bronze-shop-packages">
@@ -137,10 +133,6 @@
       </p>
       <p class="bronze-shop-status" *ngIf="starShop?.configured && !starShop?.verified_email">
         {{ locale.t('shop.verifyEmail') }}
-      </p>
-      <p class="bronze-shop-status" *ngIf="starShop?.configured && starShop?.verified_email &&
-                                              starShop?.premium && !starShop?.premium_coupon">
-        {{ locale.t('shop.premiumSetup') }}
       </p>
       <p class="premium-dialog-note">{{ locale.t('shop.sameEmailRule') }}</p>
       <div class="premium-dialog-actions">
