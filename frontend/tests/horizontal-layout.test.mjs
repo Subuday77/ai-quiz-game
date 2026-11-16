@@ -53,3 +53,15 @@ test('layout has a wide desktop grid and narrow viewport fallback', () => {
   assert.match(styles, /@media \(max-width: 680px\)/);
   assert.match(styles, /\.game-sidebar \.star-items-exchange\s*\{/);
 });
+
+test('wallet keeps all four tiers readable and gives converter buttons separate slots', () => {
+  assert.match(rail, /\[class\.wallet-wide\]="tier\.key === 'platinum'/);
+  assert.match(rail, /class="exchange-pair gold"/);
+  assert.match(rail, /class="exchange-pair" \[ngClass\]="tier\.key"/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.star-item\.platinum \{ grid-column: 1; grid-row: 4; \}/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.star-item\.wallet-wide \{ grid-column: 1 \/ -1; \}/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.bronze \{ grid-column: 2; grid-row: 1; \}/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.silver \{ grid-column: 2; grid-row: 2; \}/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange > \.exchange-pair\.gold \{ grid-column: 2; grid-row: 3; \}/);
+  assert.match(styles, /word-break: normal;/);
+});
