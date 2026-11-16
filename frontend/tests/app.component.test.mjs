@@ -43,7 +43,8 @@ const componentSource = source
 const compiled = ts.transpileModule(componentSource, { compilerOptions }).outputText;
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
-  appealHistoryRefundRows, formatAppealHistoryDate } = await import(
+  appealHistoryRefundRows, appealHistoryQuotaRefund,
+  formatAppealHistoryDate } = await import(
     pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
@@ -2637,6 +2638,35 @@ test('appeal history separates 3 bronze hint refund, 1 gold helper reward and 0 
   assert.doesNotMatch(history, /field\('appeals\.compensation',/);
   assert.doesNotMatch(history, /' \(' \+ v\.reason \+ '\)'/);
   assert.doesNotMatch(history, /field\('appeals\.hintRefunds', costs \|\| '0'\)/);
+});
+
+test('upheld complaint history explicitly shows restored free quota or preserved paid fee step', () => {
+  assert.deepEqual(appealHistoryQuotaRefund('upheld', 0), {
+    labelKey: 'appeals.historyFreeComplaint',
+    valueKey: 'appeals.historyFreeComplaintRestored',
+  });
+  assert.deepEqual(appealHistoryQuotaRefund('upheld', 1), {
+    labelKey: 'appeals.historyPaidFeeStep',
+    valueKey: 'appeals.historyPaidFeeNotIncreased',
+  });
+  assert.deepEqual(appealHistoryQuotaRefund('upheld', 4),
+    appealHistoryQuotaRefund('upheld', 1));
+  for (const status of ['pending', 'retry_pending', 'rejected', 'technical_unresolved']) {
+    assert.equal(appealHistoryQuotaRefund(status, 0), null);
+    assert.equal(appealHistoryQuotaRefund(status, 2), null);
+  }
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /appealHistoryQuotaRefund\(item\.status, item\.filing_fee_bronze\)/);
+  assert.match(history, /quotaRefund \? field\(quotaRefund\.labelKey, localized\(quotaRefund\.valueKey\)\)/);
+  for (const key of ['appeals.historyFreeComplaint',
+                     'appeals.historyFreeComplaintRestored',
+                     'appeals.historyPaidFeeStep',
+                     'appeals.historyPaidFeeNotIncreased']) {
+    assert.ok(english[key], key + ' must be in canonical localization dictionary');
+  }
+  assert.match(english['appeals.rulesUpheld'], /restores one slot/);
+  assert.match(english['appeals.rulesUpheld'], /original filing fee remains non-refundable/);
 });
 
 test('appeal history labels unused helper platinum refund and handles repeated or novel entries', () => {
