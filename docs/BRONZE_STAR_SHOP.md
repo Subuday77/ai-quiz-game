@@ -31,10 +31,12 @@ About reward claim idempotency keys are unchanged.
    secret. Do not reuse the existing Premium webhook secret.
 3. Create a 20% Shop discount code for Premium players. Entered at BMC's
    checkout, this code is not automatically attached to AI Quiz Premium status.
-   Coupon sharing is possible; the signed webhook verifies that a discounted
-   receipt belongs to a verified account with currently active Premium.
-   Non-Premium discounted orders go to manual review, so address coupon
-   sharing before real sales.
+   Coupon sharing is possible: the provider does not bind codes to an AI
+   Quiz Premium account. The backend displays the coupon only to Premium
+   members but fulfils any successfully paid valid Shop receipt at the exact
+   20%-off amount, even if the code was shared. Do not promise that the
+   Premium code is exclusive; consider a different payment provider if
+   enforcing exclusivity becomes a requirement.
 4. Set these backend environment variables (illustrative placeholders only):
 
     BMC_STAR_SHOP_ENABLED=false
