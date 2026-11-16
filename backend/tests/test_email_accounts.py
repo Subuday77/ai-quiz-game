@@ -43,6 +43,49 @@ class EmailAccountFlowTests(unittest.TestCase):
             "password": "correct horse battery staple",
         })
 
+    def test_new_account_keeps_selected_ui_language_after_email_verification(self):
+        created = self.client.post("/api/auth/email/register", json={
+            "email": "ru-player@example.com",
+            "display_name": "Тестовый игрок",
+            "password": "correct horse battery staple",
+            "ui_language": "ru",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["ui_language"], "ru")
+        self.assertFalse(created.json()["email_verified"])
+        self.assertEqual(self.client.get("/api/auth/me").json()["ui_language"], "ru")
+        self.assertEqual(len(self.sent), 1)
+
+        verified = self.client.post("/api/auth/email/verify", json={
+            "token": self.sent[0][1],
+        })
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertTrue(self.client.get("/api/auth/me").json()["email_verified"])
+        self.assertEqual(self.client.get("/api/auth/me").json()["ui_language"], "ru")
+
+        self.client.post("/api/auth/logout")
+        signed_in_again = self.client.post("/api/auth/email/login", json={
+            "email": "ru-player@example.com",
+            "password": "correct horse battery staple",
+        })
+        self.assertEqual(signed_in_again.status_code, 200, signed_in_again.text)
+        self.assertEqual(signed_in_again.json()["ui_language"], "ru")
+
+    def test_registration_defaults_to_english_and_rejects_unsupported_ui_languages(self):
+        invalid = self.client.post("/api/auth/email/register", json={
+            "email": "invalid-locale@example.com",
+            "display_name": "A",
+            "password": "correct horse battery staple",
+            "ui_language": "not-supported",
+        })
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+        self.assertEqual(self.sent, [])
+
+        legacy = self.register("default-locale@example.com")
+        self.assertEqual(legacy.status_code, 201, legacy.text)
+        self.assertEqual(legacy.json()["ui_language"], "en")
+
+
     def test_duplicate_display_names_distinct_ids_and_unique_emails(self):
         first = self.register("first@example.com")
         self.assertEqual(first.status_code, 201, first.text)
