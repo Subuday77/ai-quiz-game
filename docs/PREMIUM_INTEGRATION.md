@@ -1,0 +1,84 @@
+# AI Quiz Game — Premium / Buy Me a Coffee integration
+
+## Status and current limits
+
+The signed membership webhook and game entitlements are implemented in this branch.
+**Do not enable checkout before migrating and configuring the webhook.**
+No star-pack real-money checkout is currently deployed; the 20% Premium discount is
+represented by the server-side price-quote helper and status API, but cannot
+automatically change prices of externally configured Buy Me a Coffee Shop items.
+Do not advertise the star-shop discount as already redeemable until that shop
+and its Premium-priced products are configured and their purchase webhooks
+verified. The coffee donation button remains separate and grants no rewards.
+
+## Existing Premium rules
+
+- Monthly membership: **$5**; yearly membership: **$50** (configured on Buy Me a Coffee).
+- 8 free complaints per UTC calendar month, with no carryover.
+- Premium conversion: 10 Gold -> 1 Platinum; never reverse. Platinum stays
+  in the balance after Premium expires.
+- Quality preference: among eligible, fully reviewed pool questions of the
+  same requested difficulty, prefer higher community-rated questions. Do not
+  bypass validation, deduplication or the global difficulty gate.
+- Intended 20% reduction on purchased star packs, implemented in
+  `discounted_price_cents()` for server-computed future checkout quotes.
+  No cash purchase endpoint exists yet.
+
+## Deploy (VPS)
+
+1. Back up the PostgreSQL volume without touching the existing users and run
+   `docker compose run --rm backend python -m alembic upgrade head`
+   from the project root. Only new Premium tables are created.
+2. In the **private** Quiz Compose `.env`, set:
+   ```dotenv
+   BMC_WEBHOOK_SIGNING_SECRET=<the signing secret copied from the BMC webhook>
+   BMC_PREMIUM_LEVEL_ID=<numeric membership_level_id from a signed event preview>
+   ```
+   Do not paste the secret into chat, GitHub, frontend code or logs.
+3. Buy Me a Coffee creator dashboard → Integrations → New webhook:
+   - URL: `https://squizthebot.com/api/v2/premium/webhook`
+   - Events: `membership.started`, `membership.updated`,
+     `membership.cancelled`, `membership.paused`.
+   - Use the **Premium account** membership level; do not map general
+     recurring donations or individual coffees to Premium.
+4. Recreate only Quiz backend and web after merging/deploying:
+   `docker compose up -d --build backend web`.
+   Check `GET /api/health`. Never run `docker compose down -v`.
+5. Test via dashboard **Send test event**. Signed dashboard test events use
+   `live_mode=false`: endpoint acknowledges them but **never activates
+   Premium**. Confirm `GET /api/v2/premium` returns `active=false`.
+   A real membership payment is required for a full end-to-end check.
+6. Subscribe using the **same verified email** as the AI Quiz account.
+   After a real signed event with the configured level ID, reload the game:
+   `GET /api/v2/premium` should show `active=true`, 8 free appeals and
+   20% as the *future star-shop discount policy*. Do not interpret these
+   account-status values as a processed Shop order.
+7. Verify one-way exchange with sufficient Gold. Repeated request IDs are
+   idempotent; other conversion directions are refused. Paid cancellation
+   retains benefits only until the provider's paid period end; pause disables
+   immediately.
+
+## Security and matching
+
+- HMAC-SHA256 on **raw body** using `x-signature-sha256` is mandatory.
+- `live_mode=false`, donation, recurring-donation, and unrelated tiers
+  never create benefits.
+- New subscriptions match `supporter_email` to an **already verified**
+  login email; never match on display name.
+- On subsequent events, the provider subscription ID and supporter ID are
+  immutably bound to that same player.
+- Every processed `event_id` is tracked in PostgreSQL for replay safety.
+- Unknown buyer emails are acknowledged but **not assigned to another user**.
+  Handle those purchases manually after investigating ownership; do not
+  blindly attach by name or let players claim another person's order.
+- Store no credit card/payment credentials in Quiz.
+- The frontend checkout control remains disabled if signing secret or numeric
+  Premium membership level ID is missing.
+
+## Documentation
+
+Official Buy Me a Coffee webhook docs (July 2026):
+https://help.buymeacoffee.com/en/articles/15743173-how-to-setup-and-use-buy-me-a-coffee-webhooks
+
+Official JSON schema:
+https://cdn.buymeacoffee.com/assets/integrations/bmc-webhooks-openapi.json
