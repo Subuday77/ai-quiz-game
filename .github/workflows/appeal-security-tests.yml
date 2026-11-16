@@ -45,6 +45,19 @@ jobs:
       - name: Run entire backend unit suite
         working-directory: backend
         run: python -m unittest discover -s tests -v
+      - name: Assert production exposes email login only
+        working-directory: backend
+        run: |
+          env -u QUIZ_LEGACY_USERNAME_TEST_ROUTES python - <<'PY'
+          from api import app
+          paths = app.openapi()["paths"]
+          assert "/api/auth/email/login" in paths
+          assert "/api/auth/email/register" in paths
+          for route in ("/api/auth/login", "/api/auth/register",
+                        "/api/auth/username-suggestions", "/api/auth/username"):
+              assert route not in paths, route
+          print("Production auth routes: email only")
+          PY
       - name: Verify authenticated game and appeal routes mount in real FastAPI app
         working-directory: backend
         run: python -c "from api import app; paths=app.openapi()['paths']; assert '/api/v2/appeals' in paths and '/api/v2/games/{run_id}/appeals' in paths"
