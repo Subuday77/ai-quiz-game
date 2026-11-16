@@ -124,6 +124,16 @@ class PremiumTests(unittest.TestCase):
         self.assertEqual(pause.status_code, 200, pause.text)
         self.assertFalse(self.client.get("/api/v2/premium").json()["active"])
 
+    def test_same_second_cancel_event_is_not_lost(self):
+        timestamp = int(datetime.now(timezone.utc).timestamp())
+        first = self.send_event(event_id=200, started_at=timestamp)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertTrue(self.client.get("/api/v2/premium").json()["active"])
+        canceled = self.send_event(event_id=201, event_type="membership.paused",
+                                   status="paused", started_at=timestamp)
+        self.assertEqual(canceled.status_code, 200, canceled.text)
+        self.assertFalse(self.client.get("/api/v2/premium").json()["active"])
+
     def test_premium_gold_to_platinum_atomic_and_one_way(self):
         self.assertEqual(self.send_event().status_code, 200)
         with Session(self.engine) as db:
