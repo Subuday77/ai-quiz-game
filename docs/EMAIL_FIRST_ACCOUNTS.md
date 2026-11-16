@@ -37,14 +37,14 @@ Configure privately (see `.env.example` and `.env.production.example`):
 AUTH_PUBLIC_URL=https://YOUR_FINAL_QUIZ_DOMAIN
 AUTH_FROM_EMAIL=YOUR_VERIFIED_SENDER
 AUTH_SMTP_HOST=YOUR_PROVIDER_SMTP_HOST
-AUTH_SMTP_PORT=587
+AUTH_SMTP_PORT=2525
 AUTH_SMTP_USERNAME=YOUR_PROVIDER_USERNAME
 AUTH_SMTP_PASSWORD=YOUR_PRIVATE_PASSWORD
 # Set to exact peer IP of a trusted reverse proxy only, otherwise leave empty.
 AUTH_TRUSTED_PROXY_IPS=
 ```
 
-Port 587 uses STARTTLS, port 465 SSL. The sender domain must be configured with SPF/DKIM/DMARC with the mail provider. Never commit actual secrets, send tokens to logs, or use an unverified sender. New email signup/verification intentionally fail closed if email transport is unconfigured. Do not publish the updated front-end without the updated backend and DB schema.
+Ports 587 and 2525 use STARTTLS; port 465 uses SSL. Live netcup VPS outbound TCP tests (2026-11-16): 2525 OPEN, 587 and 465 TIMEOUT. Real SMTP delivery through port 2525 from a disposable Docker container to Gmail was confirmed, with SPF, DKIM and DMARC all PASS. Brevo sender: no-reply@squizthebot.com; public site: https://squizthebot.com. SMTP secrets are stored only in the VPS private .env. The sender domain must be configured with SPF/DKIM/DMARC with the mail provider. Never commit actual secrets, send tokens to logs, or use an unverified sender. New email signup/verification intentionally fail closed if email transport is unconfigured. Do not publish the updated front-end without the updated backend and DB schema.
 
 ## Safe rollout order
 
@@ -59,7 +59,7 @@ Port 587 uses STARTTLS, port 465 SSL. The sender domain must be configured with 
 
 ## Known release blockers / follow-ups
 
-- Live SMTP provider, secrets, sender reputation and an actual mailbox delivery test are unavailable in this PR.
+- Live SMTP has been verified externally using the production VPS network and a disposable Docker container on port 2525. The staged PR application itself has not yet been released or tested end-to-end; do not infer readiness from the successful transport test.
 - An atomic database-backed **per-client-IP 15-minute limiter** is implemented for email endpoints, plus per-account hourly caps on mail sends. Validate `AUTH_TRUSTED_PROXY_IPS` against the real Caddy/backend connection, and schedule `python -m scripts.cleanup_auth_rate_buckets` daily so old counters don't accumulate. Add production alerting for delivery errors and throttling.
 - Review accessibility and localization in all supported languages, not only canonical English. Test RU/EN and RTL in browser.
 - Add real Postgres concurrency tests for competing email claims and reset requests, as well as a production backup/restore rehearsal.
