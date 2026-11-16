@@ -507,6 +507,17 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   box-shadow: 0 8px 24px #0005;
 }
 .profile-menu .account-button { width: 100%; text-align: start; }
+.profile-menu .premium-account-button {
+  background: linear-gradient(125deg, #5832a1, #8c59dd);
+  color: #fff;
+  border: 1px solid #aa85f2;
+  font-weight: 700;
+}
+.profile-menu .premium-account-button:hover:not(:disabled),
+.profile-menu .premium-account-button:focus-visible {
+  background: linear-gradient(125deg, #7043bd, #9c70ec);
+  box-shadow: 0 0 14px rgba(151, 93, 240, .32);
+}
 
 
 /* Complaint entry belongs in the top-right of the question card. */
