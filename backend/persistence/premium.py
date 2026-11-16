@@ -35,11 +35,14 @@ _MEMBERSHIP_EVENTS = {
 
 def premium_active(db: Session, user_id: UUID, *, now: datetime | None = None) -> bool:
     now = now or datetime.now(timezone.utc)
-    return db.scalar(select(PremiumMembership.id).where(
+    membership_id = db.scalar(select(PremiumMembership.id).where(
         PremiumMembership.user_id == user_id,
         PremiumMembership.status.in_(("active", "cancelled")),
         PremiumMembership.current_period_end > now,
-    ).limit(1)) is not None
+    ).limit(1))
+    # A real database yields the typed UUID primary key. Do not treat mocked
+    # scalar placeholder objects as evidence of a paid entitlement.
+    return isinstance(membership_id, UUID)
 
 
 def status(db: Session, user_id: UUID) -> dict:
