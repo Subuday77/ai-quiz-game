@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
 from category_taxonomy import prefer_other_family, paid_random_change_candidates
 from diagnostics import event
-from persistence.auth import authenticated_user, validate_origin
+from persistence.auth import authenticated_user, verified_game_user, validate_origin
 from persistence.database import get_db
 from persistence.gameplay import (
     GameConflict, GameNotFound, TopicsNotSeeded, create_game, game_state,
@@ -37,7 +37,8 @@ from platinum_helper.service import get_purchase, card as helper_card
 from question_schema import Choice, PublicQuestion
 from star_perks import PerkUnavailable
 
-router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"])
+router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"],
+                   dependencies=[Depends(verified_game_user)])
 
 
 class NewGame(BaseModel):
