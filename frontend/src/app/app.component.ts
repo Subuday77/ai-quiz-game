@@ -47,6 +47,15 @@ interface PremiumStatus {
   star_discount_percent: number;
   priority_questions: boolean;
 }
+interface StarShopPackage {
+  bronze: number; base_price_cents: number; price_cents: number;
+  checkout_url: string | null;
+}
+interface StarShopCatalog {
+  ready: boolean; configured: boolean; verified_email: string | null;
+  premium: boolean; premium_coupon: string | null;
+  packages: StarShopPackage[];
+}
 interface ProfileStats {
   games_played: number;
   total_score: number;
@@ -332,6 +341,10 @@ export class AppComponent implements OnInit, OnDestroy {
   profileMenuOpen = false;
   premiumDialogOpen = false;
   premium: PremiumStatus | null = null;
+  starShopOpen = false;
+  starShop: StarShopCatalog | null = null;
+  starShopLoading = false;
+  starShopError = '';
   appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
   appealMessage = '';
@@ -2348,6 +2361,10 @@ export class AppComponent implements OnInit, OnDestroy {
   private clearAccount(): void {
     this.premiumDialogOpen = false;
     this.premium = null;
+    this.starShopOpen = false;
+    this.starShop = null;
+    this.starShopLoading = false;
+    this.starShopError = '';
     this.statsVersion++;
     this.appealAllowance = null;
     this.resetEnabled = false;
