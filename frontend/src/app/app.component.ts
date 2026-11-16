@@ -416,7 +416,41 @@ export class AppComponent implements OnInit, OnDestroy {
       return;
     }
     if (!this.gameId) {
+      if (!this.account) {
+        this.selectedLanguage = language;
+        return;
+      }
+      if (!this.canEditPregameLanguage || this.loading || this.languageSaving ||
+          this.perksBusy || this.categoryLoading) {
+        this.selectedLanguage = this.account.preferred_language;
+        return;
+      }
+      const accountId = this.account.id;
+      const previous = this.account.preferred_language;
+      if (language === previous) {
+        this.selectedLanguage = language;
+        return;
+      }
       this.selectedLanguage = language;
+      this.languageSaving = true;
+      this.error = '';
+      this.subscriptions.add(this.http.patch<{preferred_language: string}>(
+        GAME_API + '/language-preference', {language},
+      ).pipe(timeout(10000), finalize(() => { this.languageSaving = false; })).subscribe({
+        next: (result) => {
+          if (this.account?.id !== accountId || this.gameId) return;
+          this.account.preferred_language = result.preferred_language;
+          this.selectedLanguage = result.preferred_language;
+        },
+        error: (err: unknown) => {
+          if (this.account?.id !== accountId || this.gameId) return;
+          if (this.isUnauthorized(err)) this.sessionExpired();
+          else {
+            this.selectedLanguage = previous;
+            this.error = 'game.languageUpdateFailed';
+          }
+        },
+      }));
       return;
     }
     if (!this.canEditPregameLanguage || !this.account || this.loading ||
@@ -442,6 +476,7 @@ export class AppComponent implements OnInit, OnDestroy {
         if (this.gameId !== gameId || this.account?.id !== accountId) return;
         this.gameLanguage = game.language;
         this.selectedLanguage = game.language;
+        if (this.account) this.account.preferred_language = game.language;
       },
       error: (err: unknown) => {
         if (this.gameId !== gameId || this.account?.id !== accountId) return;
