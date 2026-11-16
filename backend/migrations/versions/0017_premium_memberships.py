@@ -25,6 +25,7 @@ def upgrade():
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column("current_period_end", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_event_created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("last_event_id", sa.BigInteger(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("provider", "provider_subscription_id",
                             name="uq_premium_provider_subscription"),
