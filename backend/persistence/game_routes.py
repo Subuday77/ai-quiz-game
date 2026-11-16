@@ -611,6 +611,8 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     # Keep the original v2 path for legacy clients; tagged games have
     # strict quality gates, emergency pool reuse and late-game recovery.
     question_number = 16 if run.status == "bonus" else game_progress.main_question_index + 1
+    from persistence.premium import premium_active
+    quality_priority = premium_active(db, user.id)
     tagged = os.getenv("AI_TAG_DEDUP_ENABLED", "false").strip().lower() == "true"
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
@@ -670,6 +672,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     category=candidate_category, max_candidates=pool_settings[2],
                     expected_bonus_topic_index=bonus_index,
                     rating_filter=probability_filter,
+                    quality_priority=quality_priority,
                 )
             except Exception as exc:
                 # The optional pool must never bypass quality checks or
@@ -687,6 +690,7 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                     category=pool_search_categories[0],
                     search_categories=pool_search_categories,
                     max_candidates=pool_settings[2], rating_filter=True,
+                    quality_priority=quality_priority,
                 )
             except Exception as exc:
                 event("question_pool_fallback_failed", error_type=type(exc).__name__)
