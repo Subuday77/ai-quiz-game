@@ -349,7 +349,7 @@ export class AppComponent implements OnInit, OnDestroy {
   aboutStatusLoading = false;
   aboutBusy = false;
   aboutError = '';
-  readonly aboutReward: StarCounts = { bronze: 50, silver: 40, gold: 30, platinum: 20 };
+  readonly aboutReward: StarCounts = { bronze: 5, silver: 4, gold: 3, platinum: 2 };
   // Public donation URL comes from the server only after the owner registers a page.
   donationUrl = '';
   resetEnabled = false;
