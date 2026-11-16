@@ -147,5 +147,31 @@ class EmailAccountFlowTests(unittest.TestCase):
         self.assertEqual(len(self.sent), n)
 
 
+
+class SMTPTransportTests(unittest.TestCase):
+    def test_brevo_port_2525_uses_starttls(self):
+        from persistence.account_email_routes import send_account_email
+        values = {
+            "AUTH_PUBLIC_URL": "https://squizthebot.com",
+            "AUTH_FROM_EMAIL": "no-reply@squizthebot.com",
+            "AUTH_SMTP_HOST": "smtp-relay.brevo.com",
+            "AUTH_SMTP_PORT": "2525",
+            "AUTH_SMTP_USERNAME": "test@smtp-brevo.com",
+            "AUTH_SMTP_PASSWORD": "test-secret",
+        }
+        with patch.dict("os.environ", values), patch(
+            "persistence.account_email_routes.smtplib.SMTP"
+        ) as smtp_class:
+            send_account_email("recipient@example.com", "test-token", purpose="verify_email")
+            smtp_class.assert_called_once_with("smtp-relay.brevo.com", 2525, timeout=10)
+            client = smtp_class.return_value.__enter__.return_value
+            client.starttls.assert_called_once()
+            client.login.assert_called_once_with("test@smtp-brevo.com", "test-secret")
+            message = client.send_message.call_args.args[0]
+            self.assertEqual(message["From"], "no-reply@squizthebot.com")
+            self.assertIn("https://squizthebot.com/#verify_email=test-token",
+                          message.get_content())
+
+
 if __name__ == "__main__":
     unittest.main()
