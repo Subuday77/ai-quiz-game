@@ -441,12 +441,13 @@
           <div class="star-items star-items-exchange">
             <ng-container *ngFor="let tier of starTiers">
               <div class="star-item" [ngClass]="tier.key"
+                   [class.wallet-wide]="tier.key === 'platinum' || (tier.key === 'gold' && !premium?.active)"
                    [attr.aria-label]="locale.t('stars.' + tier.key) + ': ' + spendableStars[tier.key]">
                 <span class="star-icon" aria-hidden="true">★</span>
                 <span class="star-label">{{ locale.t('stars.' + tier.key) }}</span>
                 <strong class="star-number">{{ spendableStars[tier.key] }}</strong>
               </div>
-              <div class="exchange-pair" *ngIf="tier.key === 'gold' && premium?.active">
+              <div class="exchange-pair gold" *ngIf="tier.key === 'gold' && premium?.active">
                 <button type="button" class="exchange-arrow"
                         (click)="premiumGoldToPlatinum()"
                         [disabled]="perksBusy || loading || spendableStars.gold < 10"
@@ -455,7 +456,7 @@
                   <span aria-hidden="true">→</span><small>10:1</small>
                 </button>
               </div>
-              <div class="exchange-pair" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
+              <div class="exchange-pair" [ngClass]="tier.key" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
                 <ng-container *ngIf="tier.key === 'bronze'">
                   <button type="button" class="exchange-arrow"
                           (click)="exchangeBetween('bronze', 'silver')"
