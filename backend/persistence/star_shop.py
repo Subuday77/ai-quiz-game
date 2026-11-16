@@ -73,11 +73,6 @@ def _configured_items() -> dict[int, dict]:
     return result
 
 
-def _coupon() -> str | None:
-    code = os.environ.get("BMC_STAR_PREMIUM_COUPON", "").strip()
-    return code if re.fullmatch(r"[A-Za-z0-9_-]{4,32}", code) else None
-
-
 def _money_cents(value: object) -> int | None:
     """BMC payment amounts are decimal USD, not integer cents."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
@@ -105,14 +100,15 @@ def get_shop(user: User = Depends(authenticated_user),
 
 def _shop_payload(*, user: User, catalog: dict, live: bool,
                   verified: bool, premium: bool) -> dict:
-    coupon = _coupon() if premium else None
-    can_checkout = live and verified and (not premium or bool(coupon))
+    # BMC Shop's built-in "Special price for members" determines the
+    # actual checkout price. We quote 20% less for active Quiz Premium; no
+    # sharable coupon or client-provided price is involved.
+    can_checkout = live and verified
     return {
         "ready": bool(can_checkout),
         "configured": bool(live),
         "verified_email": user.email if verified else None,
         "premium": premium,
-        "premium_coupon": coupon,
         "packages": [{
             "bronze": bronze, "base_price_cents": price,
             "price_cents": discounted_price_cents(price, active=premium),
@@ -252,13 +248,12 @@ async def purchase_webhook(request: Request, db: Session = Depends(get_db)):
     elif eligible and user is not None:
         base_price = PACK_PRICES[bronze]
         discounted = discounted_price_cents(base_price, active=True)
-        # BMC discount codes are not cryptographically bound to our accounts.
-        # If BMC successfully charged the published 20%-off price, deliver
-        # purchased stars even if a customer shared a coupon. Refusing
-        # delivery after a real charge is worse than losing exclusivity.
-        price_ok = paid == base_price or (
-            bool(_coupon()) and paid == discounted
-        )
+        # BMC applies its built-in member price at checkout. Trust neither
+        # client claims nor account flags for a successful payment: the signed
+        # provider receipt must match exactly the full or the member price.
+        # Both are valid fulfilled orders, even if membership state changed
+        # between checkout and delivery.
+        price_ok = paid in (base_price, discounted)
         if price_ok:
             lock_user_stars(db, user.id)
             db.add(WalletTransaction(
