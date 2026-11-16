@@ -24,7 +24,9 @@
               "src/styles.css"
             ],
             "assets": [
-              "src/favicon.svg"
+              "src/favicon.svg",
+              "src/robots.txt",
+              "src/sitemap.xml"
             ]
           }
         },
