@@ -454,8 +454,13 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  get needsEmailVerification(): boolean {
+    return !!this.account?.email && this.account.email_verified !== true;
+  }
+
   get setupButtonLabelKey(): string {
     if (!this.account) return 'game.loginToPlay';
+    if (this.needsEmailVerification) return 'game.verifyEmailToPlay';
     if (this.loading) return 'game.loading';
     // Buying a helper (or excluding categories) allocates a game ID before Q1.
     // The first question, not the database row, defines the start of play.
@@ -1608,7 +1613,22 @@ export class AppComponent implements OnInit, OnDestroy {
     if (verification) {
       try {
         await firstValueFrom(this.http.post('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
-        if (this.account) this.account.email_verified = true;
+        // The emailed link may be opened after a full page reload, before
+        // the initial /me request finishes. Refresh the authoritative status
+        // so game access unlocks immediately in the current browser.
+        try {
+          const refreshed = await firstValueFrom(
+            this.http.get<Account>('/api/auth/me').pipe(timeout(10000))
+          );
+          this.signedIn(refreshed);
+        } catch {
+          // Opening the link in another browser may have no session cookie;
+          // the user can sign in normally with the now-verified account.
+          if (this.account) {
+            this.account.email_verified = true;
+            this.restoreActiveGame();
+          }
+        }
         await Swal.fire({ titleText: this.locale.t('auth.emailVerified'), icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
       } catch { await Swal.fire({ titleText: this.locale.t('auth.verificationInvalid'),
                                   icon: 'error', background: '#1b1e3e', color: '#f1f3ff' }); }
@@ -1660,6 +1680,10 @@ export class AppComponent implements OnInit, OnDestroy {
         this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
+      return;
+    }
+    if (this.needsEmailVerification) {
+      void this.claimAccountEmail();
       return;
     }
     if (this.resumeCandidate) {
@@ -1778,6 +1802,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private createGame(forExclusions: boolean, beginQuestions = false): void {
+    if (this.needsEmailVerification) return;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
@@ -2223,7 +2248,7 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.refreshStats();
     this.refreshAppealAllowance();
-    this.restoreActiveGame();
+    if (!this.needsEmailVerification) this.restoreActiveGame();
   }
 
   private clearAccount(): void {

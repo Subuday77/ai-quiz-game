@@ -35,6 +35,8 @@
   "game.startNew": "Start a new game →",
   "game.resume": "Resume game →",
   "game.loginToPlay": "Sign in to play →",
+  "game.verifyEmailToPlay": "Verify your email to play →",
+  "game.verifyEmailInstructions": "Check your inbox and Spam folder for the verification link. To resend it or correct your email, open your profile menu (your name at the top) and choose Verify email.",
   "game.loading": "Generating a question…",
   "game.number": "QUESTION {{number}}",
   "game.bonusBadge": "✦ BONUS",

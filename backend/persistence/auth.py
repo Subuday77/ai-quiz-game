@@ -134,6 +134,18 @@ def authenticated_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def verified_game_user(user: User = Depends(authenticated_user)) -> User:
+    """Require mailbox ownership for email-first accounts before gameplay.
+
+    Legacy username accounts without a claimed email remain playable while
+    migrating to email-first sign-in. Account and email-recovery endpoints keep
+    using authenticated_user, so an unverified player can fix their address.
+    """
+    if user.email is not None and user.email_verified_at is None:
+        raise HTTPException(status_code=403, detail="Email verification required to play")
+    return user
+
+
 @router.get("/username-suggestions")
 def username_suggestions(username: str, db: Session = Depends(get_db)) -> dict[str, list[str]]:
     """Offer three currently unused usernames, never claiming to reserve them.
