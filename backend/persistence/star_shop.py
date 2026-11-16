@@ -93,13 +93,12 @@ def _money_cents(value: object) -> int | None:
 
 
 @router.get("")
-def get_shop(user: User = Depends(authenticated_user)):
+def get_shop(user: User = Depends(authenticated_user),
+             db: Session = Depends(get_db)):
     catalog = _configured_items()
     live = _enabled() and bool(os.environ.get("BMC_STAR_WEBHOOK_SIGNING_SECRET")) and bool(catalog)
     verified = bool(user.email and user.email_verified_at and not user.disabled_at)
-    premium = False  # Resolve from the same DB session below via status endpoint.
-    # The authenticated_user dependency is a DB-bound User, but this GET uses a
-    # separate DI Session only when explicitly declared; see get_shop below.
+    premium = premium_active(db, user.id)
     return _shop_payload(user=user, catalog=catalog, live=live, verified=verified,
                          premium=premium)
 
