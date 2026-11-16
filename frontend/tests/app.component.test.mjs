@@ -212,6 +212,39 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(posts.length, 0);
 });
 
+test('loss grayscale starts on losing feedback, survives results, and clears for a new game', () => {
+  const { app } = setup();
+  assert.match(source, /host: \{ '\[class\.loss-mode\]': 'lossModeActive' \}/);
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(css, /:host\(\.loss-mode\)::after/);
+  assert.match(css, /backdrop-filter: grayscale\(97%\)/);
+  assert.match(css, /pointer-events: none/);
+
+  app.screen = 'question';
+  app.finishedPhase = 'lost';
+  assert.equal(app.lossModeActive, false, 'not before result feedback');
+  app.screen = 'feedback';
+  assert.equal(app.lossModeActive, true, 'losing answer immediately desaturates UI');
+  app.screen = 'done';
+  assert.equal(app.lossModeActive, true, 'loss result remains desaturated');
+  app.finishedPhase = 'completed';
+  assert.equal(app.lossModeActive, false, 'wins remain colorful');
+  app.finishedPhase = 'lost';
+  app.screen = 'setup';
+  assert.equal(app.lossModeActive, false, 'setup is always colorful');
+  app.resetGameView();
+  assert.equal(app.lossModeActive, false, 'fresh game restores normal colors');
+
+  app.pendingResults = {
+    game_id: 'lost-run', phase: 'lost', language: 'English',
+    round_stars: { bronze: 1, silver: 0, gold: 0, platinum: 0 },
+    correct_main_answers: 3, main_question_index: 4,
+  };
+  app.showPendingResults();
+  assert.equal(app.screen, 'done');
+  assert.equal(app.lossModeActive, true, 'restored loss also desaturates UI');
+});
+
 test('question heading displays preparation during first and later question generation', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(template, /<h1 \*ngIf="screen === 'question' && questionLoading">\{\{ locale\.t\('game\.loading'\) \}\}<\/h1>/);
