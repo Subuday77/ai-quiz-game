@@ -170,12 +170,14 @@ async def membership_webhook(request: Request, db: Session = Depends(get_db)):
 
     occurred = datetime.fromtimestamp(timestamp, tz=timezone.utc)
     period_end = datetime.fromtimestamp(until, tz=timezone.utc)
-    if row is not None and occurred <= (
-        row.last_event_created if row.last_event_created.tzinfo is not None
-        else row.last_event_created.replace(tzinfo=timezone.utc)
-    ):
-        db.commit()
-        return {"accepted": True, "applied": False}
+    if row is not None:
+        last_created = (row.last_event_created if row.last_event_created.tzinfo
+                        else row.last_event_created.replace(tzinfo=timezone.utc))
+        if occurred < last_created or (
+            occurred == last_created and event_id <= row.last_event_id
+        ):
+            db.commit()
+            return {"accepted": True, "applied": False}
     cancelled = event_type == "membership.cancelled" or data.get("status") == "canceled"
     paused = event_type == "membership.paused" or data.get("status") == "paused"
     state = "paused" if paused else "cancelled" if cancelled else "active"
@@ -186,6 +188,7 @@ async def membership_webhook(request: Request, db: Session = Depends(get_db)):
             provider_supporter_id=str(supporter_id),
             plan=plan, status=state,
             current_period_end=period_end, last_event_created=occurred,
+            last_event_id=event_id,
         )
         db.add(row)
     else:
@@ -193,6 +196,7 @@ async def membership_webhook(request: Request, db: Session = Depends(get_db)):
         row.status = state
         row.current_period_end = period_end
         row.last_event_created = occurred
+        row.last_event_id = event_id
         row.updated_at = datetime.now(timezone.utc)
     receipt = db.get(PremiumWebhookEvent, key)
     receipt.outcome = "applied"
