@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, firstValueFrom, Subscription, timeout, TimeoutError, timer } from 'rxjs';
 import { LocalizationStore, UI_LANGUAGES } from './localization/store';
@@ -2649,6 +2649,11 @@ export class AppComponent implements OnInit, OnDestroy {
 
   closePremium(): void {
     this.premiumDialogOpen = false;
+  }
+
+  @HostListener('document:keydown.escape')
+  onPremiumEscape(): void {
+    if (this.premiumDialogOpen) this.closePremium();
   }
 
   confirmPremium(): void {
