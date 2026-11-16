@@ -95,9 +95,14 @@ def send_account_email(recipient: str, token: str, *, purpose: str):
     msg["Subject"] = "AI Quiz Game — Verify your email" if purpose == "verify_email" else "AI Quiz Game — Reset your password"
     msg.set_content("Open this one-time link within 30 minutes:\n\n" + link +
                     "\n\nIf you did not request this, you can ignore this message.")
-    port = int(os.environ.get("AUTH_SMTP_PORT", "587"))
+    try:
+        port = int(os.environ.get("AUTH_SMTP_PORT", "587"))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Invalid SMTP port") from None
     if port not in (465, 587, 2525):
         raise HTTPException(status_code=503, detail="Invalid SMTP port")
+    if os.environ.get("AUTH_SMTP_USERNAME") and not os.environ.get("AUTH_SMTP_PASSWORD"):
+        raise HTTPException(status_code=503, detail="Email delivery unavailable")
     try:
         if port == 465:
             client = smtplib.SMTP_SSL(os.environ["AUTH_SMTP_HOST"], port, timeout=10)
