@@ -29,6 +29,15 @@ HASHER = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
 USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{2,29}$")
 router = APIRouter(prefix="/api/auth", tags=["Accounts"])
 
+# Legacy username-only handlers remain available only to historical regression
+# fixtures. In production the endpoints are NOT mounted in the API.
+_LEGACY_TEST_ROUTES = os.environ.get("QUIZ_LEGACY_USERNAME_TEST_ROUTES") == "true"
+
+
+def _legacy_test_route(decorator, *args, **kwargs):
+    return decorator(*args, **kwargs) if _LEGACY_TEST_ROUTES else (lambda handler: handler)
+
+
 
 def username_key(username: str) -> str:
     name = unicodedata.normalize("NFKC", username.strip())
@@ -146,7 +155,7 @@ def verified_game_user(user: User = Depends(authenticated_user)) -> User:
     return user
 
 
-@router.get("/username-suggestions")
+@_legacy_test_route(router.get, "/username-suggestions")
 def username_suggestions(username: str, db: Session = Depends(get_db)) -> dict[str, list[str]]:
     """Offer three currently unused usernames, never claiming to reserve them.
 
@@ -176,7 +185,7 @@ def username_suggestions(username: str, db: Session = Depends(get_db)) -> dict[s
     return {"suggestions": suggestions}
 
 
-@router.post("/register", response_model=AccountOut, status_code=201)
+@_legacy_test_route(router.post, "/register", response_model=AccountOut, status_code=201)
 def register(payload: Credentials, request: Request, response: Response,
              db: Session = Depends(get_db)):
     validate_origin(request)
@@ -197,7 +206,7 @@ def register(payload: Credentials, request: Request, response: Response,
     return public_account(user)
 
 
-@router.post("/login", response_model=AccountOut)
+@_legacy_test_route(router.post, "/login", response_model=AccountOut)
 def login(payload: Credentials, request: Request, response: Response,
           db: Session = Depends(get_db)):
     validate_origin(request)
@@ -255,7 +264,7 @@ class PasswordChange(BaseModel):
     confirm_password: str = Field(min_length=8, max_length=256)
 
 
-@router.patch("/username", response_model=AccountOut)
+@_legacy_test_route(router.patch, "/username", response_model=AccountOut)
 def change_username(payload: UsernameChange, request: Request,
                     user: User = Depends(authenticated_user),
                     db: Session = Depends(get_db)):
