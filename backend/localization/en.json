@@ -91,7 +91,7 @@
   "auth.usernamePlaceholder": "Your username",
   "auth.passwordHint": "At least 8 characters",
   "auth.email": "Email",
-  "auth.emailOrUsername": "Email or previous username",
+  "auth.emailOrUsername": "Email",
   "auth.displayName": "Display name",
   "auth.forgotPassword": "Forgot password?",
   "auth.resetPassword": "Reset password",
