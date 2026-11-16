@@ -165,6 +165,36 @@ test('new accounts send the selected UI language to PostgreSQL at registration',
   assert.match(source, /this\.locale\.load\(account\.ui_language \|\| 'en'\)/);
 });
 
+test('successful registration displays a localized confirmation with the account email', () => {
+  assert.match(source, /if \(isRegister && newAccount\.email\) \{/);
+  assert.match(source, /titleText: this\.locale\.t\('auth\.registrationEmailSentTitle'\)/);
+  assert.match(source, /this\.locale\.format\('auth\.registrationEmailSentBody', \{ email: newAccount\.email \}\)/);
+  assert.match(source, /confirmButtonText: this\.locale\.t\('auth\.gotIt'\)/);
+  for (const key of ['auth.registrationEmailSentTitle', 'auth.registrationEmailSentBody', 'auth.gotIt']) {
+    assert.ok(english[key], key);
+  }
+  assert.match(english['auth.registrationEmailSentBody'], /\{\{email\}\}/);
+});
+
+test('verification gate gives instructions and directs resend and correction to the profile', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const start = template.indexOf('class="setup email-verification-gate"');
+  const end = template.indexOf('</section>', start);
+  const gate = template.slice(start, end);
+  assert.ok(start > 0 && end > start, 'email verification gate exists');
+  assert.doesNotMatch(gate, /<button|claimAccountEmail\(\)/);
+  assert.match(gate, /locale\.t\('game\.verifyEmailHeading'\)/);
+  assert.match(gate, /locale\.t\('game\.verifyEmailSentTo'\)/);
+  assert.match(gate, /\{\{ account\?\.email \}\}/);
+  assert.match(gate, /locale\.t\('game\.verifyEmailInstructions'\)/);
+  assert.match(gate, /locale\.format\('game\.verifyEmailProfileHelp', \{ action: locale\.t\('auth\.verifyEmail'\) \}\)/);
+  for (const key of ['game.verifyEmailHeading', 'game.verifyEmailSentTo',
+                     'game.verifyEmailInstructions', 'game.verifyEmailProfileHelp']) {
+    assert.ok(english[key], key);
+  }
+  assert.match(english['game.verifyEmailProfileHelp'], /\{\{action\}\}/);
+});
+
 test('password length hint is only used when registering', () => {
   assert.match(source, /passwordInput\.placeholder = this\.locale\.t\('auth\.passwordHint'\)/);
   assert.match(source, /if \(isRegister\) \{/);
