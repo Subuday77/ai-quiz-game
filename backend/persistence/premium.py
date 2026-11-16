@@ -170,7 +170,10 @@ async def membership_webhook(request: Request, db: Session = Depends(get_db)):
 
     occurred = datetime.fromtimestamp(timestamp, tz=timezone.utc)
     period_end = datetime.fromtimestamp(until, tz=timezone.utc)
-    if row is not None and occurred <= row.last_event_created:
+    if row is not None and occurred <= (
+        row.last_event_created if row.last_event_created.tzinfo is not None
+        else row.last_event_created.replace(tzinfo=timezone.utc)
+    ):
         db.commit()
         return {"accepted": True, "applied": False}
     cancelled = event_type == "membership.cancelled" or data.get("status") == "canceled"
