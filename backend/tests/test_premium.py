@@ -95,6 +95,11 @@ class PremiumTests(unittest.TestCase):
         self.assertEqual(self.send_event(event_id=102, level=12).status_code, 200)
         self.assertEqual(self.send_event(event_id=103, email="stranger@example.com").status_code, 200)
         self.assertFalse(self.client.get("/api/v2/premium").json()["active"])
+        # BMC test events always use event_id 1: they must never consume
+        # a real live event idempotency slot.
+        real = self.send_event(event_id=101)
+        self.assertEqual(real.status_code, 200, real.text)
+        self.assertTrue(self.client.get("/api/v2/premium").json()["active"])
 
     def test_membership_grants_and_retries_do_not_duplicate(self):
         initial = self.client.get("/api/v2/appeals/allowance").json()
