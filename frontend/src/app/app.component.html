@@ -37,13 +37,9 @@
                 {{ locale.t(player.email ? 'auth.verifyEmail' : 'auth.claimEmail') }}
               </button>
               <button class="account-button premium-account-button" type="button"
-                      (click)="openPremium()" [disabled]="!donationUrl || (!premium?.active && !premium?.checkout_ready)"
-                      [title]="locale.t('premium.sameEmail')">
-                ✦ {{ locale.t(premium?.active ? 'premium.active' : 'premium.join') }}
+                      (click)="openPremium()" [disabled]="!donationUrl || (!premium?.active && !premium?.checkout_ready)">
+                <span aria-hidden="true">✦</span> {{ locale.t(premium?.active ? 'premium.active' : 'premium.join') }}
               </button>
-              <small class="premium-email-note" *ngIf="!premium?.active">
-                {{ locale.t('premium.sameEmail') }}
-              </small>
               <button class="account-button" type="button"
                       (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
                 {{ locale.t('appeals.myComplaints') }}
@@ -65,6 +61,38 @@
       </ng-container>
     </div>
   </header>
+
+  <div class="premium-dialog-backdrop" *ngIf="premiumDialogOpen" (click)="closePremium()">
+    <section class="premium-dialog" role="dialog" aria-modal="true"
+             [attr.aria-label]="locale.t('premium.dialogTitle')" (click)="$event.stopPropagation()">
+      <button class="premium-dialog-close" type="button" (click)="closePremium()"
+              [attr.aria-label]="locale.t('premium.close')">×</button>
+      <div class="premium-dialog-emblem" aria-hidden="true">✦</div>
+      <p class="premium-dialog-eyebrow">AI Quiz Game</p>
+      <h2>{{ locale.t(premium?.active ? 'premium.active' : 'premium.dialogTitle') }}</h2>
+      <p class="premium-dialog-intro">{{ locale.t(premium?.active ? 'premium.activeDescription' : 'premium.dialogIntro') }}</p>
+      <ng-container *ngIf="!premium?.active">
+        <div class="premium-dialog-email">
+          <span class="premium-dialog-email-label">{{ locale.t('premium.verifiedEmail') }}</span>
+          <strong *ngIf="account?.email_verified && account?.email; else premiumEmailMissing"
+                  class="premium-dialog-email-value" dir="ltr">{{ account?.email }}</strong>
+          <ng-template #premiumEmailMissing>
+            <span class="premium-dialog-email-warning">{{ locale.t('premium.emailNotVerified') }}</span>
+          </ng-template>
+        </div>
+        <p class="premium-dialog-note">{{ locale.t('premium.membershipOnly') }}</p>
+      </ng-container>
+      <div class="premium-dialog-actions">
+        <button type="button" class="premium-dialog-secondary" (click)="closePremium()">
+          {{ locale.t('auth.cancel') }}
+        </button>
+        <button *ngIf="!premium?.active" type="button" class="premium-dialog-primary"
+                (click)="confirmPremium()" [disabled]="!account?.email_verified || !account?.email || !donationUrl">
+          {{ locale.t('premium.continue') }} <span aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </section>
+  </div>
 
   <section class="star-dashboard" aria-label="Star rewards">
     <div class="star-panel">
