@@ -1424,6 +1424,18 @@ test('setup and answer requests have timeouts without automatic POST retries', (
   }
 });
 
+test('email-first sign-in accepts only email, without a username option', () => {
+  const start = source.indexOf('async openAuthDialog(mode: AuthMode)');
+  const end = source.indexOf('private async requestPasswordReset()', start);
+  assert.ok(start >= 0 && end > start);
+  const dialog = source.slice(start, end);
+  assert.match(dialog, /label\('quiz-auth-email-label', 'auth.email'\)/);
+  assert.match(dialog, /EMAIL_PATTERN\.test\(identifier\)/);
+  assert.match(dialog, /'\/api\/auth\/email\/login'/);
+  assert.doesNotMatch(dialog, /'\/api\/auth\/login'/);
+  assert.doesNotMatch(dialog, /emailOrUsername/);
+});
+
 test('template wires login, PostgreSQL rewards and question retries', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(template, /openAuthDialog\('login'\)/);

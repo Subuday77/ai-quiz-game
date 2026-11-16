@@ -1436,7 +1436,7 @@ export class AppComponent implements OnInit, OnDestroy {
             const element = popup?.querySelector<HTMLElement>('#' + id);
             if (element) element.textContent = this.locale.t(key);
           };
-          label('quiz-auth-email-label', isRegister ? 'auth.email' : 'auth.emailOrUsername');
+          label('quiz-auth-email-label', 'auth.email');
           label('quiz-display-name-label', 'auth.displayName');
           label('quiz-auth-password-label', 'auth.password');
           label('quiz-auth-confirm-label', 'auth.confirm');
@@ -1462,7 +1462,7 @@ export class AppComponent implements OnInit, OnDestroy {
           const display_name = value('quiz-display-name');
           const password = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-password')?.value || '';
           const confirm = Swal.getPopup()?.querySelector<HTMLInputElement>('#quiz-auth-confirm')?.value || '';
-          if ((isRegister && (!display_name || !EMAIL_PATTERN.test(identifier))) || !identifier) {
+          if (!EMAIL_PATTERN.test(identifier) || (isRegister && !display_name)) {
             Swal.showValidationMessage(this.locale.t('auth.invalidEmailName'));
             return false;
           }
@@ -1471,10 +1471,9 @@ export class AppComponent implements OnInit, OnDestroy {
             return false;
           }
           try {
-            const url = isRegister ? '/api/auth/email/register'
-              : (identifier.includes('@') ? '/api/auth/email/login' : '/api/auth/login');
+            const url = isRegister ? '/api/auth/email/register' : '/api/auth/email/login';
             const payload = isRegister ? { email: identifier, display_name, password }
-              : (identifier.includes('@') ? { email: identifier, password } : { username: identifier, password });
+              : { email: identifier, password };
             return await firstValueFrom(this.http.post<Account>(url, payload).pipe(timeout(20000)));
           } catch (error: unknown) {
             const message = error instanceof HttpErrorResponse && error.status === 409
@@ -1612,24 +1611,28 @@ export class AppComponent implements OnInit, OnDestroy {
     const { default: Swal } = await import('sweetalert2');
     if (verification) {
       try {
-        await firstValueFrom(this.http.post('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
-        // The emailed link may be opened after a full page reload, before
-        // the initial /me request finishes. Refresh the authoritative status
-        // so game access unlocks immediately in the current browser.
+        const verified = await firstValueFrom(this.http.post<{
+          message: string; user_id: string; email: string;
+        }>('/api/auth/email/verify', { token: verification }).pipe(timeout(15000)));
+        // An emailed link proves mailbox ownership, but never authenticates or
+        // switches the existing session in a different browser.
+        let currentAccount: Account | null = null;
         try {
-          const refreshed = await firstValueFrom(
+          currentAccount = await firstValueFrom(
             this.http.get<Account>('/api/auth/me').pipe(timeout(10000))
           );
-          this.signedIn(refreshed);
+          this.signedIn(currentAccount);
         } catch {
-          // Opening the link in another browser may have no session cookie;
-          // the user can sign in normally with the now-verified account.
-          if (this.account) {
-            this.account.email_verified = true;
-            this.restoreActiveGame();
-          }
+          // The link can be opened without being signed in.
         }
-        await Swal.fire({ titleText: this.locale.t('auth.emailVerified'), icon: 'success', background: '#1b1e3e', color: '#f1f3ff' });
+        const sameAccount = currentAccount?.id === verified.user_id;
+        await Swal.fire({
+          titleText: this.locale.t('auth.emailVerified'),
+          text: sameAccount
+            ? this.locale.format('auth.emailVerifiedSameAccount', { email: verified.email })
+            : this.locale.format('auth.emailVerifiedOtherBrowser', { email: verified.email }),
+          icon: 'success', background: '#1b1e3e', color: '#f1f3ff',
+        });
       } catch { await Swal.fire({ titleText: this.locale.t('auth.verificationInvalid'),
                                   icon: 'error', background: '#1b1e3e', color: '#f1f3ff' }); }
     }

@@ -91,6 +91,36 @@ class EmailAccountFlowTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v2/games/active").status_code, 200)
         self.assertEqual(self.client.post("/api/auth/email/resend", json={}).status_code, 409)
 
+    def test_verify_link_in_other_players_browser_does_not_switch_session(self):
+        created = self.register("first@example.com")
+        self.assertEqual(created.status_code, 201, created.text)
+        first_id = created.json()["id"]
+        verify_token = self.sent[-1][1]
+
+        other_browser = TestClient(app)
+        self.addCleanup(other_browser.close)
+        other = other_browser.post("/api/auth/register", json={
+            "username": "OtherPlayer", "password": "other-player-password-123",
+        })
+        self.assertEqual(other.status_code, 201, other.text)
+        other_id = other.json()["id"]
+
+        confirmed = other_browser.post("/api/auth/email/verify", json={
+            "token": verify_token,
+        })
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(confirmed.json()["user_id"], first_id)
+        self.assertEqual(confirmed.json()["email"], "first@example.com")
+        # Mailbox confirmation never changes who is signed into this browser.
+        current = other_browser.get("/api/auth/me")
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["id"], other_id)
+        # The original browser keeps its own session and is now verified.
+        original = self.client.get("/api/auth/me")
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.json()["id"], first_id)
+        self.assertTrue(original.json()["email_verified"])
+
     def test_verify_and_reset_revoke_sessions(self):
         first = self.register("first@example.com")
         self.assertEqual(first.status_code, 201, first.text)
