@@ -1535,7 +1535,21 @@ export class AppComponent implements OnInit, OnDestroy {
           }
         },
       });
-      if (result.isConfirmed && result.value) this.signedIn(result.value as Account);
+      if (result.isConfirmed && result.value) {
+        const newAccount = result.value as Account;
+        this.signedIn(newAccount);
+        if (isRegister && newAccount.email) {
+          await Swal.fire({
+            titleText: this.locale.t('auth.registrationEmailSentTitle'),
+            text: this.locale.format('auth.registrationEmailSentBody', { email: newAccount.email }),
+            icon: 'success',
+            width: 420,
+            confirmButtonText: this.locale.t('auth.gotIt'),
+            confirmButtonColor: '#8170d8',
+            background: '#1b1e3e', color: '#f1f3ff',
+          });
+        }
+      }
     } catch {
       this.error = 'auth.modalFailed';
     } finally {
