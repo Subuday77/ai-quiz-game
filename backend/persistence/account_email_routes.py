@@ -74,8 +74,16 @@ def normalized_name(raw: str) -> str:
 
 
 def mail_configured() -> bool:
-    return bool(os.environ.get("AUTH_SMTP_HOST") and os.environ.get("AUTH_FROM_EMAIL")
-                and os.environ.get("AUTH_PUBLIC_URL"))
+    try:
+        port = int(os.environ.get("AUTH_SMTP_PORT", "587"))
+    except ValueError:
+        return False
+    return bool(port in (465, 587, 2525)
+                and os.environ.get("AUTH_SMTP_HOST")
+                and os.environ.get("AUTH_FROM_EMAIL")
+                and os.environ.get("AUTH_PUBLIC_URL")
+                and (not os.environ.get("AUTH_SMTP_USERNAME")
+                     or os.environ.get("AUTH_SMTP_PASSWORD")))
 
 
 def send_account_email(recipient: str, token: str, *, purpose: str):
