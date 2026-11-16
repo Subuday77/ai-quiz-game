@@ -37,9 +37,13 @@
                 {{ locale.t(player.email ? 'auth.verifyEmail' : 'auth.claimEmail') }}
               </button>
               <button class="account-button premium-account-button" type="button"
-                      (click)="openPremium()" [disabled]="!donationUrl">
+                      (click)="openPremium()" [disabled]="!donationUrl"
+                      [title]="locale.t('premium.sameEmail')">
                 ✦ {{ locale.t(premium?.active ? 'premium.active' : 'premium.join') }}
               </button>
+              <small class="premium-email-note" *ngIf="!premium?.active">
+                {{ locale.t('premium.sameEmail') }}
+              </small>
               <button class="account-button" type="button"
                       (click)="openAppealHistory()" [disabled]="appealBusy || authBusy">
                 {{ locale.t('appeals.myComplaints') }}
