@@ -92,7 +92,12 @@ Frontend is still Angular and runs separately in VS Code:
 ## QA only: additional free complaint filings for a test account
 
 The normal policy remains **5 free filings per calendar month (UTC)**, plus
-a star deposit for every filing. If more live Judge tests are needed,
+a star deposit for every filing. **Upheld appeals do not consume the monthly
+free allowance and do not advance the next paid-filing fee tier.** A complaint
+counts while pending, retrying, rejected or technically unresolved; when the
+Judge upholds it, the quota and the future fee step are recalculated from the
+remaining non-upheld filings. The original paid filing fee stays
+nonrefundable; no complaint or wallet history is deleted. If more live Judge tests are needed,
 use account-scoped, non-transferable **extra free filing credits**, with
 an explicit local-only environment opt-in. This does not delete existing
 appeals, reset adjudication history, refund old deposits or touch the wallet.
