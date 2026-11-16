@@ -29,18 +29,21 @@ verified. The coffee donation button remains separate and grants no rewards.
 1. Back up the PostgreSQL volume without touching the existing users and run
    `docker compose run --rm backend python -m alembic upgrade head`
    from the project root. Only new Premium tables are created.
-2. In the **private** Quiz Compose `.env`, set:
-   ```dotenv
-   BMC_WEBHOOK_SIGNING_SECRET=<the signing secret copied from the BMC webhook>
-   BMC_PREMIUM_LEVEL_ID=<numeric membership_level_id from a signed event preview>
-   ```
-   Do not paste the secret into chat, GitHub, frontend code or logs.
-3. Buy Me a Coffee creator dashboard → Integrations → New webhook:
+2. Buy Me a Coffee creator dashboard → Integrations → New webhook:
    - URL: `https://squizthebot.com/api/v2/premium/webhook`
    - Events: `membership.started`, `membership.updated`,
      `membership.cancelled`, `membership.paused`.
-   - Use the **Premium account** membership level; do not map general
-     recurring donations or individual coffees to Premium.
+   - Use the **Premium account** membership level, not general donations.
+   - Copy the webhook signing secret from this webhook's detail page.
+     Find the numeric `membership_level_id` in the signed event preview.
+3. In the **private** Quiz Compose `.env`, set:
+   ```dotenv
+   BMC_WEBHOOK_SIGNING_SECRET=<the signing secret copied from the BMC webhook>
+   BMC_PREMIUM_LEVEL_ID=<numeric Premium membership_level_id>
+   ```
+   Do not paste the secret into chat, GitHub, frontend code or logs.
+   **Keep the new webhook disabled** until the server has been restarted
+   with those settings (otherwise repeated 404/503 deliveries may disable it).
 4. Recreate only Quiz backend and web after merging/deploying:
    `docker compose up -d --build backend web`.
    Check `GET /api/health`. Never run `docker compose down -v`.
