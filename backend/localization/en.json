@@ -114,6 +114,7 @@
   "auth.emailTaken": "This email is already registered.",
   "auth.emailDeliveryUnavailable": "Email delivery is not configured yet.",
   "auth.invalidEmailName": "Enter a valid email and display name.",
+  "auth.invalidEmail": "Enter a valid email address.",
   "auth.displayNameInvalid": "Enter a display name (up to 80 characters).",
   "auth.emailClaimUnavailable": "Email unavailable or delivery not configured.",
   "auth.changeUnverifiedEmail": "Correct email address",
