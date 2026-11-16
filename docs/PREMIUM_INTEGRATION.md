@@ -6,11 +6,11 @@ The signed membership webhook and game entitlements are implemented in this bran
 **Do not enable checkout before migrating and configuring the webhook.**
 The Bronze Star Shop is implemented but OFF by default. A real checkout is not
 deployed or accepting money until five BMC Extras, their exact IDs and URLs,
-a signed Shop webhook, and a Premium 20% BMC discount code are configured.
-A BMC coupon is not bound to an AI Quiz account. Signed receipts at the
-approved discounted price are honoured for any verified purchaser to avoid
-taking money without delivering stars, even when a code is shared. Verify
-this business limitation before enabling payments. Read docs/BRONZE_STAR_SHOP.md.
+a signed Shop webhook, and the **Special price for members** field set
+to 20% off on each Shop item. BMC automatically applies this member price
+for buyers it recognizes as members; there is no coupon code.
+The game delivers confirmed purchases at exactly either the regular
+or BMC member price. Read docs/BRONZE_STAR_SHOP.md.
 Do not advertise Shop purchasing as ready until the signed purchase/refund
 webhooks and a controlled real order have been verified. The coffee donation button remains separate and grants no rewards.
 
@@ -26,7 +26,8 @@ webhooks and a controlled real order have been verified. The coffee donation but
 - Intended 20% reduction on purchased Bronze packs, implemented in
   `discounted_price_cents()` for a server-computed Shop quote. The Shop
   catalog and signed webhook endpoints are staged and disabled by default.
-  A real BMC checkout requires the owner's verified Shop Extra and code setup.
+  A real BMC checkout requires the owner's verified Shop Extras and
+  configured regular and member prices.
 
 ## Deploy (VPS)
 
