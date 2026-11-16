@@ -160,6 +160,11 @@ test('lifetime count includes only correct answers, not incorrect attempts', () 
   assert.equal(app.answeredQuestions, undefined);
 });
 
+test('new accounts send the selected UI language to PostgreSQL at registration', () => {
+  assert.match(source, /const payload = isRegister \? \{ email: identifier, display_name, password,\s*ui_language: this\.locale\.code \}/);
+  assert.match(source, /this\.locale\.load\(account\.ui_language \|\| 'en'\)/);
+});
+
 test('password length hint is only used when registering', () => {
   assert.match(source, /passwordInput\.placeholder = this\.locale\.t\('auth\.passwordHint'\)/);
   assert.match(source, /if \(isRegister\) \{/);
