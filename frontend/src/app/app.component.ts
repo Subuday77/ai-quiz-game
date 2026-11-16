@@ -53,7 +53,7 @@ interface StarShopPackage {
 }
 interface StarShopCatalog {
   ready: boolean; configured: boolean; verified_email: string | null;
-  premium: boolean; premium_coupon: string | null;
+  premium: boolean;
   packages: StarShopPackage[];
 }
 interface ProfileStats {
