@@ -54,6 +54,43 @@ class EmailAccountFlowTests(unittest.TestCase):
         self.assertEqual(first.json()["display_name"], second.json()["display_name"])
         self.assertEqual(self.register("FIRST@EXAMPLE.COM").status_code, 409)
 
+    def test_game_blocked_until_email_verified_with_profile_recovery(self):
+        created = self.register("typo@example.com")
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertFalse(created.json()["email_verified"])
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 200)
+        self.assertEqual(self.client.get("/api/v2/games/active").status_code, 403)
+        self.assertEqual(self.client.post("/api/v2/games", json={
+            "language": "English",
+        }).status_code, 403)
+
+        original_token = self.sent[-1][1]
+        resend = self.client.post("/api/auth/email/resend", json={})
+        self.assertEqual(resend.status_code, 200, resend.text)
+        self.assertNotEqual(self.sent[-1][1], original_token)
+        wrong_password = self.client.post("/api/auth/email/replace-unverified", json={
+            "email": "correct@example.com", "current_password": "wrong-password",
+        })
+        self.assertEqual(wrong_password.status_code, 401)
+        corrected = self.client.post("/api/auth/email/replace-unverified", json={
+            "email": "correct@example.com",
+            "current_password": "correct horse battery staple",
+        })
+        self.assertEqual(corrected.status_code, 200, corrected.text)
+        self.assertFalse(corrected.json()["email_verified"])
+        self.assertEqual(self.client.post("/api/auth/email/verify", json={
+            "token": original_token,
+        }).status_code, 400)
+        self.assertEqual(self.client.get("/api/v2/games/active").status_code, 403)
+
+        verified = self.client.post("/api/auth/email/verify", json={
+            "token": self.sent[-1][1],
+        })
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertTrue(self.client.get("/api/auth/me").json()["email_verified"])
+        self.assertEqual(self.client.get("/api/v2/games/active").status_code, 200)
+        self.assertEqual(self.client.post("/api/auth/email/resend", json={}).status_code, 409)
+
     def test_verify_and_reset_revoke_sessions(self):
         first = self.register("first@example.com")
         self.assertEqual(first.status_code, 201, first.text)
