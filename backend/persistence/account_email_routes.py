@@ -164,15 +164,23 @@ def register(payload: EmailRegister, request: Request, response: Response, db: S
     legacy = "u" + user_id.hex[:29]
     user = User(id=user_id, username=legacy, username_key=legacy,
                 display_name=name, email=email)
-    db.add(user)
-    db.add(AuthIdentity(user_id=user_id, provider="password", provider_subject=legacy,
-                        password_hash=HASHER.hash(payload.password)))
-    token = new_token(db, user, "verify_email")
     try:
+        db.add(user)
+        # Persist the parent row before inserting its FK-dependent identity/token.
+        # These models use explicit user_id values rather than ORM relationships,
+        # so a single implicit flush does not guarantee parent-first INSERT order.
+        db.flush()
+        db.add(AuthIdentity(user_id=user_id, provider="password", provider_subject=legacy,
+                            password_hash=HASHER.hash(payload.password)))
+        token = new_token(db, user, "verify_email")
         db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Email already registered") from None
+        constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        if constraint == "uq_users_email":
+            raise HTTPException(status_code=409, detail="Email already registered") from None
+        # Other integrity failures are server bugs, not evidence of a claimed email.
+        raise
     send_account_email(email, token, purpose="verify_email")
     start_session(db, user, response)
     return account_response(user)
