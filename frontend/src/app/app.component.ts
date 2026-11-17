@@ -239,6 +239,17 @@ export function formatAppealHistoryDate(value: string, languageCode: string): st
   }) : '—';
 }
 
+/** The server's monthly quota resets at 00:00 UTC on the first day.
+ *  Never render this date in the viewer's local time zone.
+ */
+export function formatAppealResetDate(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(date).replace(/\//g, '.');
+}
+
 /** Pure function shared by UI and regression tests: no network or state mutation. */
 export function filterAppealHistory(
   records: AppealRecord[], filters: AppealHistoryFilters,
@@ -1176,12 +1187,8 @@ export class AppComponent implements OnInit, OnDestroy {
       // The allowance API already provides the next reset at 00:00 UTC.
       // Format the UTC calendar day, not the player's local day (which may
       // be the previous date in time zones west of Greenwich).
-      const refreshAt = allowance?.refresh_at ? new Date(allowance.refresh_at) : null;
-      const resetDate = refreshAt && Number.isFinite(refreshAt.getTime())
-        ? new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
-          }).format(refreshAt).replace(/\//g, '.')
-        : '';
+      const resetDate = allowance?.refresh_at
+        ? formatAppealResetDate(allowance.refresh_at) : '';
       const resetLabel = resetDate
         ? safe(this.locale.format('appeals.freeReset', { date: resetDate })) : '';
       const historyQuotaHtml =
