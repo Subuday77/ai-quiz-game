@@ -1032,7 +1032,19 @@ export class AppComponent implements OnInit, OnDestroy {
         if (page.length < 100) break;
       }
       if (this.account?.id !== accountId) return;
-      this.refreshAppealAllowance();
+      // Read the allowance again when the history opens, so the displayed
+      // quota reflects recent rulings rather than a cached sidebar value.
+      let allowance = this.appealAllowance;
+      try {
+        const refreshed = await firstValueFrom(this.http.get<AppealAllowance>(
+          '/api/v2/appeals/allowance').pipe(timeout(8000)));
+        if (this.account?.id !== accountId) return;
+        allowance = refreshed;
+        this.appealAllowance = refreshed;
+      } catch {
+        if (this.account?.id !== accountId) return;
+        // History still opens when the allowance endpoint is unavailable.
+      }
       // History may already show an asynchronously settled appeal, while
       // the top-of-page wallet still reflects the earlier deposit debit.
       this.refreshSpendableStars();
@@ -1160,7 +1172,33 @@ export class AppComponent implements OnInit, OnDestroy {
             '</div>' +
           '</div></details>';
       }).join('');
-      const body = filterHtml +
+      const historyQuotaHtml =
+        '<div class="appeal-history-quota">' +
+          (allowance
+            ? '<strong class="appeal-history-quota-value">' +
+                safe(this.locale.format('appeals.freeQuota', {
+                  remaining: allowance.free_remaining, total: allowance.free_total,
+                })) + '</strong>'
+            : '') +
+          '<button id="appeal-history-rules-open" type="button" ' +
+            'class="appeal-history-rules-open" aria-haspopup="dialog" aria-controls="appeal-history-rules-dialog" ' +
+            'aria-label="' + localized('appeals.rulesTitle') + '" ' +
+            'title="' + localized('appeals.rulesTitle') + '">ⓘ</button>' +
+        '</div>';
+      const rulesHtml = [
+        'appeals.rulesWhen', 'appeals.rulesFree', 'appeals.rulesDeposits',
+        'appeals.rulesJudge', 'appeals.rulesUpheld', 'appeals.rulesRejected',
+        'appeals.rulesTechnical', 'appeals.rulesHistory'
+      ].map(key => '<p>' + localized(key) + '</p>').join('');
+      const rulesDialogHtml =
+        '<dialog id="appeal-history-rules-dialog" class="appeal-history-rules-dialog" ' +
+          'aria-labelledby="appeal-history-rules-title">' +
+          '<h2 id="appeal-history-rules-title">' + localized('appeals.rulesTitle') + '</h2>' +
+          '<div class="appeal-history-rules-copy">' + rulesHtml + '</div>' +
+          '<button id="appeal-history-rules-close" type="button" ' +
+            'class="appeal-history-rules-close">' + localized('helper.close') + '</button>' +
+        '</dialog>';
+      const body = historyQuotaHtml + filterHtml +
         '<div class="appeal-history-meta">' +
           '<p class="appeal-history-count" id="appeal-history-count" role="status" aria-live="polite"></p>' +
           '<button id="appeal-history-reset" class="appeal-history-reset" type="button">' +
@@ -1173,14 +1211,27 @@ export class AppComponent implements OnInit, OnDestroy {
             '<span class="appeal-scroll-chevron"></span>' +
             '<span class="appeal-scroll-chevron"></span>' +
           '</div>' +
-        '</div>';
+        '</div>' + rulesDialogHtml;
 
+      let rulesDialog: HTMLDialogElement | null = null;
       await Swal.fire({
         titleText: this.locale.t('appeals.myComplaints'),
         width: '940px', html: body,
         customClass: { popup: 'quiz-appeal-popup quiz-appeal-history-popup' },
         confirmButtonText: this.locale.t('helper.close'),
+        allowEscapeKey: () => !rulesDialog?.open,
         didOpen: popup => {
+          rulesDialog = popup.querySelector<HTMLDialogElement>('#appeal-history-rules-dialog');
+          const rulesOpen = popup.querySelector<HTMLButtonElement>('#appeal-history-rules-open');
+          const rulesClose = popup.querySelector<HTMLButtonElement>('#appeal-history-rules-close');
+          rulesOpen?.addEventListener('click', () => {
+            if (rulesDialog && !rulesDialog.open) rulesDialog.showModal();
+          });
+          rulesClose?.addEventListener('click', () => rulesDialog?.close());
+          rulesDialog?.addEventListener('click', event => {
+            if (event.target === rulesDialog) rulesDialog.close();
+          });
+          rulesDialog?.addEventListener('close', () => rulesOpen?.focus());
           const list = popup.querySelector<HTMLElement>('#appeal-history-list');
           const search = popup.querySelector<HTMLInputElement>('#appeal-history-search');
           const status = popup.querySelector<HTMLSelectElement>('#appeal-history-status');
@@ -1241,6 +1292,9 @@ export class AppComponent implements OnInit, OnDestroy {
           list.addEventListener('scroll', updateScroll, { passive: true });
           list.addEventListener('toggle', updateScroll, true);
           update();
+        },
+        willClose: () => {
+          if (rulesDialog?.open) rulesDialog.close();
         },
       });
     } catch (error) {
