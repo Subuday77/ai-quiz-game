@@ -2048,7 +2048,12 @@ export class AppComponent implements OnInit, OnDestroy {
         typeof window.matchMedia !== 'function' ||
         !window.matchMedia('(max-width: 1080px)').matches) return;
     window.requestAnimationFrame(() => {
-      if (this.screen === 'question') window.scrollTo(0, 0);
+      // Angular's DOM commit can also be scheduled for the first frame.
+      // Wait one more frame so removing the taller setup view cannot cause
+      // the browser to anchor the viewport down into the stacked sidebar.
+      window.requestAnimationFrame(() => {
+        if (this.screen === 'question') window.scrollTo(0, 0);
+      });
     });
   }
 
