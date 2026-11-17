@@ -1159,33 +1159,34 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   width: 100%;
   min-height: 52px;
 }
+/* Exchange sits centered over the junction of adjacent rows.
+   Two compact pills are side-by-side, with vertical up/down direction arrows. */
 .game-sidebar .star-items-exchange .exchange-pair {
   position: relative;
   z-index: 3;
   box-sizing: border-box;
-  width: 54px;
-  height: 48px;
-  min-height: 48px;
-  margin-block: -28px -27px;
-  margin-inline: -10px 0;
+  height: 26px;
+  min-height: 26px;
+  margin-block: -19px -16px;
+  margin-inline: 51px 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex-wrap: nowrap;
-  align-items: stretch;
-  justify-content: center;
-  gap: 2px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 34px;
   pointer-events: none;
 }
 .game-sidebar .star-items-exchange .exchange-arrow {
   display: inline-flex;
   flex-direction: row;
-  flex: 0 0 23px;
+  flex: 0 0 57px;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  min-width: 54px;
-  min-height: 23px;
-  height: 23px;
+  min-width: 57px;
+  min-height: 26px;
+  height: 26px;
   padding: 2px 5px;
   border: 1px solid #9681d0;
   border-radius: 999px;
