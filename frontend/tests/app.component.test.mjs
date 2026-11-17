@@ -2974,6 +2974,9 @@ test('mobile Start game scrolls to the question only after the two render frames
   const frames = [];
   const scrollCalls = [];
   globalThis.window = {
+    // Account boot checks location asynchronously; preserve its browser contract.
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
     matchMedia: query => ({ matches: query === '(max-width: 1080px)' }),
     requestAnimationFrame: callback => {
       frames.push(callback);
@@ -3009,6 +3012,9 @@ test('desktop navigation and mobile question retry do not force a scroll', () =>
   const original = globalThis.window;
   const frames = [];
   globalThis.window = {
+    // Account boot checks location asynchronously; preserve its browser contract.
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
     matchMedia: query => ({ matches: false }),
     requestAnimationFrame: callback => { frames.push(callback); return 1; },
     scrollTo: () => assert.fail('desktop must not auto-scroll'),
@@ -3041,6 +3047,9 @@ test('mobile scheduled scroll is cancelled logically when leaving question view'
   const frames = [];
   let scrolled = false;
   globalThis.window = {
+    // Account boot checks location asynchronously; preserve its browser contract.
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
     matchMedia: () => ({ matches: true }),
     requestAnimationFrame: callback => { frames.push(callback); return 1; },
     scrollTo: () => { scrolled = true; },
