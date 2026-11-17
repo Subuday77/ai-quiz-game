@@ -452,7 +452,7 @@
                         [disabled]="perksBusy || loading || spendableStars.gold < 10"
                         [attr.title]="locale.t('premium.convertGold')"
                         [attr.aria-label]="locale.t('premium.convertGold')">
-                  <span aria-hidden="true">→</span><small>10:1</small>
+                  <span aria-hidden="true">↓</span><small>10:1</small>
                 </button>
               </div>
               <div class="exchange-pair" [ngClass]="tier.key" *ngIf="tier.key === 'bronze' || tier.key === 'silver'">
@@ -462,14 +462,14 @@
                           [disabled]="!account || perksBusy || loading || spendableStars.bronze < 10"
                           [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })"
                           [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.bronze'), to: '1 ' + locale.t('stars.silver') })">
-                    <span aria-hidden="true">→</span><small>10:1</small>
+                    <span aria-hidden="true">↓</span><small>10:1</small>
                   </button>
                   <button type="button" class="exchange-arrow"
                           (click)="exchangeBetween('silver', 'bronze')"
                           [disabled]="!account || perksBusy || loading || spendableStars.silver < 1"
                           [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })"
                           [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.silver'), to: '10 ' + locale.t('stars.bronze') })">
-                    <span aria-hidden="true">←</span><small>1:10</small>
+                    <span aria-hidden="true">↑</span><small>1:10</small>
                   </button>
                 </ng-container>
                 <ng-container *ngIf="tier.key === 'silver'">
@@ -478,14 +478,14 @@
                           [disabled]="!account || perksBusy || loading || spendableStars.silver < 10"
                           [attr.aria-label]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })"
                           [attr.title]="locale.format('perks.exchangeTip', { from: '10 ' + locale.t('stars.silver'), to: '1 ' + locale.t('stars.gold') })">
-                    <span aria-hidden="true">→</span><small>10:1</small>
+                    <span aria-hidden="true">↓</span><small>10:1</small>
                   </button>
                   <button type="button" class="exchange-arrow"
                           (click)="exchangeBetween('gold', 'silver')"
                           [disabled]="!account || perksBusy || loading || spendableStars.gold < 1"
                           [attr.aria-label]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })"
                           [attr.title]="locale.format('perks.exchangeTip', { from: '1 ' + locale.t('stars.gold'), to: '10 ' + locale.t('stars.silver') })">
-                    <span aria-hidden="true">←</span><small>1:10</small>
+                    <span aria-hidden="true">↑</span><small>1:10</small>
                   </button>
                 </ng-container>
               </div>
