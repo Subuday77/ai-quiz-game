@@ -1219,8 +1219,6 @@ export class AppComponent implements OnInit, OnDestroy {
           'aria-labelledby="appeal-history-rules-title">' +
           '<h2 id="appeal-history-rules-title" tabindex="-1" autofocus>' +
             localized('appeals.rulesTitle') + '</h2>' +
-          (resetLabel
-            ? '<p class="appeal-history-rules-reset">' + resetLabel + '</p>' : '') +
           '<div class="appeal-history-rules-copy">' + rulesHtml + '</div>' +
           '<button id="appeal-history-rules-close" type="button" ' +
             'class="appeal-history-rules-close">' + localized('helper.close') + '</button>' +
