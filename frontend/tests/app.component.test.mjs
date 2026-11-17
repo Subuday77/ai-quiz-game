@@ -2952,7 +2952,7 @@ test('monthly appeal reset uses API-supplied UTC midnight, independent of local 
   assert.match(history, /formatAppealResetDate\(allowance\.refresh_at\)/);
   assert.match(history, /'appeals\.freeReset'/);
   assert.match(history, /appeal-history-quota-reset/);
-  assert.match(history, /appeal-history-rules-reset/);
+  assert.doesNotMatch(history, /appeal-history-rules-reset/);
   assert.ok(english['appeals.rulesFree'].includes('calendar month'));
 });
 
