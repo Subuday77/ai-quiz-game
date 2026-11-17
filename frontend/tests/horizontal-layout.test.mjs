@@ -62,7 +62,8 @@ test('both star panels use same-size full-width rows; exchange controls bridge t
   assert.match(styles, /\.game-sidebar \.star-item \{[^}]*width: 100%;[^}]*min-height: 52px;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \{[^}]*display: flex;[^}]*flex-direction: column;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -19px -16px;/s);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*margin-inline: 51px 0;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*width: 100%;[^}]*margin-inline: 0;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*justify-content: center;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*flex-direction: row;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*z-index: 3;/s);
   assert.match(rail, /class="exchange-pair gold"/);
