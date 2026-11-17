@@ -121,9 +121,9 @@ test('history shows backend-provided first-of-month refresh and opens rules at t
   assert.match(component, /refresh_at: string;/);
   assert.match(history, /formatAppealResetDate\(allowance\.refresh_at\)/);
   assert.match(history, /appeal-history-quota-reset/);
-  assert.match(history, /appeal-history-rules-reset/);
+  assert.doesNotMatch(history, /appeal-history-rules-reset/);
   assert.match(history, /id="appeal-history-rules-title" tabindex="-1" autofocus/);
   assert.match(history, /dialog\.scrollTop = 0/);
   assert.match(styles, /\.appeal-history-quota-reset/);
-  assert.match(styles, /\.appeal-history-rules-reset/);
+  assert.doesNotMatch(styles, /\.appeal-history-rules-reset/);
 });
