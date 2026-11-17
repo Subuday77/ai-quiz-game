@@ -1197,6 +1197,19 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   font-weight: 750;
   pointer-events: auto;
 }
+/* The Premium-only Gold → Platinum conversion floats by itself at the
+   exact midpoint between the two ordinary exchange button positions. */
+.game-sidebar .star-items-exchange .exchange-pair.gold {
+  justify-content: center;
+  gap: 0;
+}
+.game-sidebar .star-items-exchange .exchange-pair.gold .exchange-arrow {
+  flex: 0 0 70px;
+  min-width: 70px;
+  margin-inline: auto;
+  border-color: #e9cd83;
+  background: linear-gradient(110deg, #58457e, #65518d);
+}
 .game-sidebar .exchange-arrow span {
   font-size: 15px;
   line-height: 1;
