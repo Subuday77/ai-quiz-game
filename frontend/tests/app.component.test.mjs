@@ -2968,39 +2968,69 @@ test('complaint rules open at the first paragraph with the header focused', () =
 });
 
 
-test('mobile Start game scrolls to the question only after the two render frames', () => {
+test('first, next and retried question generation always scroll to the absolute page top', () => {
   const { app, posts, requests, scheduler } = setup();
   const original = globalThis.window;
   const frames = [];
   const scrollCalls = [];
   globalThis.window = {
-    // Account boot checks location asynchronously; preserve its browser contract.
     location: { search: '', hash: '', pathname: '/' },
     history: { replaceState() {} },
-    matchMedia: query => ({ matches: query === '(max-width: 1080px)' }),
-    requestAnimationFrame: callback => {
-      frames.push(callback);
-      return frames.length;
-    },
+    // The rule is not limited to mobile: desktop and mobile use the same top.
+    matchMedia: () => ({ matches: false }),
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
     scrollTo: (...args) => scrollCalls.push(args),
+  };
+  const flushFrames = () => {
+    while (frames.length) frames.shift()();
+  };
+  const assertAtTop = count => {
+    assert.equal(scrollCalls.length, count);
+    assert.ok(scrollCalls.every(args => args.length === 2 && args[0] === 0 && args[1] === 0));
   };
   try {
     app.gameId = '';
     app.screen = 'setup';
     scheduler.run(() => {
       app.startGame();
-      assert.equal(frames.length, 0, 'do not scroll before game creation');
-      succeed(posts[0], { game_id: 'mobile-start', language: 'English',
+      assertAtTop(0);
+      succeed(posts[0], { game_id: 'started-round', language: 'English',
         phase: 'main', correct_main_answers: 0 });
       assert.equal(app.screen, 'question');
-      assert.equal(frames.length, 1);
-      assert.equal(scrollCalls.length, 0, 'DOM may not be updated yet');
-      frames.shift()();
-      assert.equal(frames.length, 1, 'wait for Angular DOM rendering');
-      assert.equal(scrollCalls.length, 0);
-      frames.shift()();
-      assert.deepEqual(scrollCalls, [[0, 0]], 'show the question instead of the star sidebar');
-      succeed(requests[0]);
+      assertAtTop(1); // Immediately when generating Q1.
+      flushFrames();
+      assertAtTop(2); // After preparation view is rendered.
+      succeed(requests[0]); // Q1 arrives.
+      assertAtTop(3); // Scroll again as the question replaces preparation.
+      flushFrames();
+      assertAtTop(4);
+
+      // Next question, even though the player is no longer on setup.
+      app.screen = 'feedback';
+      app.continue();
+      assert.equal(requests.length, 2);
+      assertAtTop(5);
+      flushFrames();
+      assertAtTop(6);
+      succeed(requests[1], { ...question, number: 2, question_id: 'question-2' });
+      assertAtTop(7);
+      flushFrames();
+      assertAtTop(8);
+
+      // Retry while already on the question view is also an explicit request
+      // and must not preserve the player's former scroll position.
+      app.screen = 'question';
+      app.canRetryQuestion = true;
+      app.loading = false;
+      app.retryQuestion();
+      assert.equal(requests.length, 3);
+      assertAtTop(9);
+      flushFrames();
+      assertAtTop(10);
+      succeed(requests[2], { ...question, number: 3, question_id: 'question-3' });
+      assertAtTop(11);
+      flushFrames();
+      assertAtTop(12);
     });
   } finally {
     if (original === undefined) delete globalThis.window;
@@ -3008,32 +3038,31 @@ test('mobile Start game scrolls to the question only after the two render frames
   }
 });
 
-test('desktop navigation and mobile question retry do not force a scroll', () => {
+test('question scrolling is independent of viewport width and ignores duplicate requests', () => {
+  const { app, requests, scheduler } = setup();
   const original = globalThis.window;
   const frames = [];
+  const scrollCalls = [];
   globalThis.window = {
-    // Account boot checks location asynchronously; preserve its browser contract.
     location: { search: '', hash: '', pathname: '/' },
     history: { replaceState() {} },
-    matchMedia: query => ({ matches: false }),
-    requestAnimationFrame: callback => { frames.push(callback); return 1; },
-    scrollTo: () => assert.fail('desktop must not auto-scroll'),
+    matchMedia: () => ({ matches: true }),
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    scrollTo: (...args) => scrollCalls.push(args),
   };
   try {
-    const { app, requests, scheduler } = setup();
     app.screen = 'feedback';
     scheduler.run(() => {
       app.loadQuestion();
-      assert.equal(frames.length, 0);
+      assert.deepEqual(scrollCalls, [[0, 0]]);
+      app.loadQuestion(); // While loading, do not start another request.
+      assert.equal(requests.length, 1);
+      assert.equal(scrollCalls.length, 1);
+      frames.shift()();
+      frames.shift()();
+      assert.equal(scrollCalls.length, 2);
       succeed(requests[0]);
-    });
-    globalThis.window.matchMedia = () => ({ matches: true });
-    app.screen = 'question';
-    app.loading = false;
-    scheduler.run(() => {
-      app.loadQuestion();
-      assert.equal(frames.length, 0, 'retry in the same view should not scroll');
-      succeed(requests[1]);
+      assert.equal(scrollCalls.length, 3);
     });
   } finally {
     if (original === undefined) delete globalThis.window;
@@ -3058,6 +3087,8 @@ test('mobile scheduled scroll is cancelled logically when leaving question view'
     app.screen = 'setup';
     scheduler.run(() => {
       app.loadQuestion();
+      assert.equal(scrolled, true, 'scroll immediately when question preparation starts');
+      scrolled = false;
       assert.equal(frames.length, 1);
       frames.shift()();
       app.screen = 'setup';
