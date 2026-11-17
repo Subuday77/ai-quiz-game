@@ -112,3 +112,18 @@ test('appeal quota is absent from the star sidebar and kept in complaint history
   assert.match(globalStyles, /\.appeal-history-rules-dialog::backdrop/);
   assert.match(globalStyles, /\.appeal-history-rules-close/);
 });
+
+test('history shows backend-provided first-of-month refresh and opens rules at top', () => {
+  const component = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const history = component.slice(component.indexOf('async openAppealHistory()'),
+    component.indexOf('async openAccountSettings()'));
+  assert.match(component, /refresh_at: string;/);
+  assert.match(history, /formatAppealResetDate\(allowance\.refresh_at\)/);
+  assert.match(history, /appeal-history-quota-reset/);
+  assert.match(history, /appeal-history-rules-reset/);
+  assert.match(history, /id="appeal-history-rules-title" tabindex="-1" autofocus/);
+  assert.match(history, /dialog\.scrollTop = 0/);
+  assert.match(styles, /\.appeal-history-quota-reset/);
+  assert.match(styles, /\.appeal-history-rules-reset/);
+});
