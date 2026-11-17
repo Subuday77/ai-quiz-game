@@ -494,11 +494,6 @@
           <div class="stats-caption" *ngIf="account">
             <span *ngIf="statsLoading">{{ locale.t('stats.loading') }}</span>
             <span *ngIf="!statsLoading && !statsError">{{ locale.format('stats.summary', { games: gamesPlayed, correct: correctAnswers }) }}</span>
-            <span class="appeal-allowance-inline" *ngIf="appealAllowance">
-              {{ locale.format('appeals.freeCount', { count: appealAllowance.free_remaining }) }}
-              <button type="button" class="appeal-info-icon" (click)="openAppealRules()"
-                      [attr.aria-label]="locale.t('appeals.rulesTitle')" [title]="locale.t('appeals.rulesTitle')">ⓘ</button>
-            </span>
             <span class="stats-warning" *ngIf="statsError" role="status">{{ locale.t(statsError) }}</span>
           </div>
         </div>
