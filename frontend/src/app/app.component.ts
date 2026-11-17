@@ -113,6 +113,7 @@ interface HelperReply { text: string; helper: HelperCard; }
 interface AppealAllowance {
   free_remaining: number;
   free_total: number;
+  refresh_at: string;  // UTC start of the next calendar month (from API).
   filed_this_month: number;
   next_filing_fee_bronze: number;
 }
@@ -1172,28 +1173,47 @@ export class AppComponent implements OnInit, OnDestroy {
             '</div>' +
           '</div></details>';
       }).join('');
+      // The allowance API already provides the next reset at 00:00 UTC.
+      // Format the UTC calendar day, not the player's local day (which may
+      // be the previous date in time zones west of Greenwich).
+      const refreshAt = allowance?.refresh_at ? new Date(allowance.refresh_at) : null;
+      const resetDate = refreshAt && Number.isFinite(refreshAt.getTime())
+        ? new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric',
+          }).format(refreshAt).replace(/\//g, '.')
+        : '';
+      const resetLabel = resetDate
+        ? safe(this.locale.format('appeals.freeReset', { date: resetDate })) : '';
       const historyQuotaHtml =
         '<div class="appeal-history-quota">' +
-          (allowance
-            ? '<strong class="appeal-history-quota-value">' +
-                safe(this.locale.format('appeals.freeQuota', {
-                  remaining: allowance.free_remaining, total: allowance.free_total,
-                })) + '</strong>'
-            : '') +
+          '<div class="appeal-history-quota-copy">' +
+            (allowance
+              ? '<strong class="appeal-history-quota-value">' +
+                  safe(this.locale.format('appeals.freeQuota', {
+                    remaining: allowance.free_remaining, total: allowance.free_total,
+                  })) + '</strong>'
+              : '') +
+            (resetLabel
+              ? '<span class="appeal-history-quota-reset">' + resetLabel + '</span>'
+              : '') +
+          '</div>' +
           '<button id="appeal-history-rules-open" type="button" ' +
             'class="appeal-history-rules-open" aria-haspopup="dialog" aria-controls="appeal-history-rules-dialog" ' +
             'aria-label="' + localized('appeals.rulesTitle') + '" ' +
             'title="' + localized('appeals.rulesTitle') + '">ⓘ</button>' +
         '</div>';
       const rulesHtml = [
-        'appeals.rulesWhen', 'appeals.rulesFree', 'appeals.rulesDeposits',
+        'appeals.rulesFree', 'appeals.rulesWhen', 'appeals.rulesDeposits',
         'appeals.rulesJudge', 'appeals.rulesUpheld', 'appeals.rulesRejected',
         'appeals.rulesTechnical', 'appeals.rulesHistory'
       ].map(key => '<p>' + localized(key) + '</p>').join('');
       const rulesDialogHtml =
         '<dialog id="appeal-history-rules-dialog" class="appeal-history-rules-dialog" ' +
           'aria-labelledby="appeal-history-rules-title">' +
-          '<h2 id="appeal-history-rules-title">' + localized('appeals.rulesTitle') + '</h2>' +
+          '<h2 id="appeal-history-rules-title" tabindex="-1" autofocus>' +
+            localized('appeals.rulesTitle') + '</h2>' +
+          (resetLabel
+            ? '<p class="appeal-history-rules-reset">' + resetLabel + '</p>' : '') +
           '<div class="appeal-history-rules-copy">' + rulesHtml + '</div>' +
           '<button id="appeal-history-rules-close" type="button" ' +
             'class="appeal-history-rules-close">' + localized('helper.close') + '</button>' +
@@ -1225,14 +1245,22 @@ export class AppComponent implements OnInit, OnDestroy {
           const rulesOpen = popup.querySelector<HTMLButtonElement>('#appeal-history-rules-open');
           const rulesClose = popup.querySelector<HTMLButtonElement>('#appeal-history-rules-close');
           rulesOpen?.addEventListener('click', () => {
-            if (rulesDialog && !rulesDialog.open) rulesDialog.showModal();
+            const dialog = rulesDialog;
+            if (!dialog || dialog.open) return;
+            dialog.showModal();
+            // Native <dialog> otherwise focuses the last, bottom Close button
+            // and scrolls the entire rules text to its end on opening.
+            dialog.scrollTop = 0;
+            dialog.querySelector<HTMLElement>('#appeal-history-rules-title')
+              ?.focus({ preventScroll: true });
           });
           rulesClose?.addEventListener('click', () => rulesDialog?.close());
           rulesDialog?.addEventListener('click', event => {
             const dialog = rulesDialog;
             if (dialog && event.target === dialog) dialog.close();
           });
-          rulesDialog?.addEventListener('close', () => rulesOpen?.focus());
+          rulesDialog?.addEventListener('close', () =>
+            rulesOpen?.focus({ preventScroll: true }));
           const list = popup.querySelector<HTMLElement>('#appeal-history-list');
           const search = popup.querySelector<HTMLInputElement>('#appeal-history-search');
           const status = popup.querySelector<HTMLSelectElement>('#appeal-history-status');
