@@ -61,9 +61,9 @@ test('both star panels use same-size full-width rows; exchange controls bridge t
   assert.match(styles, /\.game-sidebar \.star-items \{\s*display: flex;\s*flex-direction: column;/);
   assert.match(styles, /\.game-sidebar \.star-item \{[^}]*width: 100%;[^}]*min-height: 52px;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \{[^}]*display: flex;[^}]*flex-direction: column;/s);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -28px -27px;/s);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*margin-inline: -10px 0;/s);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*flex-direction: column;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -19px -16px;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*margin-inline: 51px 0;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*flex-direction: row;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*z-index: 3;/s);
   assert.match(rail, /class="exchange-pair gold"/);
   assert.match(rail, /class="exchange-pair" \[ngClass\]="tier\.key"/);
@@ -72,6 +72,9 @@ test('both star panels use same-size full-width rows; exchange controls bridge t
   assert.match(rail, /exchangeBetween\('silver', 'gold'\)/);
   assert.match(rail, /exchangeBetween\('gold', 'silver'\)/);
   assert.match(rail, /premiumGoldToPlatinum\(\)/);
+  assert.equal((rail.match(/<span aria-hidden="true">↓<\/span>/g) || []).length, 3);
+  assert.equal((rail.match(/<span aria-hidden="true">↑<\/span>/g) || []).length, 2);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*gap: 34px;/s);
 });
 
 test('game stage stretches to sidebar height on wide layouts', () => {
