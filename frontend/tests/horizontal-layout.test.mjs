@@ -61,7 +61,9 @@ test('both star panels use same-size full-width rows; exchange controls bridge t
   assert.match(styles, /\.game-sidebar \.star-items \{\s*display: flex;\s*flex-direction: column;/);
   assert.match(styles, /\.game-sidebar \.star-item \{[^}]*width: 100%;[^}]*min-height: 52px;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \{[^}]*display: flex;[^}]*flex-direction: column;/s);
-  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -19px -16px;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*position: relative;[^}]*margin-block: -28px -27px;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*margin-inline: -10px 0;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*flex-direction: column;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*z-index: 3;/s);
   assert.match(rail, /class="exchange-pair gold"/);
   assert.match(rail, /class="exchange-pair" \[ngClass\]="tier\.key"/);
@@ -85,4 +87,21 @@ test('player-facing locale dictionary does not mention database implementation',
     typeof value === 'string' && /postgresql/i.test(value)
   ));
   assert.doesNotMatch(en['footer.note'], /postgresql/i);
+});
+
+test('appeal quota is absent from the star sidebar and kept in complaint history', () => {
+  assert.doesNotMatch(rail, /appeal-allowance-inline|appeals\.freeCount|openAppealRules\(\)/);
+  const source = readFileSync(join(root, 'src/app/app.component.ts'), 'utf8');
+  const globalStyles = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /\/api\/v2\/appeals\/allowance/);
+  assert.match(history, /'appeals\.freeQuota'/);
+  assert.match(history, /appeal-history-quota/);
+  assert.match(history, /<dialog id="appeal-history-rules-dialog"/);
+  assert.match(history, /rulesDialog\.showModal\(\)/);
+  assert.match(history, /rulesDialog\?\.close\(\)/);
+  assert.match(history, /allowEscapeKey: \(\) => !rulesDialog\?\.open/);
+  assert.match(globalStyles, /\.appeal-history-rules-dialog::backdrop/);
+  assert.match(globalStyles, /\.appeal-history-rules-close/);
 });
