@@ -44,7 +44,7 @@ const compiled = ts.transpileModule(componentSource, { compilerOptions }).output
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
   appealHistoryRefundRows, appealHistoryQuotaRefund,
-  formatAppealHistoryDate } = await import(
+  formatAppealHistoryDate, formatAppealResetDate } = await import(
     pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
@@ -107,7 +107,8 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
         });
       }
       if (url === '/api/v2/appeals/allowance') {
-        return of({ free_remaining: 5, free_total: 5, filed_this_month: 0,
+        return of({ free_remaining: 5, free_total: 5,
+                    refresh_at: '2026-12-01T00:00:00+00:00', filed_this_month: 0,
                     next_filing_fee_bronze: 0 });
       }
       if (url === '/api/v2/games/active') {
@@ -2940,4 +2941,28 @@ test('complaint action stays in the top-right header on both question and feedba
   assert.match(css, /\.card-topline \.appeal-header-button\s*\{/);
   assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
   assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
+});
+
+test('monthly appeal reset uses API-supplied UTC midnight, independent of local time', () => {
+  assert.equal(formatAppealResetDate('2026-12-01T00:00:00+00:00'), '01.12.2026');
+  assert.equal(formatAppealResetDate('2027-01-01T00:00:00Z'), '01.01.2027');
+  assert.equal(formatAppealResetDate('nonsense'), '');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /formatAppealResetDate\(allowance\.refresh_at\)/);
+  assert.match(history, /'appeals\.freeReset'/);
+  assert.match(history, /appeal-history-quota-reset/);
+  assert.match(history, /appeal-history-rules-reset/);
+  assert.ok(english['appeals.rulesFree'].includes('calendar month'));
+});
+
+test('complaint rules open at the first paragraph with the header focused', () => {
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /id="appeal-history-rules-title" tabindex="-1" autofocus/);
+  assert.match(history, /dialog\.showModal\(\)/);
+  assert.match(history, /dialog\.scrollTop = 0/);
+  assert.match(history, /\.focus\(\{ preventScroll: true \}\)/);
+  assert.ok(history.indexOf("'appeals.rulesFree'") < history.indexOf("'appeals.rulesWhen'"),
+    'monthly reset rule must be the first explanatory paragraph');
 });
