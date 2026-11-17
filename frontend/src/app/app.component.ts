@@ -2038,12 +2038,28 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  /** A narrow layout stacks the entire account/star sidebar below gameplay.
+   *  When the pregame controls disappear, mobile scroll anchoring can keep the
+   *  old scroll position at the bottom of that sidebar. Reposition only after
+   *  Angular has rendered the new question/loading view, not before DOM changes.
+   */
+  private scrollToQuestionOnMobile(): void {
+    if (typeof window === 'undefined' ||
+        typeof window.matchMedia !== 'function' ||
+        !window.matchMedia('(max-width: 1080px)').matches) return;
+    window.requestAnimationFrame(() => {
+      if (this.screen === 'question') window.scrollTo(0, 0);
+    });
+  }
+
   loadQuestion(): void {
     if (!this.gameId || this.loading || !this.account) return;
     // An allocated run is already in progress, even if its very first AI
     // question fails. Never leave the pregame controls visible on GET failure.
     // Also discard stale feedback / answer buttons when loading a new slot.
+    const enteringQuestion = this.screen !== 'question';
     this.screen = 'question';
+    if (enteringQuestion) this.scrollToQuestionOnMobile();
     this.current = null;
     this.feedback = null;
     this.currentVote = 0;
