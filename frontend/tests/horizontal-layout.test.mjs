@@ -67,6 +67,9 @@ test('both star panels use same-size full-width rows; exchange controls bridge t
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*flex-direction: row;/s);
   assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair \{[^}]*z-index: 3;/s);
   assert.match(rail, /class="exchange-pair gold"/);
+  assert.match(rail, /tier\.key === 'gold' && premium\?\.active/);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair\.gold \{[^}]*justify-content: center;/s);
+  assert.match(styles, /\.game-sidebar \.star-items-exchange \.exchange-pair\.gold \.exchange-arrow \{[^}]*margin-inline: auto;/s);
   assert.match(rail, /class="exchange-pair" \[ngClass\]="tier\.key"/);
   assert.match(rail, /exchangeBetween\('bronze', 'silver'\)/);
   assert.match(rail, /exchangeBetween\('silver', 'bronze'\)/);
