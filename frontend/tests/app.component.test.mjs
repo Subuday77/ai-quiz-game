@@ -2966,3 +2966,98 @@ test('complaint rules open at the first paragraph with the header focused', () =
   assert.ok(history.indexOf("'appeals.rulesFree'") < history.indexOf("'appeals.rulesWhen'"),
     'monthly reset rule must be the first explanatory paragraph');
 });
+
+
+test('mobile Start game scrolls to the question only after the two render frames', () => {
+  const { app, posts, requests, scheduler } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  const scrollCalls = [];
+  globalThis.window = {
+    matchMedia: query => ({ matches: query === '(max-width: 1080px)' }),
+    requestAnimationFrame: callback => {
+      frames.push(callback);
+      return frames.length;
+    },
+    scrollTo: (...args) => scrollCalls.push(args),
+  };
+  try {
+    app.gameId = '';
+    app.screen = 'setup';
+    scheduler.run(() => {
+      app.startGame();
+      assert.equal(frames.length, 0, 'do not scroll before game creation');
+      succeed(posts[0], { game_id: 'mobile-start', language: 'English',
+        phase: 'main', correct_main_answers: 0 });
+      assert.equal(app.screen, 'question');
+      assert.equal(frames.length, 1);
+      assert.equal(scrollCalls.length, 0, 'DOM may not be updated yet');
+      frames.shift()();
+      assert.equal(frames.length, 1, 'wait for Angular DOM rendering');
+      assert.equal(scrollCalls.length, 0);
+      frames.shift()();
+      assert.deepEqual(scrollCalls, [[0, 0]], 'show the question instead of the star sidebar');
+      succeed(requests[0]);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
+test('desktop navigation and mobile question retry do not force a scroll', () => {
+  const original = globalThis.window;
+  const frames = [];
+  globalThis.window = {
+    matchMedia: query => ({ matches: false }),
+    requestAnimationFrame: callback => { frames.push(callback); return 1; },
+    scrollTo: () => assert.fail('desktop must not auto-scroll'),
+  };
+  try {
+    const { app, requests, scheduler } = setup();
+    app.screen = 'feedback';
+    scheduler.run(() => {
+      app.loadQuestion();
+      assert.equal(frames.length, 0);
+      succeed(requests[0]);
+    });
+    globalThis.window.matchMedia = () => ({ matches: true });
+    app.screen = 'question';
+    app.loading = false;
+    scheduler.run(() => {
+      app.loadQuestion();
+      assert.equal(frames.length, 0, 'retry in the same view should not scroll');
+      succeed(requests[1]);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
+test('mobile scheduled scroll is cancelled logically when leaving question view', () => {
+  const { app, requests, scheduler } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  let scrolled = false;
+  globalThis.window = {
+    matchMedia: () => ({ matches: true }),
+    requestAnimationFrame: callback => { frames.push(callback); return 1; },
+    scrollTo: () => { scrolled = true; },
+  };
+  try {
+    app.screen = 'setup';
+    scheduler.run(() => {
+      app.loadQuestion();
+      assert.equal(frames.length, 1);
+      frames.shift()();
+      app.screen = 'setup';
+      frames.shift()();
+      assert.equal(scrolled, false, 'do not yank the player away from a later screen');
+      succeed(requests[0]);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
