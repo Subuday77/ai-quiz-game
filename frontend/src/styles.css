@@ -647,6 +647,20 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   font-weight: 750;
   font-variant-numeric: tabular-nums;
 }
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .24rem;
+  min-width: 0;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota-reset {
+  color: #c4d9f1;
+  font-size: .85rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
 .swal2-popup.quiz-appeal-history-popup .appeal-history-rules-open {
   box-sizing: border-box;
   display: inline-grid;
@@ -699,6 +713,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   color: #f4eeff;
   font-size: clamp(1.25rem, 3vw, 1.65rem);
   line-height: 1.25;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-dialog .appeal-history-rules-reset {
+  margin: -.2rem 0 1rem;
+  padding: .65rem .8rem;
+  border: 1px solid #7493b28c;
+  border-radius: 9px;
+  background: #2c405ba8;
+  color: #c8ebfa;
+  font-weight: 650;
 }
 .swal2-popup.quiz-appeal-history-popup .appeal-history-rules-dialog p {
   margin: 0 0 1rem;
