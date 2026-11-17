@@ -1229,7 +1229,8 @@ export class AppComponent implements OnInit, OnDestroy {
           });
           rulesClose?.addEventListener('click', () => rulesDialog?.close());
           rulesDialog?.addEventListener('click', event => {
-            if (event.target === rulesDialog) rulesDialog.close();
+            const dialog = rulesDialog;
+            if (dialog && event.target === dialog) dialog.close();
           });
           rulesDialog?.addEventListener('close', () => rulesOpen?.focus());
           const list = popup.querySelector<HTMLElement>('#appeal-history-list');
