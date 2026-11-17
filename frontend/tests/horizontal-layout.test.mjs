@@ -106,7 +106,7 @@ test('appeal quota is absent from the star sidebar and kept in complaint history
   assert.match(history, /'appeals\.freeQuota'/);
   assert.match(history, /appeal-history-quota/);
   assert.match(history, /<dialog id="appeal-history-rules-dialog"/);
-  assert.match(history, /rulesDialog\.showModal\(\)/);
+  assert.match(history, /dialog\.showModal\(\)/);
   assert.match(history, /rulesDialog\?\.close\(\)/);
   assert.match(history, /allowEscapeKey: \(\) => !rulesDialog\?\.open/);
   assert.match(globalStyles, /\.appeal-history-rules-dialog::backdrop/);
