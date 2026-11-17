@@ -2038,19 +2038,16 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  /** A narrow layout stacks the entire account/star sidebar below gameplay.
-   *  When the pregame controls disappear, mobile scroll anchoring can keep the
-   *  old scroll position at the bottom of that sidebar. Reposition only after
-   *  Angular has rendered the new question/loading view, not before DOM changes.
+  /** Every question request starts at the very top of the page, including
+   *  Q1, next questions, the bonus and retries. Repeat after rendering so
+   *  mobile browser scroll anchoring cannot leave the viewport in the sidebar.
    */
-  private scrollToQuestionOnMobile(): void {
-    if (typeof window === 'undefined' ||
-        typeof window.matchMedia !== 'function' ||
-        !window.matchMedia('(max-width: 1080px)').matches) return;
+  private scrollToQuestionTop(): void {
+    if (typeof window === 'undefined') return;
+    if (this.screen !== 'question') return;
+    window.scrollTo(0, 0);
+    if (typeof window.requestAnimationFrame !== 'function') return;
     window.requestAnimationFrame(() => {
-      // Angular's DOM commit can also be scheduled for the first frame.
-      // Wait one more frame so removing the taller setup view cannot cause
-      // the browser to anchor the viewport down into the stacked sidebar.
       window.requestAnimationFrame(() => {
         if (this.screen === 'question') window.scrollTo(0, 0);
       });
@@ -2062,9 +2059,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // An allocated run is already in progress, even if its very first AI
     // question fails. Never leave the pregame controls visible on GET failure.
     // Also discard stale feedback / answer buttons when loading a new slot.
-    const enteringQuestion = this.screen !== 'question';
     this.screen = 'question';
-    if (enteringQuestion) this.scrollToQuestionOnMobile();
     this.current = null;
     this.feedback = null;
     this.currentVote = 0;
@@ -2077,6 +2072,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.error = '';
+    this.scrollToQuestionTop();
     const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
     // Q10–Q16 can try a different vetted category on generation failure.
     const questionTimeoutMs = this.progress >= 9
@@ -2107,6 +2103,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
+        this.scrollToQuestionTop();
         this.loadCategoryInfo();
       },
       error: (error: unknown) => {
