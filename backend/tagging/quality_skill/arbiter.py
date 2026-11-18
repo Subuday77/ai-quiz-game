@@ -1,4 +1,4 @@
-"""Independent Terra arbitration for bonus questions and flagged ordinary items.
+"""Independent single-call Terra arbitration for bonus and flagged questions.
 
 A second *model opinion*, not an external source verification. The arbiter has
 no browsing tool. Unknown facts must yield 'uncertain', never pretend to cite
@@ -121,30 +121,12 @@ def settings() -> tuple[bool, str, float]:
     if not model or len(model) > 130 or any(c.isspace() for c in model):
         raise ValueError("Invalid arbiter model id")
     try:
-        timeout = float(os.getenv("QUIZ_QUALITY_ARBITER_TIMEOUT_SECONDS", "10"))
+        timeout = float(os.getenv("QUIZ_QUALITY_ARBITER_TIMEOUT_SECONDS", "18"))
     except ValueError:
         raise ValueError("Invalid arbiter timeout") from None
     if not math.isfinite(timeout) or not 0 < timeout <= 30:
         raise ValueError("Arbiter timeout must be between 0 and 30 seconds")
     return mode == "on", model, timeout
-
-
-def fallback_settings(primary_model: str) -> tuple[str | None, float]:
-    """A different independent arbiter for transient Q16 provider outages.
-
-    An empty fallback ID disables the rescue. Never call the failing model a
-    second time by mistake, and never accept a candidate without a verdict.
-    """
-    model = os.getenv("QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID", "gpt-6-luna").strip()
-    if len(model) > 130 or any(c.isspace() for c in model):
-        raise ValueError("Invalid fallback arbiter model id")
-    try:
-        timeout = float(os.getenv("QUIZ_QUALITY_ARBITER_FALLBACK_TIMEOUT_SECONDS", "12"))
-    except ValueError:
-        raise ValueError("Invalid fallback arbiter timeout") from None
-    if not math.isfinite(timeout) or not 0 < timeout <= 30:
-        raise ValueError("Fallback arbiter timeout must be between 0 and 30 seconds")
-    return (model if model and model != primary_model else None), timeout
 
 
 def stem_claims_anchored(verdict: ArbitrationVerdict, stem: str) -> bool:
@@ -202,138 +184,107 @@ def arbitrate(question, *, language: str, category: str,
               clock=perf_counter, primary_difficulty: str | None = None,
               mandatory_spatial: list[str] | None = None,
               ) -> tuple[bool, dict | None, str]:
-    """Return (accepted, confidential report, reason).
+    """One independent Terra decision; no sequential second-model request.
 
-    Terra remains the primary independent arbiter for Q16. On a transient
-    transport/provider failure, try a different model on the *same* candidate
-    within the original deadline. Both arbiters failing is still fail-closed.
+    The arbiter has its *own* configured timeout (18s by default). The
+    generator/reviewer provider timeout must not cap Terra. The common
+    generation deadline still wins, and an absent verdict still fails closed.
     """
     enabled, model, configured_timeout = settings()
     bonus = requested_difficulty == 15
     constraints = mandatory_spatial or []
-    # Spatial comparisons are correctness-critical even when generic
-    # arbitration is off. Do not change ordinary question arbitration policy.
     enabled = enabled or bool(constraints)
     flagged = bool(shadow and shadow.get("would_arbitrate"))
     if not enabled or (not bonus and not flagged and not constraints):
         return True, None, "disabled" if not enabled else "not_triggered"
 
-    fallback_model, fallback_timeout = (
-        fallback_settings(model) if bonus else (None, 0.0)
-    )
-    providers = [(model, configured_timeout)]
-    if fallback_model:
-        providers.append((fallback_model, fallback_timeout))
-    for index, (candidate_model, candidate_timeout) in enumerate(providers):
-        remaining = deadline - clock()
-        if remaining <= 0:
-            event("quality_arbitration", outcome="unavailable",
-                  reason="budget_exhausted", bonus=bonus)
-            return False, None, "budget_exhausted"
-        if index > 0:
-            event("quality_arbitration_fallback_started",
-                  model_id=candidate_model, bonus=bonus)
-
-        started = clock()
-        token = provider_timeout.set(min(candidate_timeout, timeout_seconds, remaining))
-        try:
-            # No browser/source tools: independent second-model judgment, not
-            # verifiable external citations. The candidate is unchanged.
-            client = LLMClient("openai", model_id=candidate_model,
-                               structured_output_mode="strict", role="arbiter")
-            with timed_stage("quality_arbitration_request"):
-                response = client.responses.create(
-                    instructions=_ARBITRATION_PROMPT,
-                    input=json.dumps({
-                        "requested_difficulty": requested_difficulty,
-                        "language": language, "category": category,
-                        "question": question.model_dump(exclude={"plausibility"}),
-                        "local_findings": (shadow or {}).get("findings", []),
-                        "mandatory_spatial_constraints": constraints,
-                    }, ensure_ascii=False),
-                    max_output_tokens=2400,
-                    reasoning={"effort": "low"},
-                    temperature=None,
-                    output_contract=OutputContract.ARBITRATION,
-                    request_timeout=lambda: min(
-                        candidate_timeout, timeout_seconds, deadline - clock()
-                    ),
-                )
-            verdict = ArbitrationVerdict.model_validate(
-                json.loads(normalize_output(completed_text(response)))
+    remaining = deadline - clock()
+    if remaining <= 0:
+        event("quality_arbitration", outcome="unavailable",
+              reason="budget_exhausted", bonus=bonus)
+        return False, None, "budget_exhausted"
+    started = clock()
+    # Terra is a separate call with a separate timeout; do NOT min with
+    # timeout_seconds (that value only governs generator and critic).
+    allocated = min(configured_timeout, remaining)
+    token = provider_timeout.set(allocated)
+    try:
+        client = LLMClient("openai", model_id=model,
+                           structured_output_mode="strict", role="arbiter")
+        with timed_stage("quality_arbitration_request"):
+            response = client.responses.create(
+                instructions=_ARBITRATION_PROMPT,
+                input=json.dumps({
+                    "requested_difficulty": requested_difficulty,
+                    "language": language, "category": category,
+                    "question": question.model_dump(exclude={"plausibility"}),
+                    "local_findings": (shadow or {}).get("findings", []),
+                    "mandatory_spatial_constraints": constraints,
+                }, ensure_ascii=False),
+                max_output_tokens=2400,
+                reasoning={"effort": "low"},
+                temperature=None,
+                output_contract=OutputContract.ARBITRATION,
+                request_timeout=lambda: min(configured_timeout, deadline - clock()),
             )
-        except Exception as exc:
-            transient = is_transient(exc)
-            event("quality_arbitration", outcome="unavailable",
-                  error_type=type(exc).__name__, bonus=bonus,
-                  retryable=transient, model_id=candidate_model,
-                  fallback=index > 0)
-            # Configuration/schema errors must not be hidden by another call.
-            # Retrying the same provider wastes tokens during a real outage.
-            if index == 0 and fallback_model and transient and (
-                deadline - clock() > 1.0
-            ):
-                continue
-            return False, None, "unavailable"
-        finally:
-            provider_timeout.reset(token)
-
-        checker_type = "ai_terra_arbiter" if index == 0 else "ai_fallback_arbiter"
-        if not stem_claims_anchored(verdict, question.question):
-            # An unanchored claim is a completed but invalid model verdict,
-            # not an outage. Reject the candidate; do not try another model.
-            event("quality_arbitration", outcome="reject",
-                  reason="invalid_stem_anchor", model_id=candidate_model,
-                  bonus=bonus)
-            invalid_count = sum(
-                1 for item in verdict.stem_claims
-                if not stem_claims_anchored(
-                    verdict.model_copy(update={"stem_claims": [item]}),
-                    question.question)
-            )
-            debug_event("quality_arbitration_anchor_mismatch",
-                        invalid_claim_count=invalid_count, bonus=bonus)
-            return False, {
-                "checker_type": checker_type,
-                "provider": "openai", "model": candidate_model,
-                "contract_version": ARBITRATION_CONTRACT_VERSION,
-                "decision": "reject", "issues": ["invalid_stem_anchor"],
-                "details": verdict.model_dump(mode="json"),
-                "duration_ms": round((clock() - started) * 1000),
-            }, "invalid_stem_anchor"
-        if constraints and not spatial_constraints_covered(verdict, constraints):
-            event("quality_arbitration", outcome="reject",
-                  reason="spatial_constraint_unchecked",
-                  model_id=candidate_model, bonus=bonus,
-                  constraint_count=len(constraints))
-            return False, {
-                "checker_type": checker_type,
-                "provider": "openai", "model": candidate_model,
-                "contract_version": ARBITRATION_CONTRACT_VERSION,
-                "decision": "reject", "issues": ["spatial_constraint_unchecked"],
-                "details": verdict.model_dump(mode="json"),
-                "duration_ms": round((clock() - started) * 1000),
-            }, "spatial_constraint_unchecked"
-
-        allowed, reason = is_suitable(
-            verdict, correct_answer=question.correct_answer, bonus=bonus,
-            primary_difficulty=primary_difficulty,
+        verdict = ArbitrationVerdict.model_validate(
+            json.loads(normalize_output(completed_text(response)))
         )
-        event("quality_arbitration", outcome="accept" if allowed else "reject",
-              reason=reason, model_id=candidate_model, bonus=bonus,
-              fallback=index > 0, duration_ms=elapsed_ms(started),
-              claim_count=len(verdict.stem_claims))
-        debug_event("quality_arbitration_debug", model_id=candidate_model,
-                    result=verdict.model_dump(mode="json"),
-                    reason=reason, accepted=allowed)
-        return allowed, {
-            "checker_type": checker_type,
-            "provider": "openai", "model": candidate_model,
+    except Exception as exc:
+        event("quality_arbitration", outcome="unavailable",
+              error_type=type(exc).__name__, bonus=bonus,
+              retryable=is_transient(exc), model_id=model, fallback=False)
+        return False, None, "unavailable"
+    finally:
+        provider_timeout.reset(token)
+
+    if not stem_claims_anchored(verdict, question.question):
+        event("quality_arbitration", outcome="reject",
+              reason="invalid_stem_anchor", model_id=model, bonus=bonus)
+        invalid_count = sum(
+            1 for item in verdict.stem_claims
+            if not stem_claims_anchored(
+                verdict.model_copy(update={"stem_claims": [item]}),
+                question.question)
+        )
+        debug_event("quality_arbitration_anchor_mismatch",
+                    invalid_claim_count=invalid_count, bonus=bonus)
+        return False, {
+            "checker_type": "ai_terra_arbiter", "provider": "openai", "model": model,
             "contract_version": ARBITRATION_CONTRACT_VERSION,
-            "decision": "accept" if allowed else "reject",
-            "issues": [] if allowed else [reason],
+            "decision": "reject", "issues": ["invalid_stem_anchor"],
             "details": verdict.model_dump(mode="json"),
             "duration_ms": round((clock() - started) * 1000),
-        }, reason
+        }, "invalid_stem_anchor"
+    if constraints and not spatial_constraints_covered(verdict, constraints):
+        event("quality_arbitration", outcome="reject",
+              reason="spatial_constraint_unchecked",
+              model_id=model, bonus=bonus,
+              constraint_count=len(constraints))
+        return False, {
+            "checker_type": "ai_terra_arbiter", "provider": "openai", "model": model,
+            "contract_version": ARBITRATION_CONTRACT_VERSION,
+            "decision": "reject", "issues": ["spatial_constraint_unchecked"],
+            "details": verdict.model_dump(mode="json"),
+            "duration_ms": round((clock() - started) * 1000),
+        }, "spatial_constraint_unchecked"
 
-    return False, None, "unavailable"
+    allowed, reason = is_suitable(
+        verdict, correct_answer=question.correct_answer, bonus=bonus,
+        primary_difficulty=primary_difficulty,
+    )
+    event("quality_arbitration", outcome="accept" if allowed else "reject",
+          reason=reason, model_id=model, bonus=bonus,
+          fallback=False, duration_ms=elapsed_ms(started),
+          claim_count=len(verdict.stem_claims))
+    debug_event("quality_arbitration_debug", model_id=model,
+                result=verdict.model_dump(mode="json"),
+                reason=reason, accepted=allowed)
+    return allowed, {
+        "checker_type": "ai_terra_arbiter", "provider": "openai", "model": model,
+        "contract_version": ARBITRATION_CONTRACT_VERSION,
+        "decision": "accept" if allowed else "reject",
+        "issues": [] if allowed else [reason],
+        "details": verdict.model_dump(mode="json"),
+        "duration_ms": round((clock() - started) * 1000),
+    }, reason
