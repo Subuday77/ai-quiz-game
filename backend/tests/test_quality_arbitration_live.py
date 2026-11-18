@@ -404,7 +404,7 @@ class ArbitrationPolicyTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as failed:
                 generate_valid_question(
                     q.difficulty, "English", "General knowledge",
-                    tag_history=[], tag_context=[], too_easy_reserve=[],
+                    tag_history=[], tag_context=[], editorial_reserve=[],
                 )
         self.assertEqual(failed.exception.status_code, 503)
         self.assertEqual(generator.call_count, 1)
@@ -567,7 +567,7 @@ class ArbitrationPolicyTests(unittest.TestCase):
         ) as review, patch("api.sleep") as sleep:
             result = generate_valid_question(
                 4, "English", "Chemistry",
-                tag_history=[], tag_context=[], too_easy_reserve=[],
+                tag_history=[], tag_context=[], editorial_reserve=[],
             )
         self.assertEqual(result.correct_answer, "C")
         self.assertEqual(gen.call_count, 2)
