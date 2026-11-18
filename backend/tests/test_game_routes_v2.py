@@ -713,13 +713,100 @@ class PersistentGameAPITests(unittest.TestCase):
             run = db.get(GameRun, game_id)
             self.assertIsNone(run.question_generation_token)
             self.assertIsNone(run.question_generation_until)
-        accepted = self.client.get(url)
+        # Neither a passive poll nor an ordinary GET starts another provider
+        # call after the first device's failure.
+        for path in (url + "?wait_only=true", url):
+            follower = self.client.get(path)
+            self.assertEqual(follower.status_code, 503, follower.text)
+            self.assertEqual(follower.json()["detail"]["code"], "question_generation_failed")
+            self.assertEqual(follower.json()["detail"]["reason"], "unavailable")
+        gen.assert_not_called()
+        accepted = self.client.get(url + "?retry_failed=true")
         self.assertEqual(accepted.status_code, 200, accepted.text)
         cached = self.client.get(url)
         self.assertEqual(cached.json(), accepted.json())
         gen.assert_called_once()
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+
+    def test_peer_poll_never_starts_generation_and_shared_failure_is_retryable(self):
+        from fastapi import HTTPException
+        from persistence.game_routes import (
+            _claim_question_generation, _release_question_generation,
+        )
+        user_id = UUID(self.register("SharedFailure"))
+        game_id = UUID(self.start())
+        url = f"/api/v2/games/{game_id}/question"
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            token, cached = _claim_question_generation(db, game_id, user_id)
+            self.assertIsNone(cached)
+            self.assertTrue(token)
+        with patch("api.generate_valid_question") as generator:
+            pending = self.client.get(url + "?wait_only=true")
+            self.assertEqual(pending.status_code, 409, pending.text)
+            self.assertEqual(pending.json()["detail"]["code"], "question_generating")
+            # Another browser cannot override an active lease, even on Retry.
+            concurrent_retry = self.client.get(url + "?retry_failed=true")
+            self.assertEqual(concurrent_retry.status_code, 409)
+            generator.assert_not_called()
+        from persistence.game_routes import _remember_generation_failure
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            _remember_generation_failure(db, game_id, user_id, token,
+                                         HTTPException(status_code=502, detail="AI invalid"))
+            _release_question_generation(db, game_id, user_id, token)
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, game_id).question_generation_error_code, "invalid")
+
+        # Both devices see the exact same public failure and neither silently
+        # creates a new provider call (including a normal unadorned GET).
+        with patch("api.generate_valid_question") as generator:
+            for path in (url, url + "?wait_only=true"):
+                failed = self.client.get(path)
+                self.assertEqual(failed.status_code, 502)
+                self.assertEqual(failed.json()["detail"],
+                                 {"code": "question_generation_failed", "reason": "invalid"})
+            generator.assert_not_called()
+        # After failure an unrelated poll without a lease must also be passive.
+        with patch("api.create_question", return_value=QUESTION) as gen:
+            restored = self.client.get(url + "?retry_failed=true")
+            self.assertEqual(restored.status_code, 200, restored.text)
+            self.assertEqual(gen.call_count, 1)
+            served = self.client.get(url + "?wait_only=true")
+            self.assertEqual(served.status_code, 200, served.text)
+            self.assertEqual(served.json(), restored.json())
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(GameRun, game_id).question_generation_error_code)
+
+    def test_passive_poll_without_generation_does_not_claim_lease(self):
+        self.register("PassivePoll")
+        game_id = UUID(self.start())
+        url = f"/api/v2/games/{game_id}/question"
+        with patch("api.create_question", return_value=QUESTION) as gen:
+            response = self.client.get(url + "?wait_only=true")
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(response.json()["detail"], {"code": "question_not_ready"})
+            gen.assert_not_called()
+        with Session(self.engine) as db:
+            run = db.get(GameRun, game_id)
+            self.assertIsNone(run.question_generation_token)
+            self.assertIsNone(run.question_generation_error_code)
+
+    def test_duplicate_exhaustion_failure_is_shared_as_duplicate_exhausted(self):
+        from fastapi import HTTPException
+        self.register("DuplicateFailure")
+        game_id = UUID(self.start())
+        url = f"/api/v2/games/{game_id}/question"
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail={"code": "duplicate_exhausted"}
+        )):
+            first = self.client.get(url)
+            self.assertEqual(first.status_code, 409)
+            self.assertEqual(first.json()["detail"], {"code": "duplicate_exhausted"})
+        with patch("api.generate_valid_question") as gen:
+            follower = self.client.get(url + "?wait_only=true")
+            self.assertEqual(follower.status_code, 409)
+            self.assertEqual(follower.json()["detail"], {"code": "duplicate_exhausted"})
+            gen.assert_not_called()
 
     def test_terminal_question_has_explicit_stale_round_code(self):
         self.register("StaleDevice")
