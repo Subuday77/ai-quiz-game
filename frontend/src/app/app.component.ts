@@ -2047,18 +2047,18 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  /** Every question request starts at the very top of the page, including
-   *  Q1, next questions, the bonus and retries. Repeat after rendering so
-   *  mobile browser scroll anchoring cannot leave the viewport in the sidebar.
+  /** New questions and answer feedback start at the absolute page top.
+   *  Repeat after rendering so mobile scroll anchoring cannot leave the
+   *  viewport at the bottom of the previous screen. Ignore obsolete frames
+   *  when navigation has already moved to another screen.
    */
-  private scrollToQuestionTop(): void {
-    if (typeof window === 'undefined') return;
-    if (this.screen !== 'question') return;
+  private scrollToScreenTop(expectedScreen: 'question' | 'feedback'): void {
+    if (typeof window === 'undefined' || this.screen !== expectedScreen) return;
     window.scrollTo(0, 0);
     if (typeof window.requestAnimationFrame !== 'function') return;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        if (this.screen === 'question') window.scrollTo(0, 0);
+        if (this.screen === expectedScreen) window.scrollTo(0, 0);
       });
     });
   }
@@ -2091,7 +2091,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.error = '';
-    this.scrollToQuestionTop();
+    this.scrollToScreenTop('question');
     const warning = timer(this.warningMs).subscribe(() => {
       if (currentRequest()) this.longWait = true;
     });
@@ -2135,7 +2135,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
-        this.scrollToQuestionTop();
+        this.scrollToScreenTop('question');
         this.loadCategoryInfo();
         // Another device may have spent or earned stars since our last action.
         // A successfully fetched question is a natural synchronization point.
@@ -2331,6 +2331,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
+        this.scrollToScreenTop('feedback');
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
