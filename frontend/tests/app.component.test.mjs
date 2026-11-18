@@ -2158,12 +2158,48 @@ test('real provider failures keep Retry when the game lease is not active', () =
   }
 });
 
-test('localized peer-generation caption is a status, never an error or Retry', () => {
+test('localized peer-generation caption is dismissible with OK, not a Retry', () => {
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(english['game.questionOnOtherDevice'], /another device/);
-  assert.match(html, /questionOnOtherDevice \? 'game.questionOnOtherDevice' : 'game.loading'/);
+  assert.equal(english['game.questionOnOtherDevice'],
+    'The question is already being generated on another device. Waiting for the result…');
+  assert.equal(english['common.ok'], 'OK');
+  assert.match(html, /questionOnOtherDevice && !peerGenerationAcknowledged \? 'game.questionOnOtherDevice' : 'game.loading'/);
+  assert.match(html, /\*ngIf="questionOnOtherDevice && !peerGenerationAcknowledged"/);
+  assert.match(html, /\(click\)="acknowledgePeerGeneration\(\)"/);
+  assert.match(html, /locale\.t\('common\.ok'\)/);
   assert.match(html, /questionLoading && longWait && !questionOnOtherDevice/);
   assert.match(source, /question_generation_in_progress === true/);
+});
+
+test('OK dismisses peer notice but never cancels automatic polling', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.peerGenerationAcknowledged, false);
+    app.acknowledgePeerGeneration();
+    assert.equal(app.peerGenerationAcknowledged, true);
+    assert.equal(app.canRetryQuestion, false);
+    assert.equal(app.questionLoading, true);
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      assert.equal(app.peerGenerationAcknowledged, true);
+      requests[1].subject.error(new HttpErrorResponse({
+        status: 409, error: { detail: { code: 'question_generating' } },
+      }));
+      assert.equal(app.peerGenerationAcknowledged, true);
+    }, 2001);
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 3);
+      succeed(requests[2], { ...question, question_id: 'found-after-ok' });
+    }, 4001);
+  });
+  assert.equal(app.current.question_id, 'found-after-ok');
+  assert.equal(app.peerGenerationAcknowledged, false);
+  assert.equal(app.questionOnOtherDevice, false);
 });
 
 test('stale desktop game reconciles with another device new run without F5', () => {
