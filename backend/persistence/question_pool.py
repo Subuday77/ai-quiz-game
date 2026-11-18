@@ -204,6 +204,9 @@ def offer_approved_pool_question(
         # by the same user. Acquire locks in the same order as offer_question.
         db.scalar(select(User.id).where(User.id == user_id).with_for_update())
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        claim = db.info.get("quiz_generation_token")
+        if claim is not None and run.question_generation_token != claim:
+            raise GameConflict("Question generation ownership changed")
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
         if (run.status == "bonus" and expected_bonus_topic_index is not None

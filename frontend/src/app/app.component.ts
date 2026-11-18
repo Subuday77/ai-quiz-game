@@ -66,6 +66,7 @@ interface GameInfo {
   main_question_index?: number;
   skipped_questions?: number;
   question_issued?: boolean;
+  question_generation_in_progress?: boolean;
   helper?: HelperCard | null;
   replacement_game_id?: string | null;
   bonus_decision_available?: boolean;
@@ -396,6 +397,7 @@ export class AppComponent implements OnInit, OnDestroy {
   error = '';
   configLoading = true;
   questionLoading = false;
+  questionOnOtherDevice = false;
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
@@ -404,7 +406,12 @@ export class AppComponent implements OnInit, OnDestroy {
   private lateQuestionTimeoutMs = 140000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
+  // Ignore late wallet snapshots when a newer cross-device refresh has started.
+  private spendableStarsVersion = 0;
   private restoreVersion = 0;
+  // Reject late responses from superseded rounds; HTTP cancellations are not a database lock.
+  private questionRequestVersion = 0;
+  private generationPolls = 0;
 
   progress = 0;
   stars: string[] = [];
@@ -1879,7 +1886,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.progress = run.main_question_index ?? run.correct_main_answers;
       this.gameCorrectAnswers = run.correct_main_answers;
       this.skippedQuestions = run.skipped_questions ?? 0;
-      this.currentStars = {
+      // The database owns earned stars, including Q16 and returned deposits.
+      this.currentStars = run.round_stars ? { ...run.round_stars } : {
         bronze: run.correct_main_answers >= 5 ? 1 : 0,
         silver: run.correct_main_answers >= 10 ? 1 : 0,
         gold: run.correct_main_answers >= 15 ? 1 : 0,
@@ -2038,24 +2046,29 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  /** Every question request starts at the very top of the page, including
-   *  Q1, next questions, the bonus and retries. Repeat after rendering so
-   *  mobile browser scroll anchoring cannot leave the viewport in the sidebar.
+  /** New questions and answer feedback start at the absolute page top.
+   *  Repeat after rendering so mobile scroll anchoring cannot leave the
+   *  viewport at the bottom of the previous screen. Ignore obsolete frames
+   *  when navigation has already moved to another screen.
    */
-  private scrollToQuestionTop(): void {
-    if (typeof window === 'undefined') return;
-    if (this.screen !== 'question') return;
+  private scrollToScreenTop(expectedScreen: 'question' | 'feedback'): void {
+    if (typeof window === 'undefined' || this.screen !== expectedScreen) return;
     window.scrollTo(0, 0);
     if (typeof window.requestAnimationFrame !== 'function') return;
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        if (this.screen === 'question') window.scrollTo(0, 0);
+        if (this.screen === expectedScreen) window.scrollTo(0, 0);
       });
     });
   }
 
-  loadQuestion(): void {
+  loadQuestion(waitOnly = false, retryFailed = false): void {
     if (!this.gameId || this.loading || !this.account) return;
+    const requestedGameId = this.gameId;
+    const accountId = this.account.id;
+    const version = ++this.questionRequestVersion;
+    const currentRequest = () => this.questionRequestVersion === version &&
+      this.gameId === requestedGameId && this.account?.id === accountId;
     // An allocated run is already in progress, even if its very first AI
     // question fails. Never leave the pregame controls visible on GET failure.
     // Also discard stale feedback / answer buttons when loading a new slot.
@@ -2067,30 +2080,48 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resumeAvailable = false;
     this.loading = true;
     this.questionLoading = true;
+    // Keep the peer-generation message across the next 2-second poll.
+    if (this.generationPolls === 0) {
+      this.questionOnOtherDevice = false;
+    }
     this.shopOpen = false;
     this.longWait = false;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
     this.error = '';
-    this.scrollToQuestionTop();
-    const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
+    this.scrollToScreenTop('question');
+    const warning = timer(this.warningMs).subscribe(() => {
+      if (currentRequest()) this.longWait = true;
+    });
     // Q10–Q16 can try a different vetted category on generation failure.
     const questionTimeoutMs = this.progress >= 9
       ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
       : this.requestTimeoutMs;
+    let waitingForPeer = false;
+    let checkingPeerStatus = false;
+    const questionUrl = GAME_API + '/' + requestedGameId + '/question'
+      + (waitOnly ? '?wait_only=true' : retryFailed ? '?retry_failed=true' : '');
     this.subscriptions.add(this.http.get<PublicQuestion>(
-      GAME_API + '/' + this.gameId + '/question',
+      questionUrl,
     ).pipe(
       timeout(questionTimeoutMs),
       finalize(() => {
         warning.unsubscribe();
+        if (!currentRequest()) return;
         this.loading = false;
-        this.questionLoading = false;
-        this.generatingNextQuestion = false;
+        // Keep the preparation spinner visible while waiting for the other
+        // device's generation; there must be no empty-screen flicker.
+        if (!waitingForPeer && !checkingPeerStatus) {
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+        }
         this.longWait = false;
       }),
     ).subscribe({
       next: (question) => {
+        if (!currentRequest()) return;
+        this.generationPolls = 0;
+        this.questionOnOtherDevice = false;
         this.current = question;
         this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
@@ -2103,41 +2134,113 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = null;
         this.screen = 'question';
         this.resumeAvailable = false;
-        this.scrollToQuestionTop();
+        this.scrollToScreenTop('question');
         this.loadCategoryInfo();
+        // Another device may have spent or earned stars since our last action.
+        // A successfully fetched question is a natural synchronization point.
+        this.refreshSpendableStars();
       },
       error: (error: unknown) => {
+        if (!currentRequest()) return;
         if (this.isUnauthorized(error)) {
           this.sessionExpired();
           return;
         }
-        this.canRetryQuestion = true;
+        const waitForOtherDevice = (): void => {
+          if (!currentRequest()) return;
+          this.questionOnOtherDevice = true;
+          this.questionLoading = true;
+          this.canRetryQuestion = false;
+          this.error = '';
+          if (++this.generationPolls <= 80) {
+            waitingForPeer = true;
+            // A 409 indicates an existing provider call, not a generation
+            // failure. Poll for its saved attempt without starting another.
+            this.subscriptions.add(timer(2000).subscribe(() => {
+              if (currentRequest() && this.screen === 'question' && !this.loading)
+                this.loadQuestion(true);
+            }));
+          } else {
+            this.questionOnOtherDevice = false;
+            this.questionLoading = false;
+            this.canRetryQuestion = true;
+            this.fail('game.questionTimeout');
+          }
+        };
+        const showRealError = (): void => {
+          if (!currentRequest()) return;
+          this.questionOnOtherDevice = false;
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+          this.canRetryQuestion = true;
+          if (error instanceof HttpErrorResponse && error.status === 409 &&
+              error.error?.detail?.code === 'duplicate_exhausted') {
+            this.duplicateExhausted = true;
+            this.current = null;
+            this.feedback = null;
+            this.screen = 'question';
+            this.fail('game.duplicateExhausted');
+          } else if (error instanceof TimeoutError) {
+            this.fail('game.questionTimeout');
+          } else if (error instanceof HttpErrorResponse && error.status === 502) {
+            this.fail('game.questionInvalid');
+          } else if (error instanceof HttpErrorResponse && error.status === 503) {
+            this.fail('game.questionUnavailable');
+          } else {
+            this.fail('game.questionFailed');
+          }
+        };
         if (error instanceof HttpErrorResponse && error.status === 409 &&
-            error.error?.detail?.code === 'duplicate_exhausted') {
-          // No new question was offered. Keep the server game ID, progress,
-          // and saved resume token intact; hide prior round feedback.
-          this.duplicateExhausted = true;
-          this.current = null;
-          this.feedback = null;
-          this.screen = 'question';
-          this.fail('game.duplicateExhausted');
-        } else if (error instanceof TimeoutError) {
-          this.fail('game.questionTimeout');
-        } else if (error instanceof HttpErrorResponse && error.status === 502) {
-          this.fail('game.questionInvalid');
-        } else if (error instanceof HttpErrorResponse && error.status === 503) {
-          this.fail('game.questionUnavailable');
-        } else {
-          this.fail('game.questionFailed');
+            ['question_generating', 'question_not_ready'].includes(error.error?.detail?.code)) {
+          waitForOtherDevice();
+          return;
         }
+        if (error instanceof HttpErrorResponse &&
+            error.error?.detail?.code === 'question_generation_failed') {
+          // Server persisted the terminal failure: do not start another AI
+          // call until someone explicitly presses Retry.
+          showRealError();
+          return;
+        }
+        if (error instanceof HttpErrorResponse && error.status === 409 &&
+            error.error?.detail?.code !== 'duplicate_exhausted') {
+          // A stale run must reconcile with /active, never Retry the same ID.
+          this.reconcileQuestionConflict(requestedGameId, accountId, version);
+          return;
+        }
+        // Gateways can sometimes replace the structured 409 with a 5xx.
+        // Verify the live lease via the authenticated API before showing a
+        // misleading AI failure; otherwise preserve the actual error.
+        if (error instanceof HttpErrorResponse &&
+            (error.status === 0 || error.status >= 500)) {
+          checkingPeerStatus = true;
+          this.subscriptions.add(this.http.get<GameInfo>(
+            GAME_API + '/' + encodeURIComponent(requestedGameId),
+          ).pipe(timeout(5000)).subscribe({
+            next: state => {
+              checkingPeerStatus = false;
+              if (!currentRequest()) return;
+              if (state.question_generation_in_progress === true) waitForOtherDevice();
+              else showRealError();
+            },
+            error: () => {
+              checkingPeerStatus = false;
+              showRealError();
+            },
+          }));
+          return;
+        }
+        showRealError();
       },
     }));
   }
 
   retryQuestion(): void {
     if (this.canRetryQuestion && !this.loading) {
+      this.generationPolls = 0;
+      this.questionOnOtherDevice = false;
       this.generatingNextQuestion = this.progress > 0;
-      this.loadQuestion();
+      this.loadQuestion(false, true);
     }
   }
 
@@ -2225,6 +2328,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.refreshStats(); // All-time rewards always come from PostgreSQL.
         this.screen = 'feedback';
         this.loading = false;
+        this.scrollToScreenTop('feedback');
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -2695,13 +2799,18 @@ export class AppComponent implements OnInit, OnDestroy {
   private refreshSpendableStars(): void {
     if (!this.account) return;
     const accountId = this.account.id;
+    const version = ++this.spendableStarsVersion;
     this.subscriptions.add(this.http.get<StarCounts>(STARS_API).pipe(
       timeout(10000),
     ).subscribe({
       next: (values) => {
-        if (this.account?.id === accountId) this.spendableStars = values;
+        if (this.account?.id === accountId && version === this.spendableStarsVersion)
+          this.spendableStars = values;
       },
-      error: () => { this.perksError = 'perks.balanceUnavailable'; },
+      error: () => {
+        if (this.account?.id === accountId && version === this.spendableStarsVersion)
+          this.perksError = 'perks.balanceUnavailable';
+      },
     }));
   }
 
@@ -2948,6 +3057,90 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  private reconcileQuestionConflict(expectedGameId: string, accountId: string,
+                                    requestVersion: number): void {
+    const currentRequest = () => this.account?.id === accountId &&
+      this.gameId === expectedGameId && this.questionRequestVersion === requestVersion;
+    this.restoringGame = true;
+    // Do not infer the new game from the stale run. PostgreSQL is authoritative.
+    this.subscriptions.add(this.http.get<GameInfo | null>(GAME_API + '/active').pipe(
+      timeout(10000),
+    ).subscribe({
+      next: active => {
+        if (!currentRequest()) return;
+        if (active) {
+          this.applyQuestionSync(active);
+          return;
+        }
+        // No active game: this device may have missed a finished round.
+        this.subscriptions.add(this.http.get<GameInfo>(
+          GAME_API + '/' + encodeURIComponent(expectedGameId),
+        ).pipe(timeout(10000)).subscribe({
+          next: previous => {
+            if (!currentRequest()) return;
+            this.applyQuestionSync(previous);
+          },
+          error: err => {
+            if (!currentRequest()) return;
+            this.restoringGame = false;
+            if (this.isUnauthorized(err)) this.sessionExpired();
+            else this.fail('game.recoveryFailed');
+          },
+        }));
+      },
+      error: err => {
+        if (!currentRequest()) return;
+        this.restoringGame = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.fail('game.recoveryFailed');
+      },
+    }));
+  }
+
+  private applyQuestionSync(run: GameInfo): void {
+    // Clear stale attempts and outstanding timers before changing the run ID.
+    this.resetGameView();
+    this.restoringGame = false;
+    this.loading = false;
+    this.questionLoading = false;
+    this.gameLanguage = run.language;
+    this.selectedLanguage = run.language;
+    this.progress = run.main_question_index ?? run.correct_main_answers;
+    this.gameCorrectAnswers = run.correct_main_answers;
+    this.skippedQuestions = run.skipped_questions ?? 0;
+    this.currentStars = run.round_stars ? { ...run.round_stars } : emptyStars();
+    this.stars = this.starTiers.filter(t => this.currentStars[t.key] > 0)
+      .map(t => t.key);
+    this.helperCard = run.helper ?? null;
+    this.bonusDecisionAvailable = run.bonus_decision_available === true;
+    this.gameQuestionIssued = run.question_issued === true;
+    this.refreshSpendableStars();
+    this.refreshStats();
+    if (run.phase === 'lost' || run.phase === 'completed') {
+      this.gameId = run.game_id;
+      this.finishedPhase = run.phase;
+      this.screen = 'done';
+      this.forgetActiveGame();
+      this.rememberPendingResults(run.game_id);
+      if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    } else if (run.phase === 'main' || run.phase === 'bonus') {
+      this.rememberActiveGame(run.game_id);
+      if (run.question_issued) {
+        this.resumeCandidate = run;
+        this.resumeAvailable = true;
+        this.resumeRunLanguage = run.language;
+      } else {
+        this.gameId = run.game_id;
+        this.loadCategoryInfo();
+      }
+      this.screen = 'setup';
+    } else {
+      // Abandoned run with no active successor: allow explicit fresh setup.
+      this.forgetActiveGame();
+      this.screen = 'setup';
+    }
+  }
+
   private recoverGameAfterConflict(): void {
     const id = this.gameId;
     if (!id) { this.fail('game.noRound'); return; }
@@ -2987,6 +3180,9 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private resetGameView(): void {
+    ++this.questionRequestVersion; // Any in-flight question or polling timer is obsolete.
+    this.generationPolls = 0;
+    this.questionOnOtherDevice = false;
     this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;

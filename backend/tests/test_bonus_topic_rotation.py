@@ -77,11 +77,12 @@ class BonusTopicRotationTests(unittest.TestCase):
                     run.bonus_topic_index, run.bonus_topic_change_unlocked,
                     db.scalar(select(func.count(QuestionAttempt.id))))
 
-    def failed_generation(self, status=503, client=None):
+    def failed_generation(self, status=503, client=None, retry=False):
         with patch("api.generate_valid_question", side_effect=HTTPException(
             status_code=status, detail="Test generator unavailable",
         )) as gen:
-            failed = (client or self.client).get(self.base + "/question")
+            failed = (client or self.client).get(self.base + "/question" +
+                                                  ("?retry_failed=true" if retry else ""))
         self.assertEqual(failed.status_code, status, failed.text)
         gen.assert_called_once()
         return gen.call_args.args[2]
@@ -100,7 +101,7 @@ class BonusTopicRotationTests(unittest.TestCase):
         self.assertEqual(initial[2], 0)
         visited = []
         for i in range(1, len(QUESTION_CATEGORIES) + 2):
-            generated_for = self.failed_generation(status=502)
+            generated_for = self.failed_generation(status=502, retry=(i > 1))
             visited.append(generated_for)
             self.assertEqual(generated_for, _category_for_round(
                 UUID(self.game_id), 16, i - 1
@@ -131,7 +132,7 @@ class BonusTopicRotationTests(unittest.TestCase):
                 "correct_answer": "B",
             })
             with patch("api.generate_valid_question", return_value=generated) as gen:
-                response = reopened.get(self.base + "/question")
+                response = reopened.get(self.base + "/question?retry_failed=true")
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()["number"], 16)
             self.assertTrue(response.json()["bonus"])

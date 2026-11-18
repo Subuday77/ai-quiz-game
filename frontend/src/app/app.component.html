@@ -187,7 +187,7 @@
 
         <div class="question-generation" *ngIf="screen === 'question' && questionLoading && !current" role="status" aria-live="polite">
           <span class="gear-loader" aria-hidden="true"></span>
-          <span>{{ locale.t('game.loading') }}</span>
+          <span>{{ locale.t(questionOnOtherDevice ? 'game.questionOnOtherDevice' : 'game.loading') }}</span>
         </div>
 
         <div *ngIf="screen === 'question' && current as question" class="question"
@@ -328,7 +328,7 @@
           <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
         </div>
 
-        <p class="intro" role="status" *ngIf="questionLoading && longWait">{{ locale.t('game.longWait') }}</p>
+        <p class="intro" role="status" *ngIf="questionLoading && longWait && !questionOnOtherDevice">{{ locale.t('game.longWait') }}</p>
         <div class="duplicate-recovery" *ngIf="duplicateExhausted" role="alert" aria-live="assertive">
           <p>{{ locale.t('game.duplicateExhausted') }}</p>
           <div class="question-actions">

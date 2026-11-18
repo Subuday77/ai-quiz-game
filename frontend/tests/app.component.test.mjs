@@ -63,8 +63,11 @@ const question = {
 
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
                   signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
-                  activeLookupPending = false, activeLookupPendingOnRetry = false } = {}) {
+                  activeLookupPending = false, activeLookupPendingOnRetry = false,
+                  generationStatus = undefined, starBalances = null,
+                  pendingWallet = false } = {}) {
   const requests = [];
+  const walletRequests = [];
   let activeLookupCount = 0;
   const posts = [];
   const patches = [];
@@ -95,7 +98,12 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
         return of({ ...profile, star_awards: { ...profile.star_awards } });
       }
       if (url === '/api/v2/stars') {
-        return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+        if (pendingWallet) {
+          const subject = new Subject();
+          walletRequests.push({ url, subject });
+          return subject.asObservable();
+        }
+        return of({ bronze: 0, silver: 0, gold: 0, platinum: 0, ...starBalances });
       }
       if (url === '/api/v2/premium') {
         // Premium loads during ngOnInit. It must not sit in the same pending
@@ -118,6 +126,13 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
             !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
           return of(null); // No active game in the default mock database.
         }
+      }
+      if (generationStatus !== undefined &&
+          /^\/api\/v2\/games\/[^/]+$/.test(url) &&
+          url !== '/api/v2/games/active') {
+        // The authenticated read-only game endpoint answers whether the
+        // second device is still generating (no token is exposed).
+        return of({ question_generation_in_progress: generationStatus });
       }
       if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
         return of({
@@ -148,7 +163,7 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
   app.ngOnInit();
   app.gameId = 'existing-game';
   const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
-  return { app, http, requests, posts, patches, scheduler, profile };
+  return { app, http, requests, posts, patches, scheduler, profile, walletRequests };
 }
 
 function succeed(request, value = question) {
@@ -304,7 +319,7 @@ test('45-second timeout clears loading and offers retry without a new game', () 
   scheduler.run(() => {
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, requests[0].url);
+    assert.equal(requests[1].url, requests[0].url + '?retry_failed=true');
     assert.equal(posts.length, 0);
     succeed(requests[1]);
   });
@@ -316,7 +331,7 @@ test('45-second timeout clears loading and offers retry without a new game', () 
 test('failed first generated question shows Retry only, never the setup or exclusions', () => {
   // Regression: POST /games succeeded, but the first GET /question returned 502.
   // The run must remain allocated; a retry is the ONLY ordinary action.
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.gameId = '';
   app.screen = 'setup';
   scheduler.run(() => {
@@ -340,7 +355,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
     assert.equal(posts.length, 1); // No second game created.
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, '/api/v2/games/started-round/question');
+    assert.equal(requests[1].url, '/api/v2/games/started-round/question?retry_failed=true');
     succeed(requests[1], { ...question, number: 1, difficulty: 0 });
   });
   assert.equal(app.screen, 'question');
@@ -355,7 +370,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
 });
 
 test('failed later question discards stale feedback and keeps the original game', () => {
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 8;
   app.current = question;
@@ -380,7 +395,7 @@ test('failed later question discards stale feedback and keeps the original game'
 
 test('backend and connection failures clear loading and allow a retry', () => {
   for (const status of [0, 502, 503]) {
-    const { app, requests, scheduler } = setup();
+    const { app, requests, scheduler } = setup({ generationStatus: false });
     scheduler.run(() => {
       app.loadQuestion();
       requests[0].subject.error(new HttpErrorResponse({ status }));
@@ -420,6 +435,38 @@ test('rapid clicks do not generate parallel questions', () => {
     assert.equal(requests.length, 1);
     succeed(requests[0]);
   });
+});
+
+test('new question refreshes stars spent on another device without F5', () => {
+  const serverWallet = { silver: 46 };
+  const { app, requests, scheduler } = setup({ starBalances: serverWallet });
+  assert.equal(app.spendableStars.silver, 46);
+
+  // Device A spends two silver stars, while device B still displays 46.
+  serverWallet.silver = 44;
+  assert.equal(app.spendableStars.silver, 46);
+  scheduler.run(() => {
+    app.loadQuestion();
+    succeed(requests[0], { ...question, number: 7 });
+  });
+  assert.equal(app.current.number, 7);
+  assert.equal(app.spendableStars.silver, 44,
+    'receiving the next question must reconcile the server wallet');
+});
+
+test('late wallet response cannot overwrite a newer cross-device star balance', () => {
+  const { app, requests, walletRequests } = setup({ pendingWallet: true });
+  assert.equal(walletRequests.length, 1, 'login started the first wallet read');
+
+  // Manual Subject completion is sufficient here; virtual scheduler flushing
+  // can advance 10-second HTTP timeouts before delayed responses are supplied.
+  app.loadQuestion();
+  succeed(requests[0], { ...question, number: 7 });
+  assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
+  succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
+  succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
+  assert.equal(app.spendableStars.silver, 44,
+    'an older response must not resurrect the pre-spend balance');
 });
 
 test('answering uses v2 and refreshes server-authoritative rewards', () => {
@@ -506,7 +553,7 @@ test('next-question button switches to generation label until the response arriv
 
 
 test('failed question hides Next and offers one Retry without losing progress', () => {
-  const { app, requests, scheduler } = setup();
+  const { app, requests, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 10;
   app.feedback = { phase: 'main', correct: true, correct_answer: 'B',
@@ -531,7 +578,7 @@ test('failed question hides Next and offers one Retry without losing progress', 
 });
 
 test('bonus choice is required before issuing Q16; failed loading still permits retry', () => {
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 15;
   app.bonusDecisionAvailable = true;
@@ -1521,7 +1568,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(template, /openAuthDialog\('login'\)/);
   assert.match(template, /openAuthDialog\('register'\)/);
-  assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
+  assert.match(template, /role="status" \*ngIf="questionLoading && longWait && !questionOnOtherDevice"/);
   assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
   assert.match(template, /locale\.t\(feedbackButtonLabelKey\)/);
@@ -2029,7 +2076,7 @@ test('duplicate exhaustion presents a translated recovery panel, retry keeps the
     app.retryQuestion();
     assert.equal(app.duplicateExhausted, false);
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, requests[0].url);
+    assert.equal(requests[1].url, requests[0].url + '?retry_failed=true');
     succeed(requests[1]);
   });
   assert.equal(app.error, '');
@@ -2067,7 +2114,7 @@ test('Back to menu preserves the unfinished game and Resume uses the same ID', (
   assert.equal(posts.length, 0);
 });
 
-test('only the dedicated duplicate_exhausted error triggers the special panel', () => {
+test('only dedicated duplicate_exhausted uses special panel; ordinary 409 reconciles state', () => {
   for (const error of [
     { status: 409, error: { detail: 'Game state changed' } },
     { status: 502, error: { detail: { code: 'different_error' } } },
@@ -2077,11 +2124,231 @@ test('only the dedicated duplicate_exhausted error triggers the special panel', 
     scheduler.run(() => {
       app.loadQuestion();
       requests[0].subject.error(new HttpErrorResponse(error));
+      if (error.status === 409) {
+        // /active is null in this fixture. The old run finished elsewhere.
+        assert.equal(requests[1].url, '/api/v2/games/existing-game');
+        succeed(requests[1], { game_id: 'existing-game', language: 'English',
+          phase: 'lost', correct_main_answers: 0, main_question_index: 1,
+          round_stars: { bronze: 0, silver: 0, gold: 0, platinum: 0 } });
+      }
     });
     assert.equal(app.duplicateExhausted, false);
     assert.notEqual(app.error, 'game.duplicateExhausted');
-    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.canRetryQuestion, error.status !== 409);
+    if (error.status === 409) assert.equal(app.screen, 'done');
   }
+});
+
+test('two devices share a single generation; follower polls until question exists', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.canRetryQuestion, false);
+    assert.equal(app.gameId, 'existing-game');
+    assert.equal(app.screen, 'question');
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.error, '');
+    assert.equal(app.questionLoading, true); // Continuous spinner between polls.
+    assert.equal(requests.length, 1); // Do not trigger a second request instantly.
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[1], { ...question, question_id: 'shared-question' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'shared-question');
+  assert.equal(app.loading, false);
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.questionOnOtherDevice, false);
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('a replaced 502 response is reclassified only when PostgreSQL confirms peer generation', () => {
+  const { app, requests, scheduler } = setup({ generationStatus: true });
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({ status: 502 }));
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.questionLoading, true);
+    assert.equal(app.canRetryQuestion, false);
+    assert.equal(app.error, '');
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[1], { ...question, question_id: 'saved-by-peer' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'saved-by-peer');
+  assert.equal(app.questionOnOtherDevice, false);
+});
+
+test('real provider failures keep Retry when the game lease is not active', () => {
+  for (const status of [0, 502, 503]) {
+    const { app, requests, scheduler } = setup({ generationStatus: false });
+    scheduler.run(() => {
+      app.loadQuestion();
+      requests[0].subject.error(new HttpErrorResponse({ status }));
+    });
+    assert.equal(app.questionOnOtherDevice, false);
+    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.questionLoading, false);
+    assert.ok(app.error);
+  }
+});
+
+test('localized peer-generation caption has no OK button and stays visible while waiting', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.equal(english['game.questionOnOtherDevice'],
+    'The question is already being generated on another device. Waiting for the result…');
+  assert.match(html, /questionOnOtherDevice \? 'game.questionOnOtherDevice' : 'game.loading'/);
+  assert.doesNotMatch(html, /peer-generation-ok|acknowledgePeerGeneration/);
+  assert.doesNotMatch(source, /peerGenerationAcknowledged|acknowledgePeerGeneration/);
+  assert.match(html, /questionLoading && longWait && !questionOnOtherDevice/);
+});
+
+test('follower receives saved provider failure and never launches AI automatically', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.questionLoading, true);
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
+      requests[1].subject.error(new HttpErrorResponse({
+        status: 503, error: { detail: {
+          code: 'question_generation_failed', reason: 'unavailable',
+        } },
+      }));
+    }, 2001);
+  });
+  assert.equal(requests.length, 2, 'a failed generation cannot launch another AI attempt');
+  assert.equal(app.questionOnOtherDevice, false);
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.canRetryQuestion, true);
+  assert.equal(app.error, 'game.questionUnavailable');
+});
+
+test('either device can manually retry shared failure and peer waits read-only', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 502, error: { detail: {
+        code: 'question_generation_failed', reason: 'invalid',
+      } },
+    }));
+    assert.equal(app.error, 'game.questionInvalid');
+    assert.equal(requests.length, 1, 'stored failure needs no second status lookup');
+    assert.equal(app.canRetryQuestion, true);
+    app.retryQuestion();
+    assert.equal(requests[1].url, '/api/v2/games/existing-game/question?retry_failed=true');
+    // The other device won the explicit Retry race. This browser waits.
+    requests[1].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.questionOnOtherDevice, true);
+    scheduler.schedule(() => {
+      assert.equal(requests[2].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[2], { ...question, question_id: 'retry-by-either-device' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'retry-by-either-device');
+  assert.equal(app.error, '');
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('passive follower poll with no active lease keeps waiting, never retries', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    scheduler.schedule(() => {
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
+      requests[1].subject.error(new HttpErrorResponse({
+        status: 409, error: { detail: { code: 'question_not_ready' } },
+      }));
+    }, 2001);
+    scheduler.schedule(() => {
+      assert.equal(requests[2].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[2], { ...question, question_id: 'eventual-result' });
+    }, 4002);
+  });
+  assert.equal(app.current.question_id, 'eventual-result');
+});
+
+test('stale desktop game reconciles with another device new run without F5', () => {
+  const { app, requests, posts, scheduler } = setup({ activeLookupPendingOnRetry: true });
+  app.progress = 7;
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'round_ended' } },
+    }));
+    assert.equal(requests[1].url, '/api/v2/games/active');
+    succeed(requests[1], {
+      game_id: 'mobile-new-round', language: 'Russian', phase: 'main',
+      correct_main_answers: 5, main_question_index: 5, question_issued: true,
+      skipped_questions: 0, bonus_decision_available: false,
+      round_stars: { bronze: 1, silver: 0, gold: 0, platinum: 0 },
+    });
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.resumeCandidate.game_id, 'mobile-new-round');
+    assert.equal(app.currentStars.bronze, 1);
+    assert.equal(app.progress, 5);
+    assert.equal(app.loading, false);
+    app.startGame(); // Explicit Resume, never automatic replacement.
+    assert.equal(requests[2].url, '/api/v2/games/mobile-new-round/question');
+    succeed(requests[2], { ...question, number: 6 });
+  });
+  assert.equal(app.gameId, 'mobile-new-round');
+  assert.equal(app.current.number, 6);
+  assert.equal(app.currentStars.bronze, 1);
+  assert.equal(posts.length, 0);
+});
+
+test('stale completed round restores actual Q16 award values without F5', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: 'Game has ended' },
+    }));
+    assert.equal(requests[1].url, '/api/v2/games/existing-game');
+    succeed(requests[1], {
+      game_id: 'existing-game', language: 'English', phase: 'completed',
+      main_question_index: 15, correct_main_answers: 15, question_issued: true,
+      round_stars: { bronze: 1, silver: 1, gold: 1, platinum: 1 },
+    });
+  });
+  assert.equal(app.screen, 'done');
+  assert.deepEqual(app.currentStars,
+    { bronze: 1, silver: 1, gold: 1, platinum: 1 });
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('late question reply is ignored after another game is restored', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    app.resetGameView();
+    app.gameId = 'new-game';
+    app.screen = 'setup';
+    app.loading = false;
+    succeed(requests[0]);
+  });
+  assert.equal(app.gameId, 'new-game');
+  assert.equal(app.current, null);
+  assert.equal(app.screen, 'setup');
 });
 
 test('duplicate recovery shows two accessible translated actions, not generic retry', () => {
@@ -2518,7 +2785,7 @@ test('complaint receipt remains during preparation and disappears only after nex
 });
 
 test('failed next-question generation leaves complaint receipt visible during retry', () => {
-  const { app, requests } = setup();
+  const { app, requests } = setup({ generationStatus: false });
   app.appealMessage = 'Complaint submitted for review';
   app.loading = false;
   app.loadQuestion();
@@ -3064,6 +3331,78 @@ test('question scrolling is independent of viewport width and ignores duplicate 
       succeed(requests[0]);
       assert.equal(scrollCalls.length, 3);
     });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
+
+test('answer feedback scrolls to absolute top on success and failure, on desktop and mobile', () => {
+  for (const { correct, mobile } of [
+    { correct: true, mobile: false },
+    { correct: false, mobile: true },
+  ]) {
+    const { app, posts } = setup();
+    const original = globalThis.window;
+    const frames = [];
+    const scrollCalls = [];
+    globalThis.window = {
+      location: { search: '', hash: '', pathname: '/' },
+      history: { replaceState() {} },
+      matchMedia: () => ({ matches: mobile }),
+      requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+      scrollTo: (...args) => scrollCalls.push(args),
+    };
+    try {
+      app.screen = 'question';
+      app.current = { ...question };
+      app.answer(correct ? 'B' : 'A');
+      assert.equal(posts.length, 1);
+      assert.equal(scrollCalls.length, 0, 'do not scroll before the answer is confirmed');
+      succeed(posts[0], {
+        phase: correct ? 'main' : 'lost',
+        correct, correct_answer: 'B',
+        correct_main_answers: correct ? 5 : 4, achievement: correct ? 'bronze' : null,
+      });
+      assert.equal(app.screen, 'feedback');
+      assert.deepEqual(scrollCalls, [[0, 0]], 'scroll immediately when feedback appears');
+      assert.equal(frames.length, 1);
+      frames.shift()();
+      assert.deepEqual(scrollCalls, [[0, 0]], 'wait for the second animation frame');
+      frames.shift()();
+      assert.deepEqual(scrollCalls, [[0, 0], [0, 0]],
+        'scroll again after feedback is rendered to prevent mobile scroll anchoring');
+    } finally {
+      if (original === undefined) delete globalThis.window;
+      else globalThis.window = original;
+    }
+  }
+});
+
+test('outdated feedback scroll callback does not pull the player away from another screen', () => {
+  const { app, posts } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  const scrollCalls = [];
+  globalThis.window = {
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    scrollTo: (...args) => scrollCalls.push(args),
+  };
+  try {
+    app.screen = 'question';
+    app.current = { ...question };
+    app.answer('B');
+    succeed(posts[0], { phase: 'main', correct: true, correct_answer: 'B',
+      correct_main_answers: 5, achievement: 'bronze' });
+    assert.deepEqual(scrollCalls, [[0, 0]]);
+    frames.shift()();
+    app.screen = 'setup'; // The player has navigated before the second frame.
+    frames.shift()();
+    assert.deepEqual(scrollCalls, [[0, 0]],
+      'a stale feedback frame must not move a different screen');
   } finally {
     if (original === undefined) delete globalThis.window;
     else globalThis.window = original;

@@ -1007,7 +1007,7 @@ class GlobalPoolTests(unittest.TestCase):
         item = candidate(difficulty=13)
         item._review_report = review_report()
         with patch("api.generate_valid_question", return_value=item):
-            retry = self.request()
+            retry = self.client.get(f"/api/v2/games/{self.run_id}/question?retry_failed=true")
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json()["number"], 14)
 

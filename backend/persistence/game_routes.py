@@ -8,7 +8,7 @@ import os
 import random
 import secrets
 from uuid import UUID, NAMESPACE_URL, uuid5
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StrictInt
@@ -150,6 +150,8 @@ class GameInfo(BaseModel):
     main_question_index: int = 0
     skipped_questions: int = 0
     question_issued: bool = False
+    # Read-only, lease-derived status. Never expose the generation token to clients.
+    question_generation_in_progress: bool = False
     bonus_decision_available: bool = False
     helper: dict | None = None
     replacement_game_id: UUID | None = None
@@ -194,6 +196,13 @@ def _game_info(db: Session, run) -> GameInfo:
         .group_by(StarAward.tier)
     ):
         round_stars[tier] = int(count)
+    lease_until = run.question_generation_until
+    if lease_until is not None and lease_until.tzinfo is None:
+        lease_until = lease_until.replace(tzinfo=timezone.utc)
+    generating = bool(
+        run.question_generation_token and lease_until
+        and lease_until > datetime.now(timezone.utc)
+    )
     # A lost Q16 wager consumes this round's gold for the results display,
     # though the historical StarAward stays immutable.
     if run.bonus_wager_accepted and run.bonus_correct is False:
@@ -207,6 +216,7 @@ def _game_info(db: Session, run) -> GameInfo:
         question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run.id
         ))),
+        question_generation_in_progress=generating,
         bonus_decision_available=(
             run.status == "bonus"
             and not run.bonus_wager_accepted
@@ -343,6 +353,8 @@ def _advance_bonus_topic_after_failure(
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if (run.status != "bonus" or run.correct_main_answers != 15
                 or run.bonus_topic_index != expected_topic_index
+                or (db.info.get("quiz_generation_token") is not None
+                    and db.info["quiz_generation_token"] != run.question_generation_token)
                 or pending_question(db, run_id=run.id) is not None):
             db.rollback()
             event("bonus_topic_rotation_skipped", reason="state_changed")
@@ -537,6 +549,14 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
         raise HTTPException(status_code=422, detail="Unsupported language")
     try:
         run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        # An in-flight Q1 already captured its language. Do not silently
+        # change it in another tab before the first attempt is committed.
+        lease_until = run.question_generation_until
+        if lease_until is not None and lease_until.tzinfo is None:
+            lease_until = lease_until.replace(tzinfo=timezone.utc)
+        if (run.question_generation_token and lease_until is not None
+                and lease_until > datetime.now(timezone.utc)):
+            raise HTTPException(status_code=409, detail={"code": "question_generating"})
         issued = db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run_id
         )) or 0
@@ -554,9 +574,142 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
         raise
 
 
+# A long-lived provider request must not hold a database transaction open.
+# Instead, claim the run under a short row lock, commit, and release the claim
+# after the existing generation/pool workflow (including all exception paths).
+# This also works across separate Uvicorn workers and devices.
+QUESTION_GENERATION_LEASE_SECONDS = 600
+
+
+def _generation_failure_code(exc: Exception) -> str | None:
+    """Return only public, stable error categories; never persist provider text."""
+    if isinstance(exc, HTTPException):
+        if exc.status_code == 409:
+            return ("duplicate_exhausted" if exc.detail == {"code": "duplicate_exhausted"}
+                    else None)
+        if exc.status_code == 502:
+            return "invalid"
+        if exc.status_code == 503:
+            return "unavailable"
+        return "failed" if exc.status_code >= 500 else None
+    return "failed"
+
+
+def _stored_generation_error(code: str) -> HTTPException:
+    if code == "duplicate_exhausted":
+        return HTTPException(status_code=409, detail={"code": "duplicate_exhausted"})
+    status = {"invalid": 502, "unavailable": 503}.get(code, 500)
+    return HTTPException(status_code=status, detail={
+        "code": "question_generation_failed", "reason": code,
+    })
+
+
+def _remember_generation_failure(db: Session, run_id: UUID, user_id: UUID,
+                                 token: str, exc: Exception) -> None:
+    code = _generation_failure_code(exc)
+    if code is None:
+        return  # e.g. a stale round conflict, not a generator failure.
+    try:
+        db.rollback()
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        # A superseded generation must never overwrite a newer outcome.
+        if run.question_generation_token == token:
+            run.question_generation_error_code = code
+            db.commit()
+            event("question_generation_shared_failure", reason=code)
+        else:
+            db.rollback()
+    except Exception as persistence_error:
+        db.rollback()
+        event("question_generation_failure_save_failed",
+              error_type=type(persistence_error).__name__)
+
+
+def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID, *,
+                               wait_only: bool = False,
+                               retry_failed: bool = False) -> tuple[str | None, PublicQuestion | None]:
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status not in ("main", "bonus"):
+            raise HTTPException(status_code=409, detail={"code": "round_ended"})
+        cached = pending_question(db, run_id=run.id)
+        if cached is not None and cached[1].status == "approved":
+            # Return the already-issued question while holding the run lock.
+            # Delegating to the slow path after rollback can race with another
+            # device answering it and accidentally start UNLEASED generation.
+            result = _public(*cached, phase=run.status, db=db)
+            db.rollback()
+            return None, result
+        now = datetime.now(timezone.utc)
+        expires = run.question_generation_until
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if run.question_generation_token and expires is not None and expires > now:
+            raise HTTPException(status_code=409, detail={"code": "question_generating"})
+        # A completed failure is shared by both browsers. Only a deliberate
+        # Retry action can clear it and start a new AI request. Polling clients
+        # must never claim a generation lease themselves.
+        if run.question_generation_error_code and (wait_only or not retry_failed):
+            raise _stored_generation_error(run.question_generation_error_code)
+        if wait_only:
+            raise HTTPException(status_code=409, detail={"code": "question_not_ready"})
+        token = secrets.token_hex(16)
+        run.question_generation_token = token
+        run.question_generation_until = now + timedelta(seconds=QUESTION_GENERATION_LEASE_SECONDS)
+        run.question_generation_error_code = None
+        db.commit()  # Release row lock before any AI / pool work.
+        return token, None
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _release_question_generation(db: Session, run_id: UUID, user_id: UUID,
+                                 token: str) -> None:
+    try:
+        db.rollback()  # Other generation paths may leave a read transaction open.
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.question_generation_token == token:
+            run.question_generation_token = None
+            run.question_generation_until = None
+            db.commit()
+        else:
+            db.rollback()  # An expired claim was already replaced.
+    except Exception as exc:
+        db.rollback()
+        event("question_generation_release_failed", error_type=type(exc).__name__)
+
+
 @router.get("/{run_id}/question", response_model=PublicQuestion)
-def get_question(run_id: UUID, user: User = Depends(authenticated_user),
+def get_question(run_id: UUID, wait_only: bool = False,
+                 retry_failed: bool = False,
+                 user: User = Depends(authenticated_user),
                  db: Session = Depends(get_db)):
+    try:
+        token, cached_result = _claim_question_generation(
+            db, run_id, user.id, wait_only=wait_only, retry_failed=retry_failed,
+        )
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    if cached_result is not None:
+        event("question_cache", hit=True)
+        return cached_result
+    db.info["quiz_generation_token"] = token
+    try:
+        return _get_question_with_claim(run_id, user, db)
+    except Exception as exc:
+        # Record the terminal provider/validation failure *before* releasing
+        # the lease, so the waiting browser never starts an unleased retry.
+        if token is not None:
+            _remember_generation_failure(db, run_id, user.id, token, exc)
+        raise
+    finally:
+        db.info.pop("quiz_generation_token", None)
+        if token is not None:
+            _release_question_generation(db, run_id, user.id, token)
+
+
+def _get_question_with_claim(run_id: UUID, user: User, db: Session):
     run = _lookup(db, run_id, user.id)
     if run.status not in ("main", "bonus"):
         raise HTTPException(status_code=409, detail="Game has ended")
