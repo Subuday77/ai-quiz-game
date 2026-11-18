@@ -1122,6 +1122,119 @@ class GlobalPoolTests(unittest.TestCase):
             stored = db.scalar(select(Question))
             self.assertEqual(db.get(Topic, stored.topic_id).labels["en"], calls[-1])
 
+    def test_q2_duplicate_exhaustion_recovers_in_unused_category(self):
+        """Live regression: three Q2 duplicates must not strand the round."""
+        from persistence.models import GameRun
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 1
+            db.commit()
+            primary = _category_for_round(self.run_id, 2, db=db)
+        calls = []
+
+        def generate(difficulty, language, category, **kwargs):
+            calls.append((difficulty, category, kwargs))
+            if len(calls) == 1:
+                # The generator has already rejected all three duplicates.
+                raise HTTPException(
+                    status_code=409, detail={"code": "duplicate_exhausted"}
+                )
+            item = candidate(difficulty=difficulty)
+            item._review_report = review_report()
+            return item
+
+        with patch("api.generate_valid_question", side_effect=generate):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 2)
+        self.assertEqual(response.json()["difficulty"], 1)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual([call[0] for call in calls], [1, 1])
+        self.assertEqual(calls[0][1], primary)
+        self.assertNotEqual(calls[1][1], primary)
+        self.assertEqual([call[2]["question_number"] for call in calls], [2, 2])
+        self.assertTrue(all(call[2]["absolute_deadline"] is not None for call in calls))
+        self.assertEqual(calls[0][2]["absolute_deadline"],
+                         calls[1][2]["absolute_deadline"],
+                         "both categories must share one 40s time budget")
+        with Session(self.engine) as db:
+            stored = db.get(Question, UUID(response.json()["question_id"]))
+            self.assertEqual(db.get(Topic, stored.topic_id).labels["en"],
+                             calls[1][1])
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+        self.assertEqual(self.request().json(), response.json())
+
+    def test_q2_duplicate_exhaustion_tries_approved_alternate_pool_before_ai(self):
+        from persistence.game_routes import _alternate_main_category
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 1
+            db.commit()
+            primary = _category_for_round(self.run_id, 2, db=db)
+            alternate = _alternate_main_category(db, run, 2, primary)
+            self.assertIsNotNone(alternate)
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 1
+            db.commit()
+            q = candidate(difficulty=1)
+            q._review_report = review_report()
+            _, stored = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=q,
+                category=alternate, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            pooled_id = stored.id
+
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail={"code": "duplicate_exhausted"}
+        )) as generator:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 2)
+        self.assertEqual(response.json()["question_id"], str(pooled_id))
+        generator.assert_called_once()
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+
+    def test_q2_duplicate_exhaustion_in_both_categories_remains_safe_retry(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 1
+            db.commit()
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail={"code": "duplicate_exhausted"}
+        )) as generator:
+            response = self.request()
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "duplicate_exhausted")
+        self.assertEqual(generator.call_count, 2)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.status, "main")
+            self.assertEqual(run.correct_main_answers, 1)
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 0)
+        valid = candidate(difficulty=1)
+        valid._review_report = review_report()
+        with patch("api.generate_valid_question", return_value=valid):
+            retried = self.client.get(
+                f"/api/v2/games/{self.run_id}/question?retry_failed=true"
+            )
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(retried.json()["number"], 2)
+
+    def test_q2_other_conflict_does_not_retry_alternate_category(self):
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 1
+            db.commit()
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail="Game state changed; reload question"
+        )) as generator:
+            response = self.request()
+        self.assertEqual(response.status_code, 409, response.text)
+        generator.assert_called_once()
+
     def test_q14_switches_to_unused_category_after_generation_exhaustion(self):
         from persistence.models import GameRun, Topic
         with Session(self.engine) as db:
