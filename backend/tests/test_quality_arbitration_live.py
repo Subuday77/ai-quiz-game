@@ -18,7 +18,7 @@ from tagging.quality_skill.arbiter import (
     ArbitrationVerdict, arbitrate, is_suitable,
 )
 from tagging.quality_skill.engine import evaluate_shadow
-from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
+from tagging.review import check_tagged_quality, is_strict_too_easy_reserve, editorial_reserve_score
 from test_tagged_dedup import candidate as sample_question
 from test_tagged_dynamic_scoring import critic as sample_critic
 
@@ -362,6 +362,98 @@ class ArbitrationPolicyTests(unittest.TestCase):
                 )
         self.assertEqual(q._review_report["decision"], "reject")
         terra.assert_called_once()
+
+    def test_bonus_high_editorial_score_still_gets_independent_fact_veto(self):
+        """Q16 score 4 must not skip Terra simply because the critic rejected."""
+        q = sample_question().model_copy(update={"difficulty": 15})
+        review = sample_critic(difficulty="appropriate", distractors=3,
+                               knowledge=0, suitability=1)
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("tagging.review.LLMClient") as reviewer, patch(
+            "tagging.quality_skill.arbiter.LLMClient"
+        ) as arbiter:
+            reviewer.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(review.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            arbiter.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(verdict().model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            with self.assertRaises(QualityRegenerationError):
+                check_tagged_quality(
+                    q, language="English", category="History",
+                    requested_difficulty=15, neighbors=[],
+                    mode=QualityMode.ENFORCE, deadline=perf_counter()+30,
+                    timeout_seconds=12,
+                )
+        self.assertEqual(arbiter.call_count, 1)
+        report = q._review_report
+        self.assertEqual(report["details"]["arbitration"]["decision"], "accept")
+        self.assertEqual(report["details"]["assessment"]["total"], 4.0)
+        self.assertEqual(editorial_reserve_score(q), 4.0)
+
+    def test_bonus_subjective_too_easy_consensus_is_only_editorial_fallback(self):
+        """A two-model difficulty veto may be waived, not a factual veto."""
+        q = sample_question().model_copy(update={"difficulty": 15})
+        review = sample_critic(difficulty="too_easy", distractors=0, knowledge=1)
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("tagging.review.LLMClient") as reviewer, patch(
+            "tagging.quality_skill.arbiter.LLMClient"
+        ) as arbiter:
+            reviewer.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(review.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            arbiter.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(verdict(difficulty="too_easy").model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            with self.assertRaises(QualityRegenerationError):
+                check_tagged_quality(
+                    q, language="English", category="History",
+                    requested_difficulty=15, neighbors=[],
+                    mode=QualityMode.ENFORCE, deadline=perf_counter()+30,
+                    timeout_seconds=12,
+                )
+        report = q._review_report
+        self.assertLess(report["details"]["assessment"]["total"], 3.25)
+        self.assertEqual(report["details"]["arbitration"]["issues"],
+                         ["bonus_too_easy"])
+        self.assertIsNotNone(editorial_reserve_score(q))
+
+    def test_editorial_rejection_does_not_override_flagged_ordinary_arbiter_veto(self):
+        q = sample_question().model_copy(update={"difficulty": 4})
+        review = sample_critic(difficulty="appropriate", distractors=3,
+                               knowledge=0, suitability=1)
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+        }), patch("tagging.review.LLMClient") as reviewer, patch(
+            "tagging.quality_skill.arbiter.LLMClient"
+        ) as arbiter:
+            reviewer.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(review.model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            arbiter.return_value.responses.create.return_value = ProviderResult(
+                json.dumps(verdict(answer_leak=True).model_dump(mode="json")),
+                Completion.COMPLETE, "completed",
+            )
+            with self.assertRaises(QualityRegenerationError):
+                check_tagged_quality(
+                    q, language="English", category="History",
+                    requested_difficulty=4, neighbors=[],
+                    mode=QualityMode.ENFORCE, deadline=perf_counter()+30,
+                    timeout_seconds=12,
+                    shadow={"would_arbitrate": True, "findings": []},
+                )
+        self.assertEqual(arbiter.call_count, 1)
+        self.assertEqual(q._review_report["details"]["arbitration"]["issues"],
+                         ["answer_leak"])
+        self.assertIsNone(editorial_reserve_score(q))
+
 
     def test_missing_terra_verdict_is_not_a_content_rejection(self):
         q = sample_question().model_copy(update={"difficulty": 15})
