@@ -230,7 +230,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     # starting the generator; otherwise a slow third generation leaves only a
     # couple of seconds for review and produces an avoidable provider timeout.
     critic_reserve = policy.critic_min_remaining_seconds if tagged else 0.0
-    if tagged and question_number == 16 and quality_mode == QualityMode.ENFORCE:
+    if tagged and question_number == 16 and quality_mode.value == "enforce":
         # The mandatory bonus Terra check must have its own 18-second slot.
         # Reserve it BEFORE calling the generator, not only when the critic
         # finishes; it cannot be funded from a 3-second deadline remainder.
