@@ -644,7 +644,8 @@ class PersistentGameAPITests(unittest.TestCase):
         user_id = UUID(self.register("TwoDevices"))
         game_id = UUID(self.start())
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
-            first = _claim_question_generation(db, game_id, user_id)
+            first, cached = _claim_question_generation(db, game_id, user_id)
+            self.assertIsNone(cached)
         self.assertTrue(first)
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
             with self.assertRaises(HTTPException) as raised:
@@ -663,7 +664,8 @@ class PersistentGameAPITests(unittest.TestCase):
             run.question_generation_until = datetime.now(timezone.utc) - timedelta(seconds=1)
             db.commit()
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
-            second = _claim_question_generation(db, game_id, user_id)
+            second, cached = _claim_question_generation(db, game_id, user_id)
+            self.assertIsNone(cached)
             self.assertNotEqual(first, second)
             _release_question_generation(db, game_id, user_id, first)
         with Session(self.engine) as db:
