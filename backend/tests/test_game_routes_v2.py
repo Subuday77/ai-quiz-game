@@ -678,9 +678,10 @@ class PersistentGameAPITests(unittest.TestCase):
         from fastapi import HTTPException
         self.register("LeaseCleanup")
         game_id = UUID(self.start())
-        gen.side_effect = [HTTPException(status_code=503, detail="AI unavailable"), QUESTION]
         url = f"/api/v2/games/{game_id}/question"
-        self.assertEqual(self.client.get(url).status_code, 503)
+        with patch("api.generate_valid_question",
+                   side_effect=HTTPException(status_code=503, detail="AI unavailable")):
+            self.assertEqual(self.client.get(url).status_code, 503)
         with Session(self.engine) as db:
             run = db.get(GameRun, game_id)
             self.assertIsNone(run.question_generation_token)
@@ -689,8 +690,7 @@ class PersistentGameAPITests(unittest.TestCase):
         self.assertEqual(accepted.status_code, 200, accepted.text)
         cached = self.client.get(url)
         self.assertEqual(cached.json(), accepted.json())
-        gen.assert_called()
-        self.assertEqual(gen.call_count, 2)
+        gen.assert_called_once()
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
 
