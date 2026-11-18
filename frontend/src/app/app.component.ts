@@ -2089,6 +2089,7 @@ export class AppComponent implements OnInit, OnDestroy {
     const questionTimeoutMs = this.progress >= 9
       ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
       : this.requestTimeoutMs;
+    let waitingForPeer = false;
     this.subscriptions.add(this.http.get<PublicQuestion>(
       GAME_API + '/' + requestedGameId + '/question',
     ).pipe(
@@ -2097,8 +2098,12 @@ export class AppComponent implements OnInit, OnDestroy {
         warning.unsubscribe();
         if (!currentRequest()) return;
         this.loading = false;
-        this.questionLoading = false;
-        this.generatingNextQuestion = false;
+        // Keep the preparation spinner visible while waiting for the other
+        // device's generation; there must be no empty-screen flicker.
+        if (!waitingForPeer) {
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+        }
         this.longWait = false;
       }),
     ).subscribe({
@@ -2132,6 +2137,7 @@ export class AppComponent implements OnInit, OnDestroy {
           // but never launch a second AI generation or leave an endless Retry.
           if (++this.generationPolls <= 80) {
             this.canRetryQuestion = false;
+            waitingForPeer = true;
             this.subscriptions.add(timer(2000).subscribe(() => {
               if (currentRequest() && this.screen === 'question' && !this.loading)
                 this.loadQuestion();
