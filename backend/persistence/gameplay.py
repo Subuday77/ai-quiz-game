@@ -143,6 +143,11 @@ def offer_question(
             if not isinstance(question, TaggedQuestion):
                 raise GameConflict("Tagged workflow requires verified fact metadata")
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        # An expired lease can be taken over while an old provider call hangs.
+        # Its late candidate must never overwrite the new owner's round state.
+        claim = db.info.get("quiz_generation_token")
+        if claim is not None and run.question_generation_token != claim:
+            raise GameConflict("Question generation ownership changed")
         if run.status not in ("main", "bonus"):
             raise GameConflict("Game has ended")
         # A topic switch may happen while the old AI request is in flight.
