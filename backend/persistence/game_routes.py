@@ -8,7 +8,7 @@ import os
 import random
 import secrets
 from uuid import UUID, NAMESPACE_URL, uuid5
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StrictInt
@@ -554,9 +554,69 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
         raise
 
 
+# A long-lived provider request must not hold a database transaction open.
+# Instead, claim the run under a short row lock, commit, and release the claim
+# after the existing generation/pool workflow (including all exception paths).
+# This also works across separate Uvicorn workers and devices.
+QUESTION_GENERATION_LEASE_SECONDS = 600
+
+
+def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> str | None:
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.status not in ("main", "bonus"):
+            raise HTTPException(status_code=409, detail={"code": "round_ended"})
+        cached = pending_question(db, run_id=run.id)
+        if cached is not None and cached[1].status == "approved":
+            db.rollback()
+            return None  # The original handler rechecks and serves this attempt.
+        now = datetime.now(timezone.utc)
+        expires = run.question_generation_until
+        if expires is not None and expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if run.question_generation_token and expires is not None and expires > now:
+            raise HTTPException(status_code=409, detail={"code": "question_generating"})
+        token = secrets.token_hex(16)
+        run.question_generation_token = token
+        run.question_generation_until = now + timedelta(seconds=QUESTION_GENERATION_LEASE_SECONDS)
+        db.commit()  # Release row lock before any AI / pool work.
+        return token
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _release_question_generation(db: Session, run_id: UUID, user_id: UUID,
+                                 token: str) -> None:
+    try:
+        db.rollback()  # Other generation paths may leave a read transaction open.
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if run.question_generation_token == token:
+            run.question_generation_token = None
+            run.question_generation_until = None
+            db.commit()
+        else:
+            db.rollback()  # An expired claim was already replaced.
+    except Exception as exc:
+        db.rollback()
+        event("question_generation_release_failed", error_type=type(exc).__name__)
+
+
 @router.get("/{run_id}/question", response_model=PublicQuestion)
 def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                  db: Session = Depends(get_db)):
+    try:
+        token = _claim_question_generation(db, run_id, user.id)
+    except GameNotFound:
+        raise HTTPException(status_code=404, detail="Game not found") from None
+    try:
+        return _get_question_with_claim(run_id, user, db)
+    finally:
+        if token is not None:
+            _release_question_generation(db, run_id, user.id, token)
+
+
+def _get_question_with_claim(run_id: UUID, user: User, db: Session):
     run = _lookup(db, run_id, user.id)
     if run.status not in ("main", "bonus"):
         raise HTTPException(status_code=409, detail="Game has ended")
