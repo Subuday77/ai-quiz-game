@@ -1529,7 +1529,7 @@ test('template wires login, PostgreSQL rewards and question retries', () => {
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.match(template, /openAuthDialog\('login'\)/);
   assert.match(template, /openAuthDialog\('register'\)/);
-  assert.match(template, /role="status" \*ngIf="questionLoading && longWait"/);
+  assert.match(template, /role="status" \*ngIf="questionLoading && longWait && !questionOnOtherDevice"/);
   assert.match(template, /\*ngIf="canRetryQuestion && !duplicateExhausted && error"[\s\S]*?\(click\)="retryQuestion\(\)"/);
   assert.match(template, /locale\.t\(setupButtonLabelKey\)/);
   assert.match(template, /locale\.t\(feedbackButtonLabelKey\)/);
