@@ -673,6 +673,19 @@ class PersistentGameAPITests(unittest.TestCase):
             second, cached = _claim_question_generation(db, game_id, user_id)
             self.assertIsNone(cached)
             self.assertNotEqual(first, second)
+            # Even if the slow AI call finishes after takeover, its candidate
+            # cannot be persisted with the superseded lease token.
+            from consts import QUESTION_CATEGORIES
+            from question_schema import QuizQuestion
+            from persistence.gameplay import GameConflict, offer_question
+            db.info["quiz_generation_token"] = first
+            with self.assertRaises(GameConflict):
+                offer_question(
+                    db, run_id=game_id, user_id=user_id,
+                    question=QuizQuestion.model_validate(QUESTION),
+                    category=QUESTION_CATEGORIES[0], provider="test", model="offline",
+                )
+            db.info.pop("quiz_generation_token", None)
             _release_question_generation(db, game_id, user_id, first)
         with Session(self.engine) as db:
             self.assertEqual(db.get(GameRun, game_id).question_generation_token, second)
