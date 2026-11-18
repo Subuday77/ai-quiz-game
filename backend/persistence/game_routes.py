@@ -537,6 +537,14 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
         raise HTTPException(status_code=422, detail="Unsupported language")
     try:
         run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        # An in-flight Q1 already captured its language. Do not silently
+        # change it in another tab before the first attempt is committed.
+        lease_until = run.question_generation_until
+        if lease_until is not None and lease_until.tzinfo is None:
+            lease_until = lease_until.replace(tzinfo=timezone.utc)
+        if (run.question_generation_token and lease_until is not None
+                and lease_until > datetime.now(timezone.utc)):
+            raise HTTPException(status_code=409, detail={"code": "question_generating"})
         issued = db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run_id
         )) or 0
