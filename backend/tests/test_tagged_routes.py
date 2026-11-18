@@ -101,12 +101,15 @@ class TaggedEndpointTests(unittest.TestCase):
             response = self.client.get(f"/api/v2/games/{game_id}/question")
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json(), {"detail": {"code": "duplicate_exhausted"}})
-        gen.assert_called_once()
+        self.assertEqual(gen.call_count, 2)
+        self.assertNotEqual(gen.call_args_list[0].args[2],
+                            gen.call_args_list[1].args[2],
+                            "both categories must be exhausted before a terminal 409")
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Question)), 0)
             self.assertEqual(db.scalar(select(func.count()).select_from(QuestionAttempt)), 0)
 
-    def test_rejected_twice_then_critic_timeout_and_empty_pool_returns_503(self):
+    def test_two_categories_exhaust_critic_and_empty_pool_without_leaking_question(self):
         from quality_errors import QualityRegenerationError, QualityReviewFailure
 
         game_id = self.new_game("English")
@@ -123,6 +126,9 @@ class TaggedEndpointTests(unittest.TestCase):
             "tagging.review.check_tagged_quality",
             side_effect=[QualityRegenerationError(),
                          QualityRegenerationError(),
+                         QualityReviewFailure("tag_review_unavailable", retryable=True),
+                         QualityRegenerationError(),
+                         QualityRegenerationError(),
                          QualityReviewFailure("tag_review_unavailable", retryable=True)],
         ) as critic, patch(
             "persistence.question_pool.offer_approved_pool_question",
@@ -130,10 +136,14 @@ class TaggedEndpointTests(unittest.TestCase):
         ) as pool, patch("api.sleep") as sleep:
             response = self.client.get(f"/api/v2/games/{game_id}/question")
         self.assertEqual(response.status_code, 503, response.text)
-        self.assertEqual(generator.call_count, 3)
-        self.assertEqual(critic.call_count, 3)
-        self.assertEqual(sleep.call_count, 2)
-        pool.assert_called_once()
+        self.assertEqual(generator.call_count, 6)
+        self.assertEqual(critic.call_count, 6)
+        self.assertEqual(sleep.call_count, 4)
+        self.assertEqual(pool.call_count, 2)
+        categories = [call.args[2] for call in generator.call_args_list]
+        self.assertEqual(len(set(categories)), 2)
+        self.assertEqual(categories[:3], [categories[0]] * 3)
+        self.assertEqual(categories[3:], [categories[3]] * 3)
         # No unreviewed question should leak into the active game or the DB.
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Question)), 0)
