@@ -22,7 +22,7 @@ from persistence.question_pool import (
     enabled, offer_approved_pool_question, scan_limit,
 )
 from persistence.seed_topics import seed_topics
-from tagging.review import is_strict_too_easy_reserve
+from tagging.review import is_strict_too_easy_reserve, editorial_reserve_score
 from test_tagged_dedup import candidate
 
 
@@ -97,6 +97,123 @@ class StrictReserveTests(unittest.TestCase):
         bad._review_report["decision"] = "accept"
         self.assertFalse(is_strict_too_easy_reserve(bad))
 
+
+
+def editorial_report(*, score=4.0, difficulty=0, arbitration=False,
+                     consensus_too_easy=False):
+    """A real-shape rejected v5 review, not a generic mocked quality failure."""
+    report = too_easy_report()
+    report["details"]["general_mode"] = "enforce"
+    report["details"]["requested_difficulty"] = difficulty
+    verdict = report["details"]["verdict"]
+    verdict["difficulty"] = "too_easy" if consensus_too_easy else "appropriate"
+    verdict["issue_codes"] = ["difficulty_mismatch"] if consensus_too_easy else []
+    verdict["independent_answer"] = "B"
+    report["details"]["option_diagnostics"]["consistency_flags"] = []
+    report["details"]["assessment"].update({
+        "total": score, "score_threshold": 3.25,
+    })
+    if arbitration:
+        report["details"]["arbitration"] = {
+            "checker_type": "ai_terra_arbiter",
+            "provider": "openai",
+            "model": "gpt-6.1-terra",
+            "contract_version": "arbitration_v2",
+            "decision": "reject" if consensus_too_easy else "accept",
+            "issues": ["bonus_too_easy"] if consensus_too_easy else [],
+            "details": {
+                "premise": "valid",
+                "choices": {k: "yes" if k == "B" else "no" for k in "ABCD"},
+                "difficulty": "too_easy" if consensus_too_easy else "appropriate",
+                "answer_leak": False,
+                "stem_claims": [],
+                "rationale": "All facts and options independently verified.",
+            },
+        }
+    return report
+
+
+class EditorialReserveTests(unittest.TestCase):
+    def test_editorial_penalties_can_be_reserved_at_all_main_levels(self):
+        for difficulty in (0, 4, 9, 13, 14):
+            for score in (3.25, 3.5, 5.0):
+                with self.subTest(difficulty=difficulty, score=score):
+                    q = candidate(difficulty=difficulty)
+                    q._review_report = editorial_report(score=score,
+                                                       difficulty=difficulty)
+                    q._review_report["details"]["assessment"]["raw_penalties"] = {
+                        "distractors": 2, "knowledge": 2, "suitability": 1,
+                        "wording": 1,
+                    }
+                    self.assertEqual(editorial_reserve_score(q), score)
+
+    def test_hard_failures_unknowns_and_missing_evidence_are_not_reservable(self):
+        q = candidate()
+        q._review_report = editorial_report()
+        self.assertEqual(editorial_reserve_score(q), 4.0)
+        for section, key, value in [
+            ("verdict", "facts", "fail"),
+            ("verdict", "options", "uncertain"),
+            ("verdict", "leakage", "fail"),
+            ("verdict", "language", "fail"),
+            ("verdict", "tags_valid", "fail"),
+            ("verdict", "fact_valid", "uncertain"),
+            ("verdict", "semantic_duplicate", True),
+            ("verdict", "premise", "invalid"),
+            ("verdict", "independent_answer", "A"),
+            ("verdict", "issue_codes", ["answer_leak"]),
+            ("verdict", "issue_codes", ["needs_verification"]),
+            ("assessment", "critical", "escalate"),
+            ("option_diagnostics", "outcome", "multiple_correct"),
+            ("option_diagnostics", "supported_choices", ["A", "B"]),
+            ("option_diagnostics", "uncertain_choices", ["C"]),
+            ("option_diagnostics", "consistency_flags", ["generator_key_disagrees"]),
+        ]:
+            with self.subTest(section=section, key=key, value=value):
+                bad = q.model_copy(deep=True)
+                bad._review_report["details"][section][key] = value
+                self.assertIsNone(editorial_reserve_score(bad))
+        for key, value in [
+            ("general_mode", "audit"), ("requested_difficulty", 15),
+            ("safeguard_codes", ["literal_answer_leak"]),
+        ]:
+            bad = q.model_copy(deep=True)
+            bad._review_report["details"][key] = value
+            self.assertIsNone(editorial_reserve_score(bad))
+        for decision in ("accept", "arbitration_unavailable", "audit"):
+            bad = q.model_copy(deep=True)
+            bad._review_report["decision"] = decision
+            self.assertIsNone(editorial_reserve_score(bad))
+        bad = q.model_copy(deep=True)
+        bad._review_report["details"]["assessment"]["total"] = 2
+        self.assertIsNone(editorial_reserve_score(bad))
+        bad = q.model_copy(deep=True)
+        bad._review_report["details"]["assessment"]["total"] = float("nan")
+        self.assertIsNone(editorial_reserve_score(bad))
+
+    def test_bonus_requires_real_independent_verdict_and_allows_editorial_consensus(self):
+        q = candidate(difficulty=15)
+        q._review_report = editorial_report(score=4.0, difficulty=15)
+        self.assertIsNone(editorial_reserve_score(q),
+                          "Q16 must not bypass a missing arbiter")
+        q._review_report = editorial_report(score=4.0, difficulty=15,
+                                           arbitration=True)
+        self.assertEqual(editorial_reserve_score(q), 4.0)
+        q._review_report = editorial_report(score=1.5, difficulty=15,
+                                           arbitration=True,
+                                           consensus_too_easy=True)
+        self.assertEqual(editorial_reserve_score(q), 1.5)
+        for change in [
+            lambda a: a.update({"decision": "reject", "issues": ["premise_invalid"]}),
+            lambda a: a["details"].update({"premise": "invalid"}),
+            lambda a: a["details"].update({"answer_leak": True}),
+            lambda a: a["details"]["choices"].update({"A": "yes"}),
+            lambda a: a.update({"contract_version": "arbitration_v1"}),
+        ]:
+            with self.subTest(change=change):
+                bad = q.model_copy(deep=True)
+                change(bad._review_report["details"]["arbitration"])
+                self.assertIsNone(editorial_reserve_score(bad))
 
 class PoolConfigTests(unittest.TestCase):
     def test_flag_and_scan_limit(self):
@@ -864,10 +981,10 @@ class GlobalPoolTests(unittest.TestCase):
 
     def test_strict_too_easy_reserve_is_last_resort_and_not_in_future_pool(self):
         q = candidate()
-        q._review_report = too_easy_report()
+        q._review_report = editorial_report()
 
         def exhausted(*args, **kwargs):
-            kwargs["too_easy_reserve"].append(q.model_copy(deep=True))
+            kwargs["editorial_reserve"].append(q.model_copy(deep=True))
             raise HTTPException(status_code=502, detail="AI could not generate a valid question")
 
         with patch("api.generate_valid_question", side_effect=exhausted):
@@ -875,7 +992,7 @@ class GlobalPoolTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         with Session(self.engine) as db:
             review = db.scalar(select(QuestionReview))
-            self.assertEqual(review.decision, "fallback_too_easy")
+            self.assertEqual(review.decision, "fallback_editorial")
             self.assertEqual(review.details["fallback"]["original_decision"], "reject")
             self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
             second = create_game(db, user_id=self.bob, language="English")
@@ -883,13 +1000,13 @@ class GlobalPoolTests(unittest.TestCase):
                 db, run_id=second.id, user_id=self.bob, category=self.category,
             ))
 
-    def test_an_additional_penalty_excludes_reserve(self):
+    def test_a_hard_answer_leak_excludes_reserve(self):
         q = candidate()
-        q._review_report = too_easy_report()
-        q._review_report["details"]["assessment"]["raw_penalties"]["distractors"] = 1
+        q._review_report = editorial_report()
+        q._review_report["details"]["verdict"]["leakage"] = "fail"
 
         def exhausted(*args, **kwargs):
-            kwargs["too_easy_reserve"].append(q)
+            kwargs["editorial_reserve"].append(q)
             raise HTTPException(status_code=502, detail="AI could not generate a valid question")
 
         with patch("api.generate_valid_question", side_effect=exhausted):
@@ -898,13 +1015,13 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count(Question.id))), 0)
 
-    def test_pool_has_priority_over_too_easy_reserve(self):
+    def test_pool_has_priority_over_editorial_reserve(self):
         existing_id = self.seed_other_user_question()
         q = candidate(relation="prize", concept="prize", answer="photoelectric-effect")
-        q._review_report = too_easy_report()
+        q._review_report = editorial_report()
 
         def exhausted(*args, **kwargs):
-            kwargs["too_easy_reserve"].append(q)
+            kwargs["editorial_reserve"].append(q)
             raise HTTPException(status_code=503, detail="AI provider unavailable")
 
         with patch("api.generate_valid_question", side_effect=exhausted):
@@ -914,6 +1031,89 @@ class GlobalPoolTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count(Question.id))), 1)
 
+
+
+    def test_best_reserve_score_wins_after_all_generation_attempts(self):
+        def exhausted(*args, **kwargs):
+            for score in (5.0, 3.5, 4.0):
+                q = candidate()
+                q._review_report = editorial_report(score=score)
+                kwargs["editorial_reserve"].append(q)
+            raise HTTPException(status_code=502, detail="AI could not generate a valid question")
+
+        with patch("api.generate_valid_question", side_effect=exhausted):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        with Session(self.engine) as db:
+            review = db.scalar(select(QuestionReview))
+            self.assertEqual(review.decision, "fallback_editorial")
+            self.assertEqual(review.details["fallback"]["score"], 3.5)
+            self.assertEqual(review.details["fallback"]["reason"], "editorial_only")
+
+    def test_q16_can_use_earlier_verified_reserve_and_restore_topic(self):
+        from persistence.models import GameRun
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.status = "bonus"
+            run.correct_main_answers = 15
+            run.bonus_wager_accepted = True
+            db.commit()
+            original_category = _category_for_round(self.run_id, 16, db=db)
+        calls = []
+
+        def exhausted(difficulty, language, category, **kwargs):
+            calls.append(category)
+            if len(calls) == 1:
+                q = candidate(difficulty=15)
+                q._review_report = editorial_report(
+                    score=4.0, difficulty=15, arbitration=True)
+                kwargs["editorial_reserve"].append(q)
+            raise HTTPException(status_code=502, detail="AI could not generate a valid question")
+
+        with patch("api.generate_valid_question", side_effect=exhausted):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["number"], 16)
+        self.assertEqual(len(calls), 2)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.bonus_topic_index, 0)
+            stored = db.scalar(select(Question))
+            self.assertEqual(db.get(Topic, stored.topic_id).labels["en"],
+                             original_category)
+            review = db.scalar(select(QuestionReview))
+            self.assertEqual(review.decision, "fallback_editorial")
+            self.assertEqual(review.details["fallback"]["score"], 4.0)
+
+    def test_q16_favors_lower_penalty_reserve_in_rotated_category(self):
+        from persistence.models import GameRun
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.status = "bonus"
+            run.correct_main_answers = 15
+            run.bonus_wager_accepted = True
+            db.commit()
+        calls = []
+
+        def exhausted(difficulty, language, category, **kwargs):
+            calls.append(category)
+            score = 5.0 if len(calls) == 1 else 3.5
+            q = candidate(difficulty=15)
+            q._review_report = editorial_report(
+                score=score, difficulty=15, arbitration=True)
+            kwargs["editorial_reserve"].append(q)
+            raise HTTPException(status_code=502, detail="AI could not generate a valid question")
+
+        with patch("api.generate_valid_question", side_effect=exhausted):
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            self.assertEqual(run.bonus_topic_index, 1)
+            review = db.scalar(select(QuestionReview))
+            self.assertEqual(review.details["fallback"]["score"], 3.5)
+            stored = db.scalar(select(Question))
+            self.assertEqual(db.get(Topic, stored.topic_id).labels["en"], calls[-1])
 
     def test_q14_switches_to_unused_category_after_generation_exhaustion(self):
         from persistence.models import GameRun, Topic
