@@ -188,8 +188,9 @@ from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
                             tag_history=None, tag_context=None,
-                            too_easy_reserve: list | None = None,
-                            question_number: int | None = None) -> QuizQuestion:
+                            editorial_reserve: list | None = None,
+                            question_number: int | None = None,
+                            absolute_deadline: float | None = None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
         policy = GenerationPolicy.from_env(question_number=question_number)
@@ -205,7 +206,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     if tagged:
         from tagging.contract import TaggedQuestion
         from tagging.core import require_unique, critic_neighbors, threshold
-        from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
+        from tagging.review import check_tagged_quality, editorial_reserve_score
         from tagging.quality_skill.fact_tool import known_false_fact
         from tagging.quality_skill.known_issues import known_qa_issue
         from tagging.repair import (
@@ -213,7 +214,11 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         )
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
+    # A route-level deadline can bound multiple category retries within the
+    # browser's earlier-question HTTP timeout. No extra provider calls after it.
     deadline = perf_counter() + policy.budget_seconds
+    if absolute_deadline is not None:
+        deadline = min(deadline, absolute_deadline)
     duplicate_rejections = 0
     other_failures = 0
     retry_feedback = None  # Static server-authored guidance; never raw error text.
@@ -230,6 +235,13 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     # starting the generator; otherwise a slow third generation leaves only a
     # couple of seconds for review and produces an avoidable provider timeout.
     critic_reserve = policy.critic_min_remaining_seconds if tagged else 0.0
+    if tagged and question_number == 16 and quality_mode.value == "enforce":
+        # The mandatory bonus Terra check must have its own 18-second slot.
+        # Reserve it BEFORE calling the generator, not only when the critic
+        # finishes; it cannot be funded from a 3-second deadline remainder.
+        from tagging.quality_skill.arbiter import settings as arbiter_settings
+        _, _, arbiter_timeout = arbiter_settings()
+        critic_reserve += arbiter_timeout
     event("generation_policy", budget_ms=policy.budget_seconds * 1000,
           max_attempts=policy.max_attempts,
           provider_timeout_ms=policy.provider_timeout_seconds * 1000,
@@ -389,12 +401,15 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
-            if (tagged and difficulty < 15 and too_easy_reserve is not None
-                    and question is not None and is_strict_too_easy_reserve(question)):
-                # Keep only a fully checked, strictly too-easy-only question;
-                # publication is a separate last resort AFTER the global pool.
-                too_easy_reserve.append(question.model_copy(deep=True))
-                event("question_too_easy_reserve", outcome="eligible")
+            if tagged and editorial_reserve is not None and question is not None:
+                score = editorial_reserve_score(question)
+                if score is not None:
+                    # All correctness/ambiguity/leak/duplicate gates passed.
+                    # Keep a snapshot for last-resort selection after the
+                    # global pool; never persist as a reusable pool approval.
+                    editorial_reserve.append(question.model_copy(deep=True))
+                    event("question_editorial_reserve", outcome="eligible",
+                          score=score, requested_difficulty=difficulty)
             if tagged:
                 exclusions.append({"subject": question.fact.subject,
                                    "relation": question.fact.relation,

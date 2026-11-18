@@ -501,6 +501,35 @@
     </aside>
   </div>
 
+  <!-- A server-confirmed Q16 win opens a one-time, separate award ceremony. -->
+  <div class="platinum-victory-backdrop" *ngIf="platinumCelebrationOpen">
+    <section class="platinum-victory-card" role="dialog" aria-modal="true"
+             [attr.dir]="rtl ? 'rtl' : 'ltr'"
+             [attr.aria-label]="locale.t('victory.title')">
+      <button class="platinum-victory-close" type="button"
+              (click)="closePlatinumCelebration()"
+              [attr.aria-label]="locale.t('victory.close')">×</button>
+      <span class="platinum-victory-spark platinum-victory-spark-one" aria-hidden="true">✧</span>
+      <span class="platinum-victory-spark platinum-victory-spark-two" aria-hidden="true">✦</span>
+      <span class="platinum-victory-spark platinum-victory-spark-three" aria-hidden="true">✧</span>
+      <p class="platinum-victory-eyebrow">{{ locale.t('victory.eyebrow') }}</p>
+      <h2>{{ locale.t('victory.title') }}</h2>
+      <p class="platinum-victory-lead">{{ locale.t('victory.lead') }}</p>
+      <p class="platinum-victory-ai">{{ locale.t('victory.ai') }}</p>
+      <p class="platinum-victory-ceremony">{{ locale.t('victory.ceremony') }}</p>
+      <div class="platinum-victory-medal" aria-hidden="true">
+        <div class="platinum-victory-medal-inner">★</div>
+      </div>
+      <h3>{{ locale.t('victory.starName') }}</h3>
+      <p class="platinum-victory-description">{{ locale.t('victory.starDescription') }}</p>
+      <p class="platinum-victory-final">{{ locale.t('victory.final') }}</p>
+      <button class="platinum-victory-continue" type="button"
+              (click)="finishPlatinumCelebration()">
+        {{ locale.t('victory.showResults') }}
+      </button>
+    </section>
+  </div>
+
   <div class="premium-dialog-backdrop" *ngIf="premiumDialogOpen" (click)="closePremium()">
     <section class="premium-dialog" role="dialog" aria-modal="true"
              [attr.aria-label]="locale.t('premium.dialogTitle')" (click)="$event.stopPropagation()">

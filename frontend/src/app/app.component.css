@@ -1274,3 +1274,127 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .game-stage .answers button:hover:not(:disabled),
   .game-stage .answers button:focus-visible { transform: none; }
 }
+
+
+/* Q16: a true victory ceremony, separate from Premium membership checkout. */
+.platinum-victory-backdrop {
+  position: fixed; inset: 0; z-index: 1500;
+  display: grid; place-items: center; padding: 18px;
+  background: rgba(4, 8, 25, .91);
+  backdrop-filter: blur(13px);
+}
+.platinum-victory-card {
+  position: relative; isolation: isolate;
+  box-sizing: border-box; width: min(100%, 650px);
+  max-height: 94dvh; max-height: 94svh; overflow-y: auto;
+  padding: clamp(25px, 5vw, 45px) clamp(20px, 6vw, 50px);
+  border-radius: 28px;
+  border: 1px solid rgba(169, 241, 245, .58);
+  color: #f6faff; text-align: center;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(146, 236, 255, .20), transparent 47%),
+    radial-gradient(ellipse at 18% 90%, rgba(132, 94, 206, .28), transparent 58%),
+    linear-gradient(165deg, #1a2448 0%, #10172f 76%, #202044 100%);
+  box-shadow: 0 38px 110px rgba(0, 0, 0, .76),
+              inset 0 1px 0 rgba(255, 255, 255, .19),
+              0 0 70px rgba(147, 225, 255, .14);
+  scrollbar-width: thin;
+}
+.platinum-victory-close {
+  position: absolute; top: 12px; inset-inline-end: 12px;
+  width: 38px; height: 38px; border: 0; border-radius: 12px;
+  background: #ffffff0d; color: #d5edf9;
+  font-size: 27px; line-height: 1; cursor: pointer;
+}
+.platinum-victory-eyebrow {
+  margin: 0 0 9px; color: #b7efff;
+  font-size: 12px; font-weight: 850; letter-spacing: .16em;
+  text-transform: uppercase;
+}
+.platinum-victory-card h2 {
+  margin: 0 auto 16px; max-width: 540px;
+  font-size: clamp(29px, 5vw, 44px);
+  line-height: 1.1; font-weight: 900; letter-spacing: -.035em;
+  background: linear-gradient(100deg, #d5f9ff, #fff, #c9d8ff);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.platinum-victory-lead {
+  margin: 0 auto 11px; max-width: 515px;
+  font-size: clamp(16px, 2.4vw, 19px); line-height: 1.55;
+  color: #f0f4ff; font-weight: 650;
+}
+.platinum-victory-ai {
+  margin: 0 auto 16px; max-width: 535px;
+  color: #c5d7f5; line-height: 1.65; font-size: 15px;
+}
+.platinum-victory-ceremony {
+  margin: 0 auto 8px; color: #fdeac3;
+  font-style: italic; font-size: 14px; line-height: 1.55;
+}
+.platinum-victory-medal {
+  position: relative; display: grid; place-items: center;
+  width: 134px; height: 134px; margin: 15px auto;
+  border-radius: 50%;
+  background: conic-gradient(from 35deg, #9beeff, #c5abfc, #f5ffff, #75c6ea, #b6f7ff);
+  box-shadow: 0 0 0 7px #b9eaff13, 0 0 0 14px #d5ebff0b,
+              0 18px 55px #89deff3f;
+  animation: platinum-medal-glow 3.5s ease-in-out infinite alternate;
+}
+.platinum-victory-medal-inner {
+  display: grid; place-items: center; width: 118px; height: 118px;
+  border-radius: 50%; border: 1px solid #ffffff9c;
+  background: radial-gradient(circle at 30% 25%, #f9ffff, #b4dcf2 49%, #7295cc);
+  box-shadow: inset 0 5px 12px #ffffffa1, inset 0 -7px 16px #334078a6;
+  font-size: 82px; line-height: 1; color: #fff;
+  text-shadow: 0 3px 4px #53699c, 0 0 20px #fff;
+}
+.platinum-victory-card h3 {
+  margin: 7px 0 8px; font-size: clamp(20px, 4vw, 25px);
+  letter-spacing: .13em; font-weight: 900; color: #bdf2ff;
+}
+.platinum-victory-description {
+  margin: 0 auto 14px; max-width: 500px;
+  color: #d6e3f7; line-height: 1.6; font-size: 15px;
+}
+.platinum-victory-final {
+  margin: 0 auto 22px; max-width: 500px;
+  color: #fce7b9; font-size: 15px; font-weight: 700; line-height: 1.5;
+}
+.platinum-victory-continue {
+  display: block; width: min(100%, 360px); margin: 0 auto;
+  padding: 15px 20px; min-height: 50px;
+  border-radius: 14px; border: 1px solid #d7f8ff;
+  background: linear-gradient(110deg, #9ce7f8, #d6e5ff 48%, #bdb2fa);
+  box-shadow: 0 10px 28px #85c7ff38;
+  color: #17203b; font-size: 15px; font-weight: 850; cursor: pointer;
+}
+.platinum-victory-continue:hover { filter: brightness(1.07); transform: translateY(-1px); }
+.platinum-victory-continue:focus-visible,
+.platinum-victory-close:focus-visible {
+  outline: 3px solid #ffdc89; outline-offset: 3px;
+}
+.platinum-victory-spark {
+  position: absolute; pointer-events: none; color: #c2eeff;
+  font-size: 24px; text-shadow: 0 0 17px #8fdaff;
+  animation: platinum-sparkle 3s ease-in-out infinite alternate;
+}
+.platinum-victory-spark-one { top: 18%; left: 7%; }
+.platinum-victory-spark-two { top: 38%; right: 9%; animation-delay: .8s; }
+.platinum-victory-spark-three { bottom: 23%; left: 11%; animation-delay: 1.7s; }
+@keyframes platinum-medal-glow {
+  from { box-shadow: 0 0 0 7px #b9eaff13, 0 0 0 14px #d5ebff0b, 0 13px 35px #89deff23; }
+  to { box-shadow: 0 0 0 8px #b9eaff1f, 0 0 0 16px #d5ebff16, 0 20px 65px #89deff66; }
+}
+@keyframes platinum-sparkle { from { opacity: .4; transform: scale(.8); } to { opacity: 1; transform: scale(1.1); } }
+@media (max-width: 520px) {
+  .platinum-victory-backdrop { padding: 9px; }
+  .platinum-victory-card { max-height: 96svh; padding: 28px 19px 24px; border-radius: 20px; }
+  .platinum-victory-medal { width: 112px; height: 112px; margin: 12px auto; }
+  .platinum-victory-medal-inner { width: 99px; height: 99px; font-size: 68px; }
+  .platinum-victory-spark-one { top: 12%; left: 4%; }
+  .platinum-victory-spark-two { right: 3%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .platinum-victory-medal, .platinum-victory-spark { animation: none; }
+  .platinum-victory-continue:hover { transform: none; }
+}

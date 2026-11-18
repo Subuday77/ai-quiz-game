@@ -18,6 +18,7 @@ const GAME_API = '/api/v2/games';
 const STARS_API = '/api/v2/stars';
 const ACTIVE_GAME_KEY = 'ai-quiz-game:active-round:v2:';
 const PENDING_RESULTS_KEY = 'ai-quiz-game:unviewed-results:v1:';
+const PLATINUM_CELEBRATED_KEY = 'ai-quiz-game:platinum-celebrated:v1:';
 const HELPER_CALL_KEY = 'ai-quiz-game:helper-call:v1:';
 const DRAFT_VOTE_KEY = 'ai-quiz-game:uncommitted-vote:v1:';
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -344,6 +345,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   profileMenuOpen = false;
   premiumDialogOpen = false;
+  platinumCelebrationOpen = false;
   premium: PremiumStatus | null = null;
   appealAllowance: AppealAllowance | null = null;
   appealBusy = false;
@@ -2290,6 +2292,41 @@ export class AppComponent implements OnInit, OnDestroy {
     } catch { /* refresh may forget local choice, never creates a DB vote */ }
   }
 
+  /** A round-specific ceremony, not a second award. Server award wins. */
+  private platinumCelebrationKey(runId: string): string {
+    return PLATINUM_CELEBRATED_KEY + this.account?.id + ':' + runId;
+  }
+
+  private openPlatinumCelebration(runId: string): void {
+    if (!this.account || !runId) return;
+    try {
+      if (localStorage.getItem(this.platinumCelebrationKey(runId)) === 'seen') return;
+    } catch { /* The ceremony works in private browsing too. */ }
+    this.platinumCelebrationOpen = true;
+    // The dialog is conditionally rendered; put keyboard focus inside it.
+    if (typeof document !== 'undefined') {
+      setTimeout(() => {
+        if (this.platinumCelebrationOpen)
+          document.querySelector<HTMLButtonElement>('.platinum-victory-continue')?.focus();
+      }, 0);
+    }
+  }
+
+  closePlatinumCelebration(): void {
+    if (!this.platinumCelebrationOpen) return;
+    this.platinumCelebrationOpen = false;
+    try {
+      if (this.account && this.gameId)
+        localStorage.setItem(this.platinumCelebrationKey(this.gameId), 'seen');
+    } catch { /* No persistent storage means only this view remembers. */ }
+  }
+
+  finishPlatinumCelebration(): void {
+    if (!this.platinumCelebrationOpen) return;
+    this.closePlatinumCelebration();
+    if (this.screen === 'feedback' && this.gameEnded) this.continue();
+  }
+
   answer(choice: Choice): void {
     if (this.loading || this.perksBusy || this.appealBusy || !this.current || this.screen !== 'question' || !this.account) return;
     const submittedQuestionId = this.current.question_id;
@@ -2329,6 +2366,10 @@ export class AppComponent implements OnInit, OnDestroy {
         this.screen = 'feedback';
         this.loading = false;
         this.scrollToScreenTop('feedback');
+        if (this.current?.bonus && result.correct && result.phase === 'completed'
+            && result.achievement === 'platinum') {
+          this.openPlatinumCelebration(this.gameId);
+        }
       },
       error: (err: unknown) => {
         if (this.isUnauthorized(err)) this.sessionExpired();
@@ -2909,6 +2950,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   @HostListener('document:keydown.escape')
   onPremiumEscape(): void {
+    if (this.platinumCelebrationOpen) {
+      this.closePlatinumCelebration();
+      return;
+    }
     if (this.premiumDialogOpen) this.closePremium();
   }
 
@@ -3196,6 +3241,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.current = null;
     this.feedback = null;
     this.finishedPhase = null;
+    this.platinumCelebrationOpen = false;
     this.appealMessage = '';
     this.profileMenuOpen = false;
     this.appealedQuestionIds.clear();
@@ -3284,6 +3330,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.helperCard = run.helper ?? null;
     this.screen = 'done';
     if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    if (run.phase === 'completed' && run.round_stars.platinum > 0)
+      this.openPlatinumCelebration(run.game_id);
     // Preserve the bookmark so an F5 does not erase the losing-card appeal path.
     if (run.phase !== 'lost') this.clearPendingResults();
   }

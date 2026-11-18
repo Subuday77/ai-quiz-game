@@ -177,8 +177,11 @@ def offer_approved_pool_question(
     The SQL anti-join prevents exact repeats; require_unique also prevents
     fact/tag/semantic repeats, including those across the user's languages.
 
-    search_categories enables a single ranked SQL candidate query for DB First:
-    per-category scan limit and first-admitted-category priority are preserved.
+    search_categories enables a single ranked SQL candidate query for DB First
+    or emergency all-allowed-topic recovery after exhausted duplicates:
+    per-category scan limit and first-eligible-category priority are preserved.
+    An emergency search skips the probabilistic rating filter but retains
+    approved review, minimum community score, fact checks and user dedup.
     Paid changes and Q16 intentionally retain the original one-topic path.
     """
     if max_candidates is None:
@@ -191,12 +194,12 @@ def offer_approved_pool_question(
     bonus_unverified = 0
     multi = search_categories is not None
     if multi:
-        if replace_question_id is not None or not rating_filter:
-            raise ValueError("Multi-category pool scan is only for unmodified DB First")
+        if replace_question_id is not None:
+            raise ValueError("Multi-category pool scan cannot replace a paid question")
         ordered_categories = list(search_categories)
         if not ordered_categories or ordered_categories[0] != category or len(
                 ordered_categories) != len(set(ordered_categories)):
-            raise ValueError("Invalid ordered DB First categories")
+            raise ValueError("Invalid ordered multi-category pool scan")
     else:
         ordered_categories = [category]
     try:
