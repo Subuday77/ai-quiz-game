@@ -903,7 +903,9 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                     db, run_id=run_id, user_id=user.id,
                     category=safe_main_pool_categories[0],
                     search_categories=safe_main_pool_categories,
-                    max_candidates=pool_settings[2],
+                    # Emergency all-topic scans run inside a 45s HTTP
+                    # request; cap work to ten candidates per category.
+                    max_candidates=min(pool_settings[2], 10),
                     rating_filter=False,
                     quality_priority=quality_priority,
                 )
