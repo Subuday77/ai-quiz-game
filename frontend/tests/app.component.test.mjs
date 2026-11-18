@@ -3293,6 +3293,78 @@ test('question scrolling is independent of viewport width and ignores duplicate 
   }
 });
 
+
+test('answer feedback scrolls to absolute top on success and failure, on desktop and mobile', () => {
+  for (const { correct, mobile } of [
+    { correct: true, mobile: false },
+    { correct: false, mobile: true },
+  ]) {
+    const { app, posts } = setup();
+    const original = globalThis.window;
+    const frames = [];
+    const scrollCalls = [];
+    globalThis.window = {
+      location: { search: '', hash: '', pathname: '/' },
+      history: { replaceState() {} },
+      matchMedia: () => ({ matches: mobile }),
+      requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+      scrollTo: (...args) => scrollCalls.push(args),
+    };
+    try {
+      app.screen = 'question';
+      app.current = { ...question };
+      app.answer(correct ? 'B' : 'A');
+      assert.equal(posts.length, 1);
+      assert.equal(scrollCalls.length, 0, 'do not scroll before the answer is confirmed');
+      succeed(posts[0], {
+        phase: correct ? 'main' : 'lost',
+        correct, correct_answer: 'B',
+        correct_main_answers: correct ? 5 : 4, achievement: correct ? 'bronze' : null,
+      });
+      assert.equal(app.screen, 'feedback');
+      assert.deepEqual(scrollCalls, [[0, 0]], 'scroll immediately when feedback appears');
+      assert.equal(frames.length, 1);
+      frames.shift()();
+      assert.deepEqual(scrollCalls, [[0, 0]], 'wait for the second animation frame');
+      frames.shift()();
+      assert.deepEqual(scrollCalls, [[0, 0], [0, 0]],
+        'scroll again after feedback is rendered to prevent mobile scroll anchoring');
+    } finally {
+      if (original === undefined) delete globalThis.window;
+      else globalThis.window = original;
+    }
+  }
+});
+
+test('outdated feedback scroll callback does not pull the player away from another screen', () => {
+  const { app, posts } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  const scrollCalls = [];
+  globalThis.window = {
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    scrollTo: (...args) => scrollCalls.push(args),
+  };
+  try {
+    app.screen = 'question';
+    app.current = { ...question };
+    app.answer('B');
+    succeed(posts[0], { phase: 'main', correct: true, correct_answer: 'B',
+      correct_main_answers: 5, achievement: 'bronze' });
+    assert.deepEqual(scrollCalls, [[0, 0]]);
+    frames.shift()();
+    app.screen = 'setup'; // The player has navigated before the second frame.
+    frames.shift()();
+    assert.deepEqual(scrollCalls, [[0, 0]],
+      'a stale feedback frame must not move a different screen');
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
 test('mobile scheduled scroll is cancelled logically when leaving question view', () => {
   const { app, requests, scheduler } = setup();
   const original = globalThis.window;
