@@ -9,6 +9,7 @@ import random
 import secrets
 from uuid import UUID, NAMESPACE_URL, uuid5
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StrictInt
@@ -318,7 +319,7 @@ def _main_pool_search_categories(
 
 def _alternate_main_category(db: Session, run: GameRun, number: int,
                              primary: str) -> str | None:
-    """One deterministic, allowed, unconsumed backup for a late main slot.
+    """One deterministic, allowed, unconsumed backup for any main slot.
 
     Do not mutate the game or charge a paid category-change perk. A question
     only consumes a topic after it is actually offered and answered.
@@ -817,15 +818,16 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 detail="Historical questions lack verified tags; run tagging.backfill",
             ) from None
 
-        # AI retry policy stays unchanged: one alternate for late main slots.
-        # DB First searches all unplayed/allowed main topics before *any* AI.
+        # Every main question can switch once to an unused, allowed alternate
+        # after exhausted generation (including exclusively duplicate results).
+        # DB First still searches all usable topics before any AI call.
         # Q16 retains its separate persisted rotation and stricter pool checks.
         pool_search_categories = (
             _main_pool_search_categories(db, run, question_number, category)
             if source_order == "pool_first" and question_number <= 15 else []
         )
         categories_to_try = [category]
-        if 10 <= question_number <= 15:
+        if 1 <= question_number <= 15:
             alternate = _alternate_main_category(db, run, question_number, category)
             if alternate is not None:
                 categories_to_try.append(alternate)
@@ -854,6 +856,12 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 ) from None
         reserves = []
         last_generation_error = None
+        # Q1–Q12 use a 45s browser timeout; even with category recovery the
+        # whole backend generation must finish first. Leave ~5s for DB
+        # persistence/network, without changing normal 30s per-category caps.
+        early_main_deadline = (
+            perf_counter() + 40.0 if question_number <= 12 else None
+        )
 
         def offer_pool(candidate_category: str, *, probability_filter: bool = False):
             if not pool_settings[0]:
@@ -957,6 +965,7 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                     tag_history=history, tag_context=exclusions,
                     editorial_reserve=editorial_reserve,
                     question_number=question_number,
+                    absolute_deadline=early_main_deadline,
                 )
             except HTTPException as generation_error:
                 recoverable = (generation_error.status_code in (502, 503)
