@@ -398,7 +398,6 @@ export class AppComponent implements OnInit, OnDestroy {
   configLoading = true;
   questionLoading = false;
   questionOnOtherDevice = false;
-  peerGenerationAcknowledged = false;
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
@@ -2063,7 +2062,7 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadQuestion(): void {
+  loadQuestion(waitOnly = false, retryFailed = false): void {
     if (!this.gameId || this.loading || !this.account) return;
     const requestedGameId = this.gameId;
     const accountId = this.account.id;
@@ -2084,7 +2083,6 @@ export class AppComponent implements OnInit, OnDestroy {
     // Keep the peer-generation message across the next 2-second poll.
     if (this.generationPolls === 0) {
       this.questionOnOtherDevice = false;
-      this.peerGenerationAcknowledged = false;
     }
     this.shopOpen = false;
     this.longWait = false;
@@ -2101,8 +2099,10 @@ export class AppComponent implements OnInit, OnDestroy {
       : this.requestTimeoutMs;
     let waitingForPeer = false;
     let checkingPeerStatus = false;
+    const questionUrl = GAME_API + '/' + requestedGameId + '/question'
+      + (waitOnly ? '?wait_only=true' : retryFailed ? '?retry_failed=true' : '');
     this.subscriptions.add(this.http.get<PublicQuestion>(
-      GAME_API + '/' + requestedGameId + '/question',
+      questionUrl,
     ).pipe(
       timeout(questionTimeoutMs),
       finalize(() => {
@@ -2122,7 +2122,6 @@ export class AppComponent implements OnInit, OnDestroy {
         if (!currentRequest()) return;
         this.generationPolls = 0;
         this.questionOnOtherDevice = false;
-        this.peerGenerationAcknowledged = false;
         this.current = question;
         this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
@@ -2159,11 +2158,10 @@ export class AppComponent implements OnInit, OnDestroy {
             // failure. Poll for its saved attempt without starting another.
             this.subscriptions.add(timer(2000).subscribe(() => {
               if (currentRequest() && this.screen === 'question' && !this.loading)
-                this.loadQuestion();
+                this.loadQuestion(true);
             }));
           } else {
             this.questionOnOtherDevice = false;
-            this.peerGenerationAcknowledged = false;
             this.questionLoading = false;
             this.canRetryQuestion = true;
             this.fail('game.questionTimeout');
@@ -2172,7 +2170,6 @@ export class AppComponent implements OnInit, OnDestroy {
         const showRealError = (): void => {
           if (!currentRequest()) return;
           this.questionOnOtherDevice = false;
-          this.peerGenerationAcknowledged = false;
           this.questionLoading = false;
           this.generatingNextQuestion = false;
           this.canRetryQuestion = true;
@@ -2194,8 +2191,15 @@ export class AppComponent implements OnInit, OnDestroy {
           }
         };
         if (error instanceof HttpErrorResponse && error.status === 409 &&
-            error.error?.detail?.code === 'question_generating') {
+            ['question_generating', 'question_not_ready'].includes(error.error?.detail?.code)) {
           waitForOtherDevice();
+          return;
+        }
+        if (error instanceof HttpErrorResponse &&
+            error.error?.detail?.code === 'question_generation_failed') {
+          // Server persisted the terminal failure: do not start another AI
+          // call until someone explicitly presses Retry.
+          showRealError();
           return;
         }
         if (error instanceof HttpErrorResponse && error.status === 409 &&
@@ -2231,19 +2235,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
-  acknowledgePeerGeneration(): void {
-    // Dismiss only the notice; the 2-second polling continues until the
-    // authoritative attempt becomes available or an actual failure occurs.
-    this.peerGenerationAcknowledged = true;
-  }
-
   retryQuestion(): void {
     if (this.canRetryQuestion && !this.loading) {
       this.generationPolls = 0;
       this.questionOnOtherDevice = false;
-      this.peerGenerationAcknowledged = false;
       this.generatingNextQuestion = this.progress > 0;
-      this.loadQuestion();
+      this.loadQuestion(false, true);
     }
   }
 
@@ -3186,7 +3183,6 @@ export class AppComponent implements OnInit, OnDestroy {
     ++this.questionRequestVersion; // Any in-flight question or polling timer is obsolete.
     this.generationPolls = 0;
     this.questionOnOtherDevice = false;
-    this.peerGenerationAcknowledged = false;
     this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
