@@ -561,15 +561,19 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
 QUESTION_GENERATION_LEASE_SECONDS = 600
 
 
-def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> str | None:
+def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> tuple[str | None, PublicQuestion | None]:
     try:
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
             raise HTTPException(status_code=409, detail={"code": "round_ended"})
         cached = pending_question(db, run_id=run.id)
         if cached is not None and cached[1].status == "approved":
+            # Return the already-issued question while holding the run lock.
+            # Delegating to the slow path after rollback can race with another
+            # device answering it and accidentally start UNLEASED generation.
+            result = _public(*cached, phase=run.status, db=db)
             db.rollback()
-            return None  # The original handler rechecks and serves this attempt.
+            return None, result
         now = datetime.now(timezone.utc)
         expires = run.question_generation_until
         if expires is not None and expires.tzinfo is None:
@@ -580,7 +584,7 @@ def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> str 
         run.question_generation_token = token
         run.question_generation_until = now + timedelta(seconds=QUESTION_GENERATION_LEASE_SECONDS)
         db.commit()  # Release row lock before any AI / pool work.
-        return token
+        return token, None
     except Exception:
         db.rollback()
         raise
@@ -606,9 +610,12 @@ def _release_question_generation(db: Session, run_id: UUID, user_id: UUID,
 def get_question(run_id: UUID, user: User = Depends(authenticated_user),
                  db: Session = Depends(get_db)):
     try:
-        token = _claim_question_generation(db, run_id, user.id)
+        token, cached_result = _claim_question_generation(db, run_id, user.id)
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
+    if cached_result is not None:
+        event("question_cache", hit=True)
+        return cached_result
     try:
         return _get_question_with_claim(run_id, user, db)
     finally:
