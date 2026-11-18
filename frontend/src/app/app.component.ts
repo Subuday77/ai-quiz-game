@@ -66,6 +66,7 @@ interface GameInfo {
   main_question_index?: number;
   skipped_questions?: number;
   question_issued?: boolean;
+  question_generation_in_progress?: boolean;
   helper?: HelperCard | null;
   replacement_game_id?: string | null;
   bonus_decision_available?: boolean;
@@ -396,6 +397,7 @@ export class AppComponent implements OnInit, OnDestroy {
   error = '';
   configLoading = true;
   questionLoading = false;
+  questionOnOtherDevice = false;
   longWait = false;
   canRetryQuestion = false;
   duplicateExhausted = false;
@@ -2076,6 +2078,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.resumeAvailable = false;
     this.loading = true;
     this.questionLoading = true;
+    // Keep the peer-generation message across the next 2-second poll.
+    if (this.generationPolls === 0) this.questionOnOtherDevice = false;
     this.shopOpen = false;
     this.longWait = false;
     this.canRetryQuestion = false;
@@ -2090,6 +2094,7 @@ export class AppComponent implements OnInit, OnDestroy {
       ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
       : this.requestTimeoutMs;
     let waitingForPeer = false;
+    let checkingPeerStatus = false;
     this.subscriptions.add(this.http.get<PublicQuestion>(
       GAME_API + '/' + requestedGameId + '/question',
     ).pipe(
@@ -2100,7 +2105,7 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loading = false;
         // Keep the preparation spinner visible while waiting for the other
         // device's generation; there must be no empty-screen flicker.
-        if (!waitingForPeer) {
+        if (!waitingForPeer && !checkingPeerStatus) {
           this.questionLoading = false;
           this.generatingNextQuestion = false;
         }
@@ -2110,6 +2115,7 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (question) => {
         if (!currentRequest()) return;
         this.generationPolls = 0;
+        this.questionOnOtherDevice = false;
         this.current = question;
         this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
@@ -2131,21 +2137,53 @@ export class AppComponent implements OnInit, OnDestroy {
           this.sessionExpired();
           return;
         }
-        if (error instanceof HttpErrorResponse && error.status === 409 &&
-            error.error?.detail?.code === 'question_generating') {
-          // Another device/worker is doing the expensive work. Poll its result,
-          // but never launch a second AI generation or leave an endless Retry.
+        const waitForOtherDevice = (): void => {
+          if (!currentRequest()) return;
+          this.questionOnOtherDevice = true;
+          this.questionLoading = true;
+          this.canRetryQuestion = false;
+          this.error = '';
           if (++this.generationPolls <= 80) {
-            this.canRetryQuestion = false;
             waitingForPeer = true;
+            // A 409 indicates an existing provider call, not a generation
+            // failure. Poll for its saved attempt without starting another.
             this.subscriptions.add(timer(2000).subscribe(() => {
               if (currentRequest() && this.screen === 'question' && !this.loading)
                 this.loadQuestion();
             }));
           } else {
+            this.questionOnOtherDevice = false;
+            this.questionLoading = false;
             this.canRetryQuestion = true;
             this.fail('game.questionTimeout');
           }
+        };
+        const showRealError = (): void => {
+          if (!currentRequest()) return;
+          this.questionOnOtherDevice = false;
+          this.questionLoading = false;
+          this.generatingNextQuestion = false;
+          this.canRetryQuestion = true;
+          if (error instanceof HttpErrorResponse && error.status === 409 &&
+              error.error?.detail?.code === 'duplicate_exhausted') {
+            this.duplicateExhausted = true;
+            this.current = null;
+            this.feedback = null;
+            this.screen = 'question';
+            this.fail('game.duplicateExhausted');
+          } else if (error instanceof TimeoutError) {
+            this.fail('game.questionTimeout');
+          } else if (error instanceof HttpErrorResponse && error.status === 502) {
+            this.fail('game.questionInvalid');
+          } else if (error instanceof HttpErrorResponse && error.status === 503) {
+            this.fail('game.questionUnavailable');
+          } else {
+            this.fail('game.questionFailed');
+          }
+        };
+        if (error instanceof HttpErrorResponse && error.status === 409 &&
+            error.error?.detail?.code === 'question_generating') {
+          waitForOtherDevice();
           return;
         }
         if (error instanceof HttpErrorResponse && error.status === 409 &&
@@ -2154,25 +2192,30 @@ export class AppComponent implements OnInit, OnDestroy {
           this.reconcileQuestionConflict(requestedGameId, accountId, version);
           return;
         }
-        this.canRetryQuestion = true;
-        if (error instanceof HttpErrorResponse && error.status === 409 &&
-            error.error?.detail?.code === 'duplicate_exhausted') {
-          // No new question was offered. Keep the server game ID, progress,
-          // and saved resume token intact; hide prior round feedback.
-          this.duplicateExhausted = true;
-          this.current = null;
-          this.feedback = null;
-          this.screen = 'question';
-          this.fail('game.duplicateExhausted');
-        } else if (error instanceof TimeoutError) {
-          this.fail('game.questionTimeout');
-        } else if (error instanceof HttpErrorResponse && error.status === 502) {
-          this.fail('game.questionInvalid');
-        } else if (error instanceof HttpErrorResponse && error.status === 503) {
-          this.fail('game.questionUnavailable');
-        } else {
-          this.fail('game.questionFailed');
+        // Gateways can sometimes replace the structured 409 with a 5xx.
+        // Verify the live lease via the authenticated API before showing a
+        // misleading AI failure; otherwise preserve the actual error.
+        if (error instanceof TimeoutError ||
+            (error instanceof HttpErrorResponse &&
+              (error.status === 0 || error.status >= 500))) {
+          checkingPeerStatus = true;
+          this.subscriptions.add(this.http.get<GameInfo>(
+            GAME_API + '/' + encodeURIComponent(requestedGameId),
+          ).pipe(timeout(5000)).subscribe({
+            next: state => {
+              checkingPeerStatus = false;
+              if (!currentRequest()) return;
+              if (state.question_generation_in_progress === true) waitForOtherDevice();
+              else showRealError();
+            },
+            error: () => {
+              checkingPeerStatus = false;
+              showRealError();
+            },
+          }));
+          return;
         }
+        showRealError();
       },
     }));
   }
@@ -2180,6 +2223,7 @@ export class AppComponent implements OnInit, OnDestroy {
   retryQuestion(): void {
     if (this.canRetryQuestion && !this.loading) {
       this.generationPolls = 0;
+      this.questionOnOtherDevice = false;
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
     }
@@ -3117,6 +3161,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private resetGameView(): void {
     ++this.questionRequestVersion; // Any in-flight question or polling timer is obsolete.
     this.generationPolls = 0;
+    this.questionOnOtherDevice = false;
     this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
