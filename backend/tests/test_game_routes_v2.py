@@ -635,5 +635,76 @@ class PersistentGameAPITests(unittest.TestCase):
         )
 
 
+    def test_question_generation_lease_single_flight_and_expired_takeover(self):
+        from datetime import datetime, timedelta, timezone
+        from fastapi import HTTPException
+        from persistence.game_routes import (
+            _claim_question_generation, _release_question_generation,
+        )
+        user_id = UUID(self.register("TwoDevices"))
+        game_id = UUID(self.start())
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            first = _claim_question_generation(db, game_id, user_id)
+        self.assertTrue(first)
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            with self.assertRaises(HTTPException) as raised:
+                _claim_question_generation(db, game_id, user_id)
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(raised.exception.detail, {"code": "question_generating"})
+        # The second browser cannot call the AI while the lease is live.
+        self.assertEqual(self.client.get(
+            f"/api/v2/games/{game_id}/question").json()["detail"],
+            {"code": "question_generating"})
+
+        # A dead worker's expired lease can be claimed, but stale cleanup
+        # cannot delete the replacement worker's token.
+        with Session(self.engine) as db:
+            run = db.get(GameRun, game_id)
+            run.question_generation_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            second = _claim_question_generation(db, game_id, user_id)
+            self.assertNotEqual(first, second)
+            _release_question_generation(db, game_id, user_id, first)
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, game_id).question_generation_token, second)
+        with Session(self.engine) as db:
+            _release_question_generation(db, game_id, user_id, second)
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(GameRun, game_id).question_generation_token)
+
+    @patch("api.create_question", return_value=QUESTION)
+    def test_generation_failure_releases_lease_and_cached_question_reuses_it(self, gen):
+        from fastapi import HTTPException
+        self.register("LeaseCleanup")
+        game_id = UUID(self.start())
+        gen.side_effect = [HTTPException(status_code=503, detail="AI unavailable"), QUESTION]
+        url = f"/api/v2/games/{game_id}/question"
+        self.assertEqual(self.client.get(url).status_code, 503)
+        with Session(self.engine) as db:
+            run = db.get(GameRun, game_id)
+            self.assertIsNone(run.question_generation_token)
+            self.assertIsNone(run.question_generation_until)
+        accepted = self.client.get(url)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        cached = self.client.get(url)
+        self.assertEqual(cached.json(), accepted.json())
+        gen.assert_called()
+        self.assertEqual(gen.call_count, 2)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 1)
+
+    def test_terminal_question_has_explicit_stale_round_code(self):
+        self.register("StaleDevice")
+        game_id = UUID(self.start())
+        with Session(self.engine) as db:
+            run = db.get(GameRun, game_id)
+            run.status = "abandoned"
+            db.commit()
+        response = self.client.get(f"/api/v2/games/{game_id}/question")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "round_ended")
+
+
 if __name__ == "__main__":
     unittest.main()
