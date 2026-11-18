@@ -89,7 +89,10 @@ test('game stage stretches to sidebar height on wide layouts', () => {
 
 test('player-facing locale dictionary does not mention database implementation', () => {
   const en = JSON.parse(readFileSync(join(root, '../backend/localization/en.json'), 'utf8'));
-  assert.match(en['stars.account'], /your account/);
+  assert.equal(Object.hasOwn(en, 'stars.account'), false);
+  assert.doesNotMatch(rail, /stars\.account/);
+  assert.match(rail, /\*ngIf="!account" class="star-local"/);
+  assert.match(rail, /locale\.t\('stars\.signIn'\)/);
   assert.ok(!Object.values(en).some(value =>
     typeof value === 'string' && /postgresql/i.test(value)
   ));
