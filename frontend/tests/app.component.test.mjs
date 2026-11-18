@@ -3440,3 +3440,75 @@ test('mobile scheduled scroll is cancelled logically when leaving question view'
     else globalThis.window = original;
   }
 });
+
+
+test('Q16 victory opens a localized Platinum ceremony only after server award', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const start = template.indexOf('class="platinum-victory-backdrop"');
+  const end = template.indexOf('class="premium-dialog-backdrop"', start);
+  assert.ok(start > 0 && end > start);
+  const modal = template.slice(start, end);
+  assert.match(modal, /role="dialog" aria-modal="true"/);
+  assert.match(modal, /\(click\)="finishPlatinumCelebration\(\)"/);
+  assert.match(modal, /\(click\)="closePlatinumCelebration\(\)"/);
+  assert.match(css, /\.platinum-victory-backdrop/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  for (const key of ['eyebrow', 'title', 'lead', 'ai', 'ceremony', 'starName',
+                     'starDescription', 'final', 'showResults', 'close']) {
+    assert.ok(english['victory.' + key], key);
+    assert.match(modal, new RegExp("locale\\.t\\('victory\\." + key + "'\\)"));
+  }
+
+  const { app, posts } = setup();
+  app.current = { ...question, question_id: 'bonus-16', bonus: true, number: 16,
+                  difficulty: 15 };
+  app.screen = 'question';
+  app.answer('B');
+  succeed(posts.at(-1), {
+    correct: true, correct_answer: 'B', phase: 'completed',
+    correct_main_answers: 15, achievement: 'platinum',
+  });
+  assert.equal(app.platinumCelebrationOpen, true);
+  assert.equal(app.currentStars.platinum, 1);
+  assert.equal(app.screen, 'feedback');
+  app.finishPlatinumCelebration();
+  assert.equal(app.platinumCelebrationOpen, false);
+  assert.equal(app.screen, 'done');
+});
+
+test('neither Q15 completion nor a failed Q16 can trigger platinum ceremony', () => {
+  for (const scenario of [
+    { number: 15, bonus: false, correct: true, phase: 'completed', achievement: 'gold' },
+    { number: 16, bonus: true, correct: false, phase: 'lost', achievement: null },
+    { number: 16, bonus: true, correct: true, phase: 'completed', achievement: null },
+  ]) {
+    const { app, posts } = setup();
+    app.current = { ...question, question_id: 'case-' + scenario.number,
+                    bonus: scenario.bonus, number: scenario.number };
+    app.screen = 'question';
+    app.answer('B');
+    succeed(posts.at(-1), {
+      correct: scenario.correct, correct_answer: 'B',
+      phase: scenario.phase, correct_main_answers: 15,
+      achievement: scenario.achievement,
+    });
+    assert.equal(app.platinumCelebrationOpen, false, JSON.stringify(scenario));
+  }
+});
+
+test('restoring an earned Q16 Platinum star reopens an unseen ceremony', () => {
+  const { app } = setup();
+  app.pendingResults = {
+    game_id: 'bonus-complete', phase: 'completed', language: 'English',
+    round_stars: { bronze: 1, silver: 1, gold: 1, platinum: 1 },
+    correct_main_answers: 15, main_question_index: 15,
+  };
+  app.screen = 'setup';
+  app.showPendingResults();
+  assert.equal(app.screen, 'done');
+  assert.equal(app.platinumCelebrationOpen, true);
+  app.finishPlatinumCelebration();
+  assert.equal(app.screen, 'done', 'restored results should not request another question');
+  assert.equal(app.platinumCelebrationOpen, false);
+});
