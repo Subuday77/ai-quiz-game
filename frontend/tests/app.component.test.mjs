@@ -319,7 +319,7 @@ test('45-second timeout clears loading and offers retry without a new game', () 
   scheduler.run(() => {
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, requests[0].url);
+    assert.equal(requests[1].url, requests[0].url + '?retry_failed=true');
     assert.equal(posts.length, 0);
     succeed(requests[1]);
   });
@@ -355,7 +355,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
     assert.equal(posts.length, 1); // No second game created.
     app.retryQuestion();
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, '/api/v2/games/started-round/question');
+    assert.equal(requests[1].url, '/api/v2/games/started-round/question?retry_failed=true');
     succeed(requests[1], { ...question, number: 1, difficulty: 0 });
   });
   assert.equal(app.screen, 'question');
@@ -2155,6 +2155,7 @@ test('two devices share a single generation; follower polls until question exist
     assert.equal(requests.length, 1); // Do not trigger a second request instantly.
     scheduler.schedule(() => {
       assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
       succeed(requests[1], { ...question, question_id: 'shared-question' });
     }, 2001);
   });
@@ -2176,6 +2177,7 @@ test('a replaced 502 response is reclassified only when PostgreSQL confirms peer
     assert.equal(app.error, '');
     scheduler.schedule(() => {
       assert.equal(requests.length, 2);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
       succeed(requests[1], { ...question, question_id: 'saved-by-peer' });
     }, 2001);
   });
@@ -2197,20 +2199,17 @@ test('real provider failures keep Retry when the game lease is not active', () =
   }
 });
 
-test('localized peer-generation caption is dismissible with OK, not a Retry', () => {
+test('localized peer-generation caption has no OK button and stays visible while waiting', () => {
   const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
   assert.equal(english['game.questionOnOtherDevice'],
     'The question is already being generated on another device. Waiting for the result…');
-  assert.equal(english['common.ok'], 'OK');
-  assert.match(html, /questionOnOtherDevice && !peerGenerationAcknowledged \? 'game.questionOnOtherDevice' : 'game.loading'/);
-  assert.match(html, /\*ngIf="questionOnOtherDevice && !peerGenerationAcknowledged"/);
-  assert.match(html, /\(click\)="acknowledgePeerGeneration\(\)"/);
-  assert.match(html, /locale\.t\('common\.ok'\)/);
+  assert.match(html, /questionOnOtherDevice \? 'game.questionOnOtherDevice' : 'game.loading'/);
+  assert.doesNotMatch(html, /peer-generation-ok|acknowledgePeerGeneration/);
+  assert.doesNotMatch(source, /peerGenerationAcknowledged|acknowledgePeerGeneration/);
   assert.match(html, /questionLoading && longWait && !questionOnOtherDevice/);
-  assert.match(source, /question_generation_in_progress === true/);
 });
 
-test('OK dismisses peer notice but never cancels automatic polling', () => {
+test('follower receives saved provider failure and never launches AI automatically', () => {
   const { app, requests, scheduler } = setup();
   scheduler.run(() => {
     app.loadQuestion();
@@ -2218,27 +2217,72 @@ test('OK dismisses peer notice but never cancels automatic polling', () => {
       status: 409, error: { detail: { code: 'question_generating' } },
     }));
     assert.equal(app.questionOnOtherDevice, true);
-    assert.equal(app.peerGenerationAcknowledged, false);
-    app.acknowledgePeerGeneration();
-    assert.equal(app.peerGenerationAcknowledged, true);
-    assert.equal(app.canRetryQuestion, false);
     assert.equal(app.questionLoading, true);
     scheduler.schedule(() => {
       assert.equal(requests.length, 2);
-      assert.equal(app.peerGenerationAcknowledged, true);
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
       requests[1].subject.error(new HttpErrorResponse({
-        status: 409, error: { detail: { code: 'question_generating' } },
+        status: 503, error: { detail: {
+          code: 'question_generation_failed', reason: 'unavailable',
+        } },
       }));
-      assert.equal(app.peerGenerationAcknowledged, true);
+    }, 2001);
+  });
+  assert.equal(requests.length, 2, 'a failed generation cannot launch another AI attempt');
+  assert.equal(app.questionOnOtherDevice, false);
+  assert.equal(app.questionLoading, false);
+  assert.equal(app.canRetryQuestion, true);
+  assert.equal(app.error, 'game.questionUnavailable');
+});
+
+test('either device can manually retry shared failure and peer waits read-only', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 502, error: { detail: {
+        code: 'question_generation_failed', reason: 'invalid',
+      } },
+    }));
+    assert.equal(app.error, 'game.questionInvalid');
+    assert.equal(requests.length, 1, 'stored failure needs no second status lookup');
+    assert.equal(app.canRetryQuestion, true);
+    app.retryQuestion();
+    assert.equal(requests[1].url, '/api/v2/games/existing-game/question?retry_failed=true');
+    // The other device won the explicit Retry race. This browser waits.
+    requests[1].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.questionOnOtherDevice, true);
+    scheduler.schedule(() => {
+      assert.equal(requests[2].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[2], { ...question, question_id: 'retry-by-either-device' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'retry-by-either-device');
+  assert.equal(app.error, '');
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('passive follower poll with no active lease keeps waiting, never retries', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    scheduler.schedule(() => {
+      assert.equal(requests[1].url, '/api/v2/games/existing-game/question?wait_only=true');
+      requests[1].subject.error(new HttpErrorResponse({
+        status: 409, error: { detail: { code: 'question_not_ready' } },
+      }));
     }, 2001);
     scheduler.schedule(() => {
-      assert.equal(requests.length, 3);
-      succeed(requests[2], { ...question, question_id: 'found-after-ok' });
+      assert.equal(requests[2].url, '/api/v2/games/existing-game/question?wait_only=true');
+      succeed(requests[2], { ...question, question_id: 'eventual-result' });
     }, 4002);
   });
-  assert.equal(app.current.question_id, 'found-after-ok');
-  assert.equal(app.peerGenerationAcknowledged, false);
-  assert.equal(app.questionOnOtherDevice, false);
+  assert.equal(app.current.question_id, 'eventual-result');
 });
 
 test('stale desktop game reconciles with another device new run without F5', () => {
