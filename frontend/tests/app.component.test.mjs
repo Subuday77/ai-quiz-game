@@ -2195,7 +2195,7 @@ test('OK dismisses peer notice but never cancels automatic polling', () => {
     scheduler.schedule(() => {
       assert.equal(requests.length, 3);
       succeed(requests[2], { ...question, question_id: 'found-after-ok' });
-    }, 4001);
+    }, 4002);
   });
   assert.equal(app.current.question_id, 'found-after-ok');
   assert.equal(app.peerGenerationAcknowledged, false);
