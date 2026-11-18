@@ -2067,7 +2067,7 @@ test('Back to menu preserves the unfinished game and Resume uses the same ID', (
   assert.equal(posts.length, 0);
 });
 
-test('only the dedicated duplicate_exhausted error triggers the special panel', () => {
+test('only dedicated duplicate_exhausted uses special panel; ordinary 409 reconciles state', () => {
   for (const error of [
     { status: 409, error: { detail: 'Game state changed' } },
     { status: 502, error: { detail: { code: 'different_error' } } },
@@ -2077,11 +2077,106 @@ test('only the dedicated duplicate_exhausted error triggers the special panel', 
     scheduler.run(() => {
       app.loadQuestion();
       requests[0].subject.error(new HttpErrorResponse(error));
+      if (error.status === 409) {
+        // /active is null in this fixture. The old run finished elsewhere.
+        assert.equal(requests[1].url, '/api/v2/games/existing-game');
+        succeed(requests[1], { game_id: 'existing-game', language: 'English',
+          phase: 'lost', correct_main_answers: 0, main_question_index: 1,
+          round_stars: { bronze: 0, silver: 0, gold: 0, platinum: 0 } });
+      }
     });
     assert.equal(app.duplicateExhausted, false);
     assert.notEqual(app.error, 'game.duplicateExhausted');
-    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.canRetryQuestion, error.status !== 409);
+    if (error.status === 409) assert.equal(app.screen, 'done');
   }
+});
+
+test('two devices share a single generation; follower polls until question exists', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'question_generating' } },
+    }));
+    assert.equal(app.canRetryQuestion, false);
+    assert.equal(app.gameId, 'existing-game');
+    assert.equal(app.screen, 'question');
+    assert.equal(requests.length, 1); // Do not trigger a second request instantly.
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      succeed(requests[1], { ...question, question_id: 'shared-question' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'shared-question');
+  assert.equal(app.loading, false);
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('stale desktop game reconciles with another device new run without F5', () => {
+  const { app, requests, posts, scheduler } = setup({ activeLookupPendingOnRetry: true });
+  app.progress = 7;
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: { code: 'round_ended' } },
+    }));
+    assert.equal(requests[1].url, '/api/v2/games/active');
+    succeed(requests[1], {
+      game_id: 'mobile-new-round', language: 'Russian', phase: 'main',
+      correct_main_answers: 5, main_question_index: 5, question_issued: true,
+      skipped_questions: 0, bonus_decision_available: false,
+      round_stars: { bronze: 1, silver: 0, gold: 0, platinum: 0 },
+    });
+    assert.equal(app.screen, 'setup');
+    assert.equal(app.resumeAvailable, true);
+    assert.equal(app.resumeCandidate.game_id, 'mobile-new-round');
+    assert.equal(app.currentStars.bronze, 1);
+    assert.equal(app.progress, 5);
+    assert.equal(app.loading, false);
+    app.startGame(); // Explicit Resume, never automatic replacement.
+    assert.equal(requests[2].url, '/api/v2/games/mobile-new-round/question');
+    succeed(requests[2], { ...question, number: 6 });
+  });
+  assert.equal(app.gameId, 'mobile-new-round');
+  assert.equal(app.current.number, 6);
+  assert.equal(app.currentStars.bronze, 1);
+  assert.equal(posts.length, 0);
+});
+
+test('stale completed round restores actual Q16 award values without F5', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({
+      status: 409, error: { detail: 'Game has ended' },
+    }));
+    assert.equal(requests[1].url, '/api/v2/games/existing-game');
+    succeed(requests[1], {
+      game_id: 'existing-game', language: 'English', phase: 'completed',
+      main_question_index: 15, correct_main_answers: 15, question_issued: true,
+      round_stars: { bronze: 1, silver: 1, gold: 1, platinum: 1 },
+    });
+  });
+  assert.equal(app.screen, 'done');
+  assert.deepEqual(app.currentStars,
+    { bronze: 1, silver: 1, gold: 1, platinum: 1 });
+  assert.equal(app.canRetryQuestion, false);
+});
+
+test('late question reply is ignored after another game is restored', () => {
+  const { app, requests, scheduler } = setup();
+  scheduler.run(() => {
+    app.loadQuestion();
+    app.resetGameView();
+    app.gameId = 'new-game';
+    app.screen = 'setup';
+    app.loading = false;
+    succeed(requests[0]);
+  });
+  assert.equal(app.gameId, 'new-game');
+  assert.equal(app.current, null);
+  assert.equal(app.screen, 'setup');
 });
 
 test('duplicate recovery shows two accessible translated actions, not generic retry', () => {
