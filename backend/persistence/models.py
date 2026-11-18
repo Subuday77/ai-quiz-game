@@ -290,6 +290,10 @@ class GameRun(Base):
     )
     # None means the unmodified global catalog; otherwise a per-game allowlist.
     allowed_categories: Mapped[list | None] = mapped_column(JsonData, nullable=True)
+    # Single-flight question generation. Token/expiry survive worker restarts;
+    # the lease is released on completion or automatically expires after a crash.
+    question_generation_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question_generation_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at = datetime_column()
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active_duration_ms: Mapped[int | None] = mapped_column(Integer)
