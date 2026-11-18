@@ -375,6 +375,36 @@ def _advance_bonus_topic_after_failure(
         event("bonus_topic_rotation_failed", error_type=type(exc).__name__)
 
 
+def _restore_bonus_topic_for_editorial_reserve(
+    db: Session, *, run_id: UUID, user_id: UUID,
+    expected_topic_index: int, selected_topic_index: int,
+) -> bool:
+    """Use a prior, fully checked Q16 candidate without a stale topic index.
+
+    The existing generation lease and a short row lock guard this restoration.
+    If another device issued a question or the run changed, fail closed.
+    """
+    db.rollback()
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        if (run.status != "bonus" or run.correct_main_answers != 15
+                or run.bonus_topic_index != expected_topic_index
+                or (db.info.get("quiz_generation_token") is not None
+                    and db.info["quiz_generation_token"] != run.question_generation_token)
+                or pending_question(db, run_id=run.id) is not None):
+            db.rollback()
+            return False
+        run.bonus_topic_index = selected_topic_index
+        db.commit()
+        event("bonus_topic_restored_for_editorial_reserve",
+              from_index=expected_topic_index, to_index=selected_topic_index)
+        return True
+    except Exception as exc:
+        db.rollback()
+        event("bonus_topic_reserve_restore_failed", error_type=type(exc).__name__)
+        return False
+
+
 def _generation_metadata() -> tuple[str, str]:
     provider = (os.environ.get("LLM_PROVIDER") or "unknown").strip().lower()[:40]
     if provider not in ("openai", "nvidia", "bedrock"):
@@ -775,7 +805,7 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
     if tagged:
         from tagging.core import HistoryNotTagged, generator_context
         from tagging.repository import history_for_user
-        from tagging.review import is_strict_too_easy_reserve
+        from tagging.review import editorial_reserve_score
         from persistence.question_pool import (
             enabled as fallback_enabled, offer_approved_pool_question, scan_limit,
         )
@@ -803,6 +833,11 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
             categories_to_try.append(None)  # Resolve after persisted rotation.
         db.rollback()  # Never hold a DB connection while calling AI.
 
+        # Reuse the old flag when a deployed VPS has not yet added the new
+        # generalized editorial-reserve setting. The new flag takes precedence.
+        reserve_flag = ("QUIZ_EDITORIAL_RESERVE_ENABLED"
+                        if "QUIZ_EDITORIAL_RESERVE_ENABLED" in os.environ
+                        else "QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
         pool_settings = None
         if source_order == "pool_first":
             try:
@@ -810,8 +845,7 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 # toggle; it does NOT relax any question verification gate.
                 pool_settings = (
                     True,
-                    question_number != 16
-                    and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED"),
+                    fallback_enabled(reserve_flag),
                     scan_limit(),
                 )
             except ValueError:
@@ -916,12 +950,12 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
             event("question_source_selected", source="generator",
                   order=source_order, number=question_number)
             db.rollback()
-            too_easy_reserve = []
+            editorial_reserve = []
             try:
                 candidate = generate_valid_question(
                     difficulty, language, selected_category,
                     tag_history=history, tag_context=exclusions,
-                    too_easy_reserve=too_easy_reserve,
+                    editorial_reserve=editorial_reserve,
                     question_number=question_number,
                 )
             except HTTPException as generation_error:
@@ -938,10 +972,7 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 if pool_settings is None:
                     try:
                         use_pool = fallback_enabled("QUIZ_QUESTION_POOL_FALLBACK_ENABLED")
-                        use_reserve = (
-                            question_number != 16
-                            and fallback_enabled("QUIZ_TOO_EASY_ONLY_FALLBACK_ENABLED")
-                        )
+                        use_reserve = fallback_enabled(reserve_flag)
                         limit = scan_limit() if use_pool else 1
                         pool_settings = (use_pool, use_reserve, limit)
                     except ValueError:
@@ -957,26 +988,46 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                             db=db,
                         )
                 if pool_settings[1]:
-                    eligible = next((item for item in too_easy_reserve
-                                     if is_strict_too_easy_reserve(item)), None)
-                    if eligible is not None:
-                        reserves.append((selected_category, eligible, generation_error))
+                    for item in editorial_reserve:
+                        score = editorial_reserve_score(item)
+                        if score is not None:
+                            reserves.append((
+                                score, category_attempt, selected_category,
+                                item, generation_error, bonus_index,
+                            ))
                 last_generation_error = generation_error
                 if category_attempt + 1 < len(categories_to_try):
                     continue
                 if reserves:
-                    category, candidate, original_error = reserves[0]
-                    # Strict too-easy-only reserve stays the absolute LAST
-                    # fallback, after both categories and their approved pools.
+                    # Choose the least-penalized *verified* candidate across
+                    # all retries/topics. Keep pool reuse and normal successful
+                    # generation strictly ahead of this emergency exception.
+                    score, _, category, candidate, original_error, selected_index = min(
+                        reserves, key=lambda item: (item[0], item[1])
+                    )
+                    if question_number == 16 and selected_index != bonus_index:
+                        # The first topic may hold the best reserve, even after
+                        # Q16's persistent topic rotation. Restore its index
+                        # under the generation lease before offering the item.
+                        if not _restore_bonus_topic_for_editorial_reserve(
+                            db, run_id=run_id, user_id=user.id,
+                            expected_topic_index=bonus_index,
+                            selected_topic_index=selected_index,
+                        ):
+                            raise HTTPException(
+                                status_code=409, detail="Game state changed; reload question"
+                            )
+                        bonus_index = selected_index
                     report = candidate._review_report
                     report["details"]["fallback"] = {
-                        "reason": "too_easy_only",
+                        "reason": "editorial_only",
+                        "score": score,
                         "original_decision": report["decision"],
                         "generation_status": original_error.status_code,
                     }
-                    report["decision"] = "fallback_too_easy"
-                    event("question_too_easy_fallback", outcome="selected",
-                          requested_difficulty=difficulty)
+                    report["decision"] = "fallback_editorial"
+                    event("question_editorial_fallback", outcome="selected",
+                          score=score, requested_difficulty=difficulty)
                     break
                 # Q16 has already rotated once to its second category.
                 # Keep that index for the next GET retry, without charging
