@@ -63,7 +63,8 @@ const question = {
 
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
                   signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
-                  activeLookupPending = false, activeLookupPendingOnRetry = false } = {}) {
+                  activeLookupPending = false, activeLookupPendingOnRetry = false,
+                  generationStatus = undefined } = {}) {
   const requests = [];
   let activeLookupCount = 0;
   const posts = [];
@@ -118,6 +119,13 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
             !globalThis.localStorage?.getItem?.('ai-quiz-game:active-round:v2:user-1')) {
           return of(null); // No active game in the default mock database.
         }
+      }
+      if (generationStatus !== undefined &&
+          /^\/api\/v2\/games\/[^/]+$/.test(url) &&
+          url !== '/api/v2/games/active') {
+        // The authenticated read-only game endpoint answers whether the
+        // second device is still generating (no token is exposed).
+        return of({ question_generation_in_progress: generationStatus });
       }
       if (/^\/api\/v2\/games\/[^/]+\/categories$/.test(url)) {
         return of({
@@ -316,7 +324,7 @@ test('45-second timeout clears loading and offers retry without a new game', () 
 test('failed first generated question shows Retry only, never the setup or exclusions', () => {
   // Regression: POST /games succeeded, but the first GET /question returned 502.
   // The run must remain allocated; a retry is the ONLY ordinary action.
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.gameId = '';
   app.screen = 'setup';
   scheduler.run(() => {
@@ -355,7 +363,7 @@ test('failed first generated question shows Retry only, never the setup or exclu
 });
 
 test('failed later question discards stale feedback and keeps the original game', () => {
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 8;
   app.current = question;
@@ -380,7 +388,7 @@ test('failed later question discards stale feedback and keeps the original game'
 
 test('backend and connection failures clear loading and allow a retry', () => {
   for (const status of [0, 502, 503]) {
-    const { app, requests, scheduler } = setup();
+    const { app, requests, scheduler } = setup({ generationStatus: false });
     scheduler.run(() => {
       app.loadQuestion();
       requests[0].subject.error(new HttpErrorResponse({ status }));
@@ -506,7 +514,7 @@ test('next-question button switches to generation label until the response arriv
 
 
 test('failed question hides Next and offers one Retry without losing progress', () => {
-  const { app, requests, scheduler } = setup();
+  const { app, requests, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 10;
   app.feedback = { phase: 'main', correct: true, correct_answer: 'B',
@@ -531,7 +539,7 @@ test('failed question hides Next and offers one Retry without losing progress', 
 });
 
 test('bonus choice is required before issuing Q16; failed loading still permits retry', () => {
-  const { app, requests, posts, scheduler } = setup();
+  const { app, requests, posts, scheduler } = setup({ generationStatus: false });
   app.screen = 'feedback';
   app.progress = 15;
   app.bonusDecisionAvailable = true;
@@ -2102,6 +2110,8 @@ test('two devices share a single generation; follower polls until question exist
     assert.equal(app.canRetryQuestion, false);
     assert.equal(app.gameId, 'existing-game');
     assert.equal(app.screen, 'question');
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.error, '');
     assert.equal(app.questionLoading, true); // Continuous spinner between polls.
     assert.equal(requests.length, 1); // Do not trigger a second request instantly.
     scheduler.schedule(() => {
@@ -2112,7 +2122,48 @@ test('two devices share a single generation; follower polls until question exist
   assert.equal(app.current.question_id, 'shared-question');
   assert.equal(app.loading, false);
   assert.equal(app.questionLoading, false);
+  assert.equal(app.questionOnOtherDevice, false);
   assert.equal(app.canRetryQuestion, false);
+});
+
+test('a replaced 502 response is reclassified only when PostgreSQL confirms peer generation', () => {
+  const { app, requests, scheduler } = setup({ generationStatus: true });
+  scheduler.run(() => {
+    app.loadQuestion();
+    requests[0].subject.error(new HttpErrorResponse({ status: 502 }));
+    assert.equal(app.questionOnOtherDevice, true);
+    assert.equal(app.questionLoading, true);
+    assert.equal(app.canRetryQuestion, false);
+    assert.equal(app.error, '');
+    scheduler.schedule(() => {
+      assert.equal(requests.length, 2);
+      succeed(requests[1], { ...question, question_id: 'saved-by-peer' });
+    }, 2001);
+  });
+  assert.equal(app.current.question_id, 'saved-by-peer');
+  assert.equal(app.questionOnOtherDevice, false);
+});
+
+test('real provider failures keep Retry when the game lease is not active', () => {
+  for (const status of [0, 502, 503]) {
+    const { app, requests, scheduler } = setup({ generationStatus: false });
+    scheduler.run(() => {
+      app.loadQuestion();
+      requests[0].subject.error(new HttpErrorResponse({ status }));
+    });
+    assert.equal(app.questionOnOtherDevice, false);
+    assert.equal(app.canRetryQuestion, true);
+    assert.equal(app.questionLoading, false);
+    assert.ok(app.error);
+  }
+});
+
+test('localized peer-generation caption is a status, never an error or Retry', () => {
+  const html = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(english['game.questionOnOtherDevice'], /another device/);
+  assert.match(html, /questionOnOtherDevice \? 'game.questionOnOtherDevice' : 'game.loading'/);
+  assert.match(html, /questionLoading && longWait && !questionOnOtherDevice/);
+  assert.match(source, /question_generation_in_progress === true/);
 });
 
 test('stale desktop game reconciles with another device new run without F5', () => {
@@ -2615,7 +2666,7 @@ test('complaint receipt remains during preparation and disappears only after nex
 });
 
 test('failed next-question generation leaves complaint receipt visible during retry', () => {
-  const { app, requests } = setup();
+  const { app, requests } = setup({ generationStatus: false });
   app.appealMessage = 'Complaint submitted for review';
   app.loading = false;
   app.loadQuestion();
