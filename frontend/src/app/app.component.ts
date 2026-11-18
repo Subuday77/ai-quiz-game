@@ -2304,10 +2304,12 @@ export class AppComponent implements OnInit, OnDestroy {
     } catch { /* The ceremony works in private browsing too. */ }
     this.platinumCelebrationOpen = true;
     // The dialog is conditionally rendered; put keyboard focus inside it.
-    setTimeout(() => {
-      if (this.platinumCelebrationOpen)
-        document.querySelector<HTMLButtonElement>('.platinum-victory-continue')?.focus();
-    }, 0);
+    if (typeof document !== 'undefined') {
+      setTimeout(() => {
+        if (this.platinumCelebrationOpen)
+          document.querySelector<HTMLButtonElement>('.platinum-victory-continue')?.focus();
+      }, 0);
+    }
   }
 
   closePlatinumCelebration(): void {
