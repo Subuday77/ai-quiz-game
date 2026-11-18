@@ -436,7 +436,7 @@
         <div class="star-panel">
           <div class="star-panel-title">
             {{ locale.t('perks.balance') }}
-            <span class="star-local">{{ locale.t(account ? 'stars.account' : 'stars.signIn') }}</span>
+            <span *ngIf="!account" class="star-local">{{ locale.t('stars.signIn') }}</span>
           </div>
           <div class="star-items star-items-exchange">
             <ng-container *ngFor="let tier of starTiers">
