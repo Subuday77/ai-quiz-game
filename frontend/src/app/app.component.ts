@@ -405,6 +405,9 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
   private restoreVersion = 0;
+  // Reject late responses from superseded rounds; HTTP cancellations are not a database lock.
+  private questionRequestVersion = 0;
+  private generationPolls = 0;
 
   progress = 0;
   stars: string[] = [];
@@ -1879,7 +1882,8 @@ export class AppComponent implements OnInit, OnDestroy {
       this.progress = run.main_question_index ?? run.correct_main_answers;
       this.gameCorrectAnswers = run.correct_main_answers;
       this.skippedQuestions = run.skipped_questions ?? 0;
-      this.currentStars = {
+      // The database owns earned stars, including Q16 and returned deposits.
+      this.currentStars = run.round_stars ? { ...run.round_stars } : {
         bronze: run.correct_main_answers >= 5 ? 1 : 0,
         silver: run.correct_main_answers >= 10 ? 1 : 0,
         gold: run.correct_main_answers >= 15 ? 1 : 0,
@@ -2056,6 +2060,11 @@ export class AppComponent implements OnInit, OnDestroy {
 
   loadQuestion(): void {
     if (!this.gameId || this.loading || !this.account) return;
+    const requestedGameId = this.gameId;
+    const accountId = this.account.id;
+    const version = ++this.questionRequestVersion;
+    const currentRequest = () => this.questionRequestVersion === version &&
+      this.gameId === requestedGameId && this.account?.id === accountId;
     // An allocated run is already in progress, even if its very first AI
     // question fails. Never leave the pregame controls visible on GET failure.
     // Also discard stale feedback / answer buttons when loading a new slot.
@@ -2073,17 +2082,20 @@ export class AppComponent implements OnInit, OnDestroy {
     this.duplicateExhausted = false;
     this.error = '';
     this.scrollToQuestionTop();
-    const warning = timer(this.warningMs).subscribe(() => { this.longWait = true; });
+    const warning = timer(this.warningMs).subscribe(() => {
+      if (currentRequest()) this.longWait = true;
+    });
     // Q10–Q16 can try a different vetted category on generation failure.
     const questionTimeoutMs = this.progress >= 9
       ? Math.max(this.lateQuestionTimeoutMs, this.requestTimeoutMs)
       : this.requestTimeoutMs;
     this.subscriptions.add(this.http.get<PublicQuestion>(
-      GAME_API + '/' + this.gameId + '/question',
+      GAME_API + '/' + requestedGameId + '/question',
     ).pipe(
       timeout(questionTimeoutMs),
       finalize(() => {
         warning.unsubscribe();
+        if (!currentRequest()) return;
         this.loading = false;
         this.questionLoading = false;
         this.generatingNextQuestion = false;
@@ -2091,6 +2103,8 @@ export class AppComponent implements OnInit, OnDestroy {
       }),
     ).subscribe({
       next: (question) => {
+        if (!currentRequest()) return;
+        this.generationPolls = 0;
         this.current = question;
         this.currentVote = this.restoreDraftVote(question.question_id);
         this.appealMessage = ''; // Keep the notice while preparing; clear only on the next actual question.
@@ -2107,8 +2121,31 @@ export class AppComponent implements OnInit, OnDestroy {
         this.loadCategoryInfo();
       },
       error: (error: unknown) => {
+        if (!currentRequest()) return;
         if (this.isUnauthorized(error)) {
           this.sessionExpired();
+          return;
+        }
+        if (error instanceof HttpErrorResponse && error.status === 409 &&
+            error.error?.detail?.code === 'question_generating') {
+          // Another device/worker is doing the expensive work. Poll its result,
+          // but never launch a second AI generation or leave an endless Retry.
+          if (++this.generationPolls <= 80) {
+            this.canRetryQuestion = false;
+            this.subscriptions.add(timer(2000).subscribe(() => {
+              if (currentRequest() && this.screen === 'question' && !this.loading)
+                this.loadQuestion();
+            }));
+          } else {
+            this.canRetryQuestion = true;
+            this.fail('game.questionTimeout');
+          }
+          return;
+        }
+        if (error instanceof HttpErrorResponse && error.status === 409 &&
+            error.error?.detail?.code !== 'duplicate_exhausted') {
+          // A stale run must reconcile with /active, never Retry the same ID.
+          this.reconcileQuestionConflict(requestedGameId, accountId, version);
           return;
         }
         this.canRetryQuestion = true;
@@ -2136,6 +2173,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   retryQuestion(): void {
     if (this.canRetryQuestion && !this.loading) {
+      this.generationPolls = 0;
       this.generatingNextQuestion = this.progress > 0;
       this.loadQuestion();
     }
@@ -2948,6 +2986,90 @@ export class AppComponent implements OnInit, OnDestroy {
     }));
   }
 
+  private reconcileQuestionConflict(expectedGameId: string, accountId: string,
+                                    requestVersion: number): void {
+    const currentRequest = () => this.account?.id === accountId &&
+      this.gameId === expectedGameId && this.questionRequestVersion === requestVersion;
+    this.restoringGame = true;
+    // Do not infer the new game from the stale run. PostgreSQL is authoritative.
+    this.subscriptions.add(this.http.get<GameInfo | null>(GAME_API + '/active').pipe(
+      timeout(10000),
+    ).subscribe({
+      next: active => {
+        if (!currentRequest()) return;
+        if (active) {
+          this.applyQuestionSync(active);
+          return;
+        }
+        // No active game: this device may have missed a finished round.
+        this.subscriptions.add(this.http.get<GameInfo>(
+          GAME_API + '/' + encodeURIComponent(expectedGameId),
+        ).pipe(timeout(10000)).subscribe({
+          next: previous => {
+            if (!currentRequest()) return;
+            this.applyQuestionSync(previous);
+          },
+          error: err => {
+            if (!currentRequest()) return;
+            this.restoringGame = false;
+            if (this.isUnauthorized(err)) this.sessionExpired();
+            else this.fail('game.recoveryFailed');
+          },
+        }));
+      },
+      error: err => {
+        if (!currentRequest()) return;
+        this.restoringGame = false;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else this.fail('game.recoveryFailed');
+      },
+    }));
+  }
+
+  private applyQuestionSync(run: GameInfo): void {
+    // Clear stale attempts and outstanding timers before changing the run ID.
+    this.resetGameView();
+    this.restoringGame = false;
+    this.loading = false;
+    this.questionLoading = false;
+    this.gameLanguage = run.language;
+    this.selectedLanguage = run.language;
+    this.progress = run.main_question_index ?? run.correct_main_answers;
+    this.gameCorrectAnswers = run.correct_main_answers;
+    this.skippedQuestions = run.skipped_questions ?? 0;
+    this.currentStars = run.round_stars ? { ...run.round_stars } : emptyStars();
+    this.stars = this.starTiers.filter(t => this.currentStars[t.key] > 0)
+      .map(t => t.key);
+    this.helperCard = run.helper ?? null;
+    this.bonusDecisionAvailable = run.bonus_decision_available === true;
+    this.gameQuestionIssued = run.question_issued === true;
+    this.refreshSpendableStars();
+    this.refreshStats();
+    if (run.phase === 'lost' || run.phase === 'completed') {
+      this.gameId = run.game_id;
+      this.finishedPhase = run.phase;
+      this.screen = 'done';
+      this.forgetActiveGame();
+      this.rememberPendingResults(run.game_id);
+      if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    } else if (run.phase === 'main' || run.phase === 'bonus') {
+      this.rememberActiveGame(run.game_id);
+      if (run.question_issued) {
+        this.resumeCandidate = run;
+        this.resumeAvailable = true;
+        this.resumeRunLanguage = run.language;
+      } else {
+        this.gameId = run.game_id;
+        this.loadCategoryInfo();
+      }
+      this.screen = 'setup';
+    } else {
+      // Abandoned run with no active successor: allow explicit fresh setup.
+      this.forgetActiveGame();
+      this.screen = 'setup';
+    }
+  }
+
   private recoverGameAfterConflict(): void {
     const id = this.gameId;
     if (!id) { this.fail('game.noRound'); return; }
@@ -2987,6 +3109,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   private resetGameView(): void {
+    ++this.questionRequestVersion; // Any in-flight question or polling timer is obsolete.
+    this.generationPolls = 0;
     this.currentVote = 0;
     this.canRetryQuestion = false;
     this.duplicateExhausted = false;
