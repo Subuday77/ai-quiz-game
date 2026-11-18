@@ -22,7 +22,7 @@ class QualityReviewFailure(Exception):
 
 
 class QualityArbitrationUnavailable(Exception):
-    """No publishable verdict from Terra. Abort paid regeneration immediately.
+    """No publishable verdict from primary or fallback arbiter. Abort regeneration.
 
     Distinct from QualityRegenerationError (a *valid* reject verdict). The
     game route may still offer a previously vetted, eligible pool question.
