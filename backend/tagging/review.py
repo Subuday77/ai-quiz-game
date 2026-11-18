@@ -5,6 +5,7 @@ when the tagged workflow is enabled. Python's deterministic rejection is
 always earlier and cannot be overridden by this reviewer.
 """
 import json
+import math
 from time import perf_counter
 
 from pydantic import Field, ValidationError, model_validator
@@ -518,9 +519,10 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
               count=len(required_spatial),
               reviewer_fact=verdict.fact_valid.value,
               reviewer_premise=verdict.premise.value)
-    should_arbitrate = mode == QualityMode.ENFORCE and (
-        not review_rejected or (bonus_too_easy and not hard_rejected)
-    )
+    # An editorial score must not prevent an independent hard-fact veto.
+    # In particular, every Q16 candidate must reach arbitration, including
+    # those rejected only for weak distractors or an easier-than-target level.
+    should_arbitrate = mode == QualityMode.ENFORCE and not hard_rejected
     if should_arbitrate:
         from tagging.quality_skill.arbiter import arbitrate
         allowed, arbitration, reason = arbitrate(
@@ -613,3 +615,110 @@ def is_strict_too_easy_reserve(question: TaggedQuestion) -> bool:
             or options.get("uncertain_choices") != []):
         return False
     return True
+
+def editorial_reserve_score(question: TaggedQuestion) -> float | None:
+    """Return the editorial penalty only for a fully vetted rejected candidate.
+
+    Hard failures NEVER enter this reserve: incorrect/unknown facts, a
+    non-unique or uncertain choice, answer leakage, language errors, invalid
+    tags/fact metadata, duplicates, known local safeguards, or an unavailable/
+    negative independent arbiter. A Q16 consensus-too-easy verdict is the sole
+    allowed *negative* arbitration verdict because it is editorial, not fact.
+    The reserve is request-local and may only be published after normal retries
+    and an approved-pool search are exhausted. It is never shared as approved
+    global-pool material.
+    """
+    report = question._review_report
+    if (not isinstance(report, dict) or report.get("decision") != "reject"
+            or report.get("contract_version") != "tagged_review_v5"):
+        return None
+    details = report.get("details")
+    if not isinstance(details, dict):
+        return None
+    verdict = details.get("verdict")
+    assessment = details.get("assessment")
+    options = details.get("option_diagnostics")
+    if not all(isinstance(x, dict) for x in (verdict, assessment, options)):
+        return None
+    if details.get("general_mode") != QualityMode.ENFORCE.value:
+        return None
+    if details.get("requested_difficulty") != question.difficulty:
+        return None
+    if any(verdict.get(k) != "pass" for k in (
+        "facts", "options", "language", "leakage", "tags_valid", "fact_valid"
+    )):
+        return None
+    if (verdict.get("premise") != "valid"
+            or verdict.get("independent_answer") != question.correct_answer
+            or verdict.get("semantic_duplicate") is not False
+            or assessment.get("critical") != "none"):
+        return None
+    # Editorial code is allowed; all other issue codes indicate a possible
+    # correctness/wording problem with no safe automatic waiver.
+    issues = verdict.get("issue_codes")
+    if not isinstance(issues, list) or any(
+        code != "difficulty_mismatch" for code in issues
+    ):
+        return None
+    # Option evidence has historically been diagnostic, but publication of a
+    # weaker editorial candidate requires positive agreement from all four.
+    if (options.get("outcome") != "single_correct"
+            or options.get("supported_choices") != [question.correct_answer]
+            or options.get("uncertain_choices") != []
+            or options.get("consistency_flags") != []):
+        return None
+    if any(code != "source_backed_distractor_calibration"
+           for code in details.get("safeguard_codes", [])):
+        return None
+
+    score = assessment.get("total")
+    threshold = assessment.get("score_threshold")
+    if (not isinstance(score, (int, float)) or isinstance(score, bool)
+            or not math.isfinite(score) or score < 0
+            or not isinstance(threshold, (int, float))
+            or isinstance(threshold, bool) or not math.isfinite(threshold)
+            or threshold <= 0):
+        return None
+    over_threshold = score >= threshold
+
+    arbitration = details.get("arbitration")
+    consensus_too_easy = False
+    if arbitration is not None:
+        if not isinstance(arbitration, dict):
+            return None
+        from tagging.quality_skill.arbiter import (
+            ARBITRATION_CONTRACT_VERSION, ArbitrationVerdict,
+            is_suitable, spatial_constraints_covered, stem_claims_anchored,
+        )
+        from tagging.quality_skill.fact_tool import spatial_constraints
+        try:
+            independent = ArbitrationVerdict.model_validate(arbitration["details"])
+        except (KeyError, ValueError, TypeError):
+            return None
+        if (arbitration.get("checker_type") not in (
+                "ai_terra_arbiter", "ai_fallback_arbiter")
+                or arbitration.get("contract_version") != ARBITRATION_CONTRACT_VERSION
+                or not stem_claims_anchored(independent, question.question)
+                or not spatial_constraints_covered(
+                    independent, spatial_constraints(question.question))):
+            return None
+        allowed, reason = is_suitable(
+            independent, correct_answer=question.correct_answer,
+            bonus=question.difficulty == 15,
+            primary_difficulty=verdict.get("difficulty"),
+        )
+        consensus_too_easy = (
+            question.difficulty == 15 and reason == "bonus_too_easy"
+            and arbitration.get("decision") == "reject"
+            and arbitration.get("issues") == ["bonus_too_easy"]
+        )
+        if not (allowed and arbitration.get("decision") == "accept"
+                or consensus_too_easy):
+            return None
+    elif question.difficulty == 15:
+        # Q16 always requires an actual independent fact/options verdict.
+        return None
+    # Both factual and editorial rejections by the arbiter remain binding;
+    # only a completely verified, softer difficulty disagreement is waivable.
+    return float(score) if over_threshold or consensus_too_easy else None
+
