@@ -187,7 +187,11 @@
 
         <div class="question-generation" *ngIf="screen === 'question' && questionLoading && !current" role="status" aria-live="polite">
           <span class="gear-loader" aria-hidden="true"></span>
-          <span>{{ locale.t(questionOnOtherDevice ? 'game.questionOnOtherDevice' : 'game.loading') }}</span>
+          <span>{{ locale.t(questionOnOtherDevice && !peerGenerationAcknowledged ? 'game.questionOnOtherDevice' : 'game.loading') }}</span>
+          <button *ngIf="questionOnOtherDevice && !peerGenerationAcknowledged" type="button"
+                  class="outline-button peer-generation-ok" (click)="acknowledgePeerGeneration()">
+            {{ locale.t('common.ok') }}
+          </button>
         </div>
 
         <div *ngIf="screen === 'question' && current as question" class="question"
