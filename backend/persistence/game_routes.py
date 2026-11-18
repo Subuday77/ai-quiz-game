@@ -581,7 +581,53 @@ def change_pregame_language(run_id: UUID, payload: NewGame, request: Request,
 QUESTION_GENERATION_LEASE_SECONDS = 600
 
 
-def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> tuple[str | None, PublicQuestion | None]:
+def _generation_failure_code(exc: Exception) -> str | None:
+    """Return only public, stable error categories; never persist provider text."""
+    if isinstance(exc, HTTPException):
+        if exc.status_code == 409:
+            return ("duplicate_exhausted" if exc.detail == {"code": "duplicate_exhausted"}
+                    else None)
+        if exc.status_code == 502:
+            return "invalid"
+        if exc.status_code == 503:
+            return "unavailable"
+        return "failed" if exc.status_code >= 500 else None
+    return "failed"
+
+
+def _stored_generation_error(code: str) -> HTTPException:
+    if code == "duplicate_exhausted":
+        return HTTPException(status_code=409, detail={"code": "duplicate_exhausted"})
+    status = {"invalid": 502, "unavailable": 503}.get(code, 500)
+    return HTTPException(status_code=status, detail={
+        "code": "question_generation_failed", "reason": code,
+    })
+
+
+def _remember_generation_failure(db: Session, run_id: UUID, user_id: UUID,
+                                 token: str, exc: Exception) -> None:
+    code = _generation_failure_code(exc)
+    if code is None:
+        return  # e.g. a stale round conflict, not a generator failure.
+    try:
+        db.rollback()
+        run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
+        # A superseded generation must never overwrite a newer outcome.
+        if run.question_generation_token == token:
+            run.question_generation_error_code = code
+            db.commit()
+            event("question_generation_shared_failure", reason=code)
+        else:
+            db.rollback()
+    except Exception as persistence_error:
+        db.rollback()
+        event("question_generation_failure_save_failed",
+              error_type=type(persistence_error).__name__)
+
+
+def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID, *,
+                               wait_only: bool = False,
+                               retry_failed: bool = False) -> tuple[str | None, PublicQuestion | None]:
     try:
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status not in ("main", "bonus"):
@@ -600,9 +646,17 @@ def _claim_question_generation(db: Session, run_id: UUID, user_id: UUID) -> tupl
             expires = expires.replace(tzinfo=timezone.utc)
         if run.question_generation_token and expires is not None and expires > now:
             raise HTTPException(status_code=409, detail={"code": "question_generating"})
+        # A completed failure is shared by both browsers. Only a deliberate
+        # Retry action can clear it and start a new AI request. Polling clients
+        # must never claim a generation lease themselves.
+        if run.question_generation_error_code and (wait_only or not retry_failed):
+            raise _stored_generation_error(run.question_generation_error_code)
+        if wait_only:
+            raise HTTPException(status_code=409, detail={"code": "question_not_ready"})
         token = secrets.token_hex(16)
         run.question_generation_token = token
         run.question_generation_until = now + timedelta(seconds=QUESTION_GENERATION_LEASE_SECONDS)
+        run.question_generation_error_code = None
         db.commit()  # Release row lock before any AI / pool work.
         return token, None
     except Exception:
@@ -627,10 +681,14 @@ def _release_question_generation(db: Session, run_id: UUID, user_id: UUID,
 
 
 @router.get("/{run_id}/question", response_model=PublicQuestion)
-def get_question(run_id: UUID, user: User = Depends(authenticated_user),
+def get_question(run_id: UUID, wait_only: bool = False,
+                 retry_failed: bool = False,
+                 user: User = Depends(authenticated_user),
                  db: Session = Depends(get_db)):
     try:
-        token, cached_result = _claim_question_generation(db, run_id, user.id)
+        token, cached_result = _claim_question_generation(
+            db, run_id, user.id, wait_only=wait_only, retry_failed=retry_failed,
+        )
     except GameNotFound:
         raise HTTPException(status_code=404, detail="Game not found") from None
     if cached_result is not None:
@@ -639,6 +697,12 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     db.info["quiz_generation_token"] = token
     try:
         return _get_question_with_claim(run_id, user, db)
+    except Exception as exc:
+        # Record the terminal provider/validation failure *before* releasing
+        # the lease, so the waiting browser never starts an unleased retry.
+        if token is not None:
+            _remember_generation_failure(db, run_id, user.id, token, exc)
+        raise
     finally:
         db.info.pop("quiz_generation_token", None)
         if token is not None:
