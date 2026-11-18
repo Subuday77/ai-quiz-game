@@ -64,8 +64,10 @@ const question = {
 function setup({ warning = 15000, timeout = 45000, settingsError = false,
                   signedIn = true, starAwards = {}, answered = 0, correct = 0, devReset = false,
                   activeLookupPending = false, activeLookupPendingOnRetry = false,
-                  generationStatus = undefined } = {}) {
+                  generationStatus = undefined, starBalances = null,
+                  pendingWallet = false } = {}) {
   const requests = [];
+  const walletRequests = [];
   let activeLookupCount = 0;
   const posts = [];
   const patches = [];
@@ -96,7 +98,12 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
         return of({ ...profile, star_awards: { ...profile.star_awards } });
       }
       if (url === '/api/v2/stars') {
-        return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
+        if (pendingWallet) {
+          const subject = new Subject();
+          walletRequests.push({ url, subject });
+          return subject.asObservable();
+        }
+        return of({ bronze: 0, silver: 0, gold: 0, platinum: 0, ...starBalances });
       }
       if (url === '/api/v2/premium') {
         // Premium loads during ngOnInit. It must not sit in the same pending
@@ -156,7 +163,7 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
   app.ngOnInit();
   app.gameId = 'existing-game';
   const scheduler = new TestScheduler((actual, expected) => assert.deepEqual(actual, expected));
-  return { app, http, requests, posts, patches, scheduler, profile };
+  return { app, http, requests, posts, patches, scheduler, profile, walletRequests };
 }
 
 function succeed(request, value = question) {
@@ -428,6 +435,38 @@ test('rapid clicks do not generate parallel questions', () => {
     assert.equal(requests.length, 1);
     succeed(requests[0]);
   });
+});
+
+test('new question refreshes stars spent on another device without F5', () => {
+  const serverWallet = { silver: 46 };
+  const { app, requests, scheduler } = setup({ starBalances: serverWallet });
+  assert.equal(app.spendableStars.silver, 46);
+
+  // Device A spends two silver stars, while device B still displays 46.
+  serverWallet.silver = 44;
+  assert.equal(app.spendableStars.silver, 46);
+  scheduler.run(() => {
+    app.loadQuestion();
+    succeed(requests[0], { ...question, number: 7 });
+  });
+  assert.equal(app.current.number, 7);
+  assert.equal(app.spendableStars.silver, 44,
+    'receiving the next question must reconcile the server wallet');
+});
+
+test('late wallet response cannot overwrite a newer cross-device star balance', () => {
+  const { app, requests, scheduler, walletRequests } = setup({ pendingWallet: true });
+  assert.equal(walletRequests.length, 1, 'login started the first wallet read');
+  scheduler.run(() => {
+    app.loadQuestion();
+    succeed(requests[0], { ...question, number: 7 });
+  });
+  assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
+
+  succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
+  succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
+  assert.equal(app.spendableStars.silver, 44,
+    'an older response must not resurrect the pre-spend balance');
 });
 
 test('answering uses v2 and refreshes server-authoritative rewards', () => {

@@ -407,6 +407,8 @@ export class AppComponent implements OnInit, OnDestroy {
   private lateQuestionTimeoutMs = 140000;
   private readonly subscriptions = new Subscription();
   private statsVersion = 0;
+  // Ignore late wallet snapshots when a newer cross-device refresh has started.
+  private spendableStarsVersion = 0;
   private restoreVersion = 0;
   // Reject late responses from superseded rounds; HTTP cancellations are not a database lock.
   private questionRequestVersion = 0;
@@ -2135,6 +2137,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.resumeAvailable = false;
         this.scrollToQuestionTop();
         this.loadCategoryInfo();
+        // Another device may have spent or earned stars since our last action.
+        // A successfully fetched question is a natural synchronization point.
+        this.refreshSpendableStars();
       },
       error: (error: unknown) => {
         if (!currentRequest()) return;
@@ -2796,13 +2801,18 @@ export class AppComponent implements OnInit, OnDestroy {
   private refreshSpendableStars(): void {
     if (!this.account) return;
     const accountId = this.account.id;
+    const version = ++this.spendableStarsVersion;
     this.subscriptions.add(this.http.get<StarCounts>(STARS_API).pipe(
       timeout(10000),
     ).subscribe({
       next: (values) => {
-        if (this.account?.id === accountId) this.spendableStars = values;
+        if (this.account?.id === accountId && version === this.spendableStarsVersion)
+          this.spendableStars = values;
       },
-      error: () => { this.perksError = 'perks.balanceUnavailable'; },
+      error: () => {
+        if (this.account?.id === accountId && version === this.spendableStarsVersion)
+          this.perksError = 'perks.balanceUnavailable';
+      },
     }));
   }
 
