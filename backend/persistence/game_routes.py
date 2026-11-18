@@ -150,6 +150,8 @@ class GameInfo(BaseModel):
     main_question_index: int = 0
     skipped_questions: int = 0
     question_issued: bool = False
+    # Read-only, lease-derived status. Never expose the generation token to clients.
+    question_generation_in_progress: bool = False
     bonus_decision_available: bool = False
     helper: dict | None = None
     replacement_game_id: UUID | None = None
@@ -194,6 +196,13 @@ def _game_info(db: Session, run) -> GameInfo:
         .group_by(StarAward.tier)
     ):
         round_stars[tier] = int(count)
+    lease_until = run.question_generation_until
+    if lease_until is not None and lease_until.tzinfo is None:
+        lease_until = lease_until.replace(tzinfo=timezone.utc)
+    generating = bool(
+        run.question_generation_token and lease_until
+        and lease_until > datetime.now(timezone.utc)
+    )
     # A lost Q16 wager consumes this round's gold for the results display,
     # though the historical StarAward stays immutable.
     if run.bonus_wager_accepted and run.bonus_correct is False:
@@ -207,6 +216,7 @@ def _game_info(db: Session, run) -> GameInfo:
         question_issued=bool(db.scalar(select(func.count(QuestionAttempt.id)).where(
             QuestionAttempt.run_id == run.id
         ))),
+        question_generation_in_progress=generating,
         bonus_decision_available=(
             run.status == "bonus"
             and not run.bonus_wager_accepted
