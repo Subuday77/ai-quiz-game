@@ -179,13 +179,28 @@ def require_unique(candidate: TaggedQuestion, history: list[HistoryItem],
 
 
 def generator_context(history: list[HistoryItem], category_slug: str) -> list[dict]:
-    """Bounded prompt context; strict check still uses the FULL user history."""
-    selected = [item for item in reversed(history) if item.category_slug == category_slug]
-    # Include recent nearby facts, not the entire user's history.
+    """Bounded exclusions from both the selected topic and other played topics.
+
+    The strict duplicate check uses the FULL user history. Previously only
+    same-category facts reached the generator, so it could spend three paid
+    attempts repeating facts already asked under another category. Preserve
+    the 35-item prompt cap while reserving ten entries for cross-topic facts.
+    """
+    recent = list(reversed(history))
+    same = [item for item in recent if item.category_slug == category_slug][:25]
+    cross = [item for item in recent if item.category_slug != category_slug][:10]
+    selected = same + cross
+    included = {item.question_id for item in selected}
+    for item in recent:
+        if len(selected) >= 35:
+            break
+        if item.question_id not in included:
+            selected.append(item)
+            included.add(item.question_id)
     return [{"fact_key": item.fact_key,
              "subject": item.subject, "relation": item.relation,
              "object": item.object,
-             "tags": item.tags} for item in selected[:35]]
+             "tags": item.tags} for item in selected]
 
 
 def critic_neighbors(candidate: TaggedQuestion, history: list[HistoryItem],
