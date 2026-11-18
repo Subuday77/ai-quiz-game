@@ -189,7 +189,8 @@ from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 def generate_valid_question(difficulty: int, language: str, category: str, *,
                             tag_history=None, tag_context=None,
                             editorial_reserve: list | None = None,
-                            question_number: int | None = None) -> QuizQuestion:
+                            question_number: int | None = None,
+                            absolute_deadline: float | None = None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
         policy = GenerationPolicy.from_env(question_number=question_number)
@@ -213,7 +214,11 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
         )
         from persistence.seed_topics import category_slug as topic_slug
         exclusions = list(tag_context or [])
+    # A route-level deadline can bound multiple category retries within the
+    # browser's earlier-question HTTP timeout. No extra provider calls after it.
     deadline = perf_counter() + policy.budget_seconds
+    if absolute_deadline is not None:
+        deadline = min(deadline, absolute_deadline)
     duplicate_rejections = 0
     other_failures = 0
     retry_feedback = None  # Static server-authored guidance; never raw error text.
