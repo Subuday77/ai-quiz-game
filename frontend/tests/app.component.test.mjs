@@ -2102,6 +2102,7 @@ test('two devices share a single generation; follower polls until question exist
     assert.equal(app.canRetryQuestion, false);
     assert.equal(app.gameId, 'existing-game');
     assert.equal(app.screen, 'question');
+    assert.equal(app.questionLoading, true); // Continuous spinner between polls.
     assert.equal(requests.length, 1); // Do not trigger a second request instantly.
     scheduler.schedule(() => {
       assert.equal(requests.length, 2);
@@ -2110,6 +2111,7 @@ test('two devices share a single generation; follower polls until question exist
   });
   assert.equal(app.current.question_id, 'shared-question');
   assert.equal(app.loading, false);
+  assert.equal(app.questionLoading, false);
   assert.equal(app.canRetryQuestion, false);
 });
 
