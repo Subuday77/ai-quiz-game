@@ -2195,9 +2195,8 @@ export class AppComponent implements OnInit, OnDestroy {
         // Gateways can sometimes replace the structured 409 with a 5xx.
         // Verify the live lease via the authenticated API before showing a
         // misleading AI failure; otherwise preserve the actual error.
-        if (error instanceof TimeoutError ||
-            (error instanceof HttpErrorResponse &&
-              (error.status === 0 || error.status >= 500))) {
+        if (error instanceof HttpErrorResponse &&
+            (error.status === 0 || error.status >= 500)) {
           checkingPeerStatus = true;
           this.subscriptions.add(this.http.get<GameInfo>(
             GAME_API + '/' + encodeURIComponent(requestedGameId),
