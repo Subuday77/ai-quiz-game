@@ -343,6 +343,8 @@ def _advance_bonus_topic_after_failure(
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if (run.status != "bonus" or run.correct_main_answers != 15
                 or run.bonus_topic_index != expected_topic_index
+                or (db.info.get("quiz_generation_token") is not None
+                    and db.info["quiz_generation_token"] != run.question_generation_token)
                 or pending_question(db, run_id=run.id) is not None):
             db.rollback()
             event("bonus_topic_rotation_skipped", reason="state_changed")
@@ -624,9 +626,11 @@ def get_question(run_id: UUID, user: User = Depends(authenticated_user),
     if cached_result is not None:
         event("question_cache", hit=True)
         return cached_result
+    db.info["quiz_generation_token"] = token
     try:
         return _get_question_with_claim(run_id, user, db)
     finally:
+        db.info.pop("quiz_generation_token", None)
         if token is not None:
             _release_question_generation(db, run_id, user.id, token)
 
