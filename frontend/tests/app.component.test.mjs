@@ -2076,7 +2076,7 @@ test('duplicate exhaustion presents a translated recovery panel, retry keeps the
     app.retryQuestion();
     assert.equal(app.duplicateExhausted, false);
     assert.equal(requests.length, 2);
-    assert.equal(requests[1].url, requests[0].url);
+    assert.equal(requests[1].url, requests[0].url + '?retry_failed=true');
     succeed(requests[1]);
   });
   assert.equal(app.error, '');
