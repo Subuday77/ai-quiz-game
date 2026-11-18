@@ -460,13 +460,14 @@ test('late wallet response cannot overwrite a newer cross-device star balance', 
   scheduler.run(() => {
     app.loadQuestion();
     succeed(requests[0], { ...question, number: 7 });
-  });
-  assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
+    assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
 
-  succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
-  succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
-  assert.equal(app.spendableStars.silver, 44,
-    'an older response must not resurrect the pre-spend balance');
+    // Resolve both delayed HTTP calls before virtual timeout timers run.
+    succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
+    succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
+    assert.equal(app.spendableStars.silver, 44,
+      'an older response must not resurrect the pre-spend balance');
+  });
 });
 
 test('answering uses v2 and refreshes server-authoritative rewards', () => {
