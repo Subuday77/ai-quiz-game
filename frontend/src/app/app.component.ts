@@ -2948,6 +2948,10 @@ export class AppComponent implements OnInit, OnDestroy {
 
   @HostListener('document:keydown.escape')
   onPremiumEscape(): void {
+    if (this.platinumCelebrationOpen) {
+      this.closePlatinumCelebration();
+      return;
+    }
     if (this.premiumDialogOpen) this.closePremium();
   }
 
