@@ -7,10 +7,11 @@ from threading import Event
 from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError, ReadTimeoutError
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 
-from api import app, sessions
+from api import app, sessions, generate_valid_question
 from generation_policy import GenerationPolicy, is_transient, provider_timeout
 from test_api import QUESTION
 
@@ -110,6 +111,26 @@ class RetryTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
         self.assertEqual(self.generated.call_count, 2)
         self.assertEqual(timeouts, [12, 9.5])
+        self.assertIsNone(provider_timeout.get())
+
+    def test_absolute_deadline_caps_second_category_without_extra_provider_calls(self):
+        """Shared Q2 recovery cap overrides a fresh per-category 30s budget."""
+        allocations = []
+
+        def slow(*args):
+            allocations.append(provider_timeout.get())
+            self.advance(6)
+            raise APITimeoutError(request=Mock())
+
+        self.generated.side_effect = slow
+        with self.assertRaises(HTTPException) as failure:
+            generate_valid_question(
+                0, "English", "History", absolute_deadline=108.0,
+            )
+        self.assertEqual(failure.exception.status_code, 503)
+        self.assertEqual(allocations, [8.0])
+        self.generated.assert_called_once()
+        self.sleep.assert_not_called()
         self.assertIsNone(provider_timeout.get())
 
     def test_no_sleep_or_new_call_when_budget_is_exhausted(self):
