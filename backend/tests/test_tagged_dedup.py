@@ -249,6 +249,38 @@ class TaggedContractTests(unittest.TestCase):
         self.assertEqual((match.score, match.reason), (40, "entity+concept"))
         require_unique(candidate_question, [history])
 
+    def test_generator_context_includes_recent_cross_category_facts_bounded(self):
+        """Live Q2 repeats: same-topic prompt-only exclusions missed old facts."""
+        from tagging.core import generator_context
+
+        history = [
+            HistoryItem(
+                question_id=f"q-{i}",
+                category_slug="physics" if i % 2 == 0 else "history",
+                question_text=f"Previously asked fact {i}?",
+                fact_key=f"unique-fact-{i}",
+                subject=f"subject-{i}",
+                relation="year", object=str(i),
+                tags={"entity": (f"subject-{i}",), "concept": ("year",),
+                      "keyword": ()},
+            )
+            for i in range(120)
+        ]
+        context = generator_context(history, "physics")
+        self.assertEqual(len(context), 35, "prompt token cost remains bounded")
+        self.assertEqual(context[0]["subject"], "subject-118")
+        self.assertEqual(context[25]["subject"], "subject-119",
+                         "reserve ten slots for facts seen in other categories")
+        self.assertEqual(sum(
+            int(item["subject"].split("-")[-1]) % 2 == 1
+            for item in context
+        ), 10)
+        self.assertEqual(len({item["fact_key"] for item in context}), 35)
+        other_topic = generator_context(history, "never-played")
+        self.assertEqual(len(other_topic), 35)
+        self.assertEqual(other_topic[0]["subject"], "subject-119",
+                         "unplayed topics must still receive recent exclusions")
+
     def test_real_lermontov_log_distinct_poems_do_not_collide(self):
         # 2026-11-02: old key of author + wrote-poem was the SAME for
         # Borodino and Parus. Three retries exhausted at level 2.
