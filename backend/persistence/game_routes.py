@@ -822,9 +822,12 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
         # after exhausted generation (including exclusively duplicate results).
         # DB First still searches all usable topics before any AI call.
         # Q16 retains its separate persisted rotation and stricter pool checks.
-        pool_search_categories = (
+        safe_main_pool_categories = (
             _main_pool_search_categories(db, run, question_number, category)
-            if source_order == "pool_first" and question_number <= 15 else []
+            if question_number <= 15 else []
+        )
+        pool_search_categories = (
+            safe_main_pool_categories if source_order == "pool_first" else []
         )
         categories_to_try = [category]
         if 1 <= question_number <= 15:
@@ -856,6 +859,7 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 ) from None
         reserves = []
         last_generation_error = None
+        emergency_main_pool_checked = False
         # Q1–Q12 use a 45s browser timeout; even with category recovery the
         # whole backend generation must finish first. Leave ~5s for DB
         # persistence/network, without changing normal 30s per-category caps.
@@ -878,6 +882,34 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                 # The optional pool must never bypass quality checks or
                 # mutate an already issued question when it fails.
                 event("question_pool_fallback_failed", error_type=type(exc).__name__)
+                db.rollback()
+                return None
+
+        def offer_emergency_main_pool():
+            """One strict scan across *all* unused Q1–Q15 topics after duplicates.
+
+            Exactly one SQL candidate query; no additional paid AI calls.
+            A pool hit still passes all normal global review, fact, and
+            full per-user duplicate checks in offer_approved_pool_question.
+            """
+            nonlocal emergency_main_pool_checked
+            if emergency_main_pool_checked or not pool_settings[0] or not safe_main_pool_categories:
+                return None
+            emergency_main_pool_checked = True
+            event("question_duplicate_pool_scan", number=question_number,
+                  categories=len(safe_main_pool_categories))
+            try:
+                return offer_approved_pool_question(
+                    db, run_id=run_id, user_id=user.id,
+                    category=safe_main_pool_categories[0],
+                    search_categories=safe_main_pool_categories,
+                    max_candidates=pool_settings[2],
+                    rating_filter=False,
+                    quality_priority=quality_priority,
+                )
+            except Exception as exc:
+                event("question_pool_fallback_failed",
+                      error_type=type(exc).__name__, scope="all_main_topics")
                 db.rollback()
                 return None
 
@@ -996,6 +1028,19 @@ def _get_question_with_claim(run_id: UUID, user: User, db: Session):
                             *pooled, phase="bonus" if pooled[0].number == 16 else "main",
                             db=db,
                         )
+                if (question_number <= 15 and generation_error.status_code == 409
+                        and generation_error.detail == {"code": "duplicate_exhausted"}):
+                    # Avoid a second AI call when a vetted unused question is
+                    # already available in any *allowed* topic, not just two.
+                    pooled = offer_emergency_main_pool()
+                    if pooled is not None:
+                        chosen_topic = db.get(Topic, pooled[1].topic_id)
+                        event("question_source_selected", source="pool",
+                              order="emergency_duplicate_recovery",
+                              number=question_number,
+                              category=(chosen_topic.labels.get("en")
+                                        if chosen_topic else None))
+                        return _public(*pooled, phase="main", db=db)
                 if pool_settings[1]:
                     for item in editorial_reserve:
                         score = editorial_reserve_score(item)
