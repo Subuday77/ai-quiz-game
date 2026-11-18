@@ -105,6 +105,9 @@ def editorial_report(*, score=4.0, difficulty=0, arbitration=False,
     report = too_easy_report()
     report["details"]["general_mode"] = "enforce"
     report["details"]["requested_difficulty"] = difficulty
+    report["details"]["arbitration_required_for_reserve"] = bool(
+        arbitration or difficulty == 15
+    )
     verdict = report["details"]["verdict"]
     verdict["difficulty"] = "too_easy" if consensus_too_easy else "appropriate"
     verdict["issue_codes"] = ["difficulty_mismatch"] if consensus_too_easy else []
@@ -184,6 +187,10 @@ class EditorialReserveTests(unittest.TestCase):
             bad = q.model_copy(deep=True)
             bad._review_report["decision"] = decision
             self.assertIsNone(editorial_reserve_score(bad))
+        bad = q.model_copy(deep=True)
+        bad._review_report["details"]["arbitration_required_for_reserve"] = True
+        self.assertIsNone(editorial_reserve_score(bad),
+                          "a flagged normal question must not bypass its arbiter")
         bad = q.model_copy(deep=True)
         bad._review_report["details"]["assessment"]["total"] = 2
         self.assertIsNone(editorial_reserve_score(bad))
