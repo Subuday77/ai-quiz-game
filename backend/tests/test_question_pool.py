@@ -1122,6 +1122,55 @@ class GlobalPoolTests(unittest.TestCase):
             stored = db.scalar(select(Question))
             self.assertEqual(db.get(Topic, stored.topic_id).labels["en"], calls[-1])
 
+    def test_q2_three_duplicates_use_strict_global_pool_without_second_ai_call(self):
+        """Previously Q2 returned 409 after 2+1 duplicates despite a vetted third topic."""
+        from persistence.game_routes import _alternate_main_category
+        with Session(self.engine) as db:
+            run = db.get(GameRun, self.run_id)
+            run.correct_main_answers = 1
+            db.commit()
+            primary = _category_for_round(self.run_id, 2, db=db)
+            alternate = _alternate_main_category(db, run, 2, primary)
+            categories = _main_pool_search_categories(db, run, 2, primary)
+            distant = next(
+                cat for cat in reversed(categories)
+                if cat != primary and cat != alternate
+            )
+            self.assertIsNotNone(alternate)
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 1
+            db.commit()
+            q = candidate(difficulty=1, relation="nobel-prize-reason",
+                          concept="photoelectric-effect",
+                          answer="photoelectric-effect")
+            q._review_report = review_report()
+            _, saved = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob, question=q,
+                category=distant, provider="test", model="stub",
+                dedup_enforce=True,
+            )
+            pooled_id = saved.id
+
+        with patch("api.generate_valid_question", side_effect=HTTPException(
+            status_code=409, detail={"code": "duplicate_exhausted"}
+        )) as generator, patch(
+            "persistence.question_pool.random.random", return_value=0.999
+        ):
+            response = self.request()
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["question_id"], str(pooled_id))
+        self.assertEqual(response.json()["number"], 2)
+        self.assertEqual(response.json()["difficulty"], 1)
+        generator.assert_called_once()
+        with Session(self.engine) as db:
+            question = db.get(Question, UUID(response.json()["question_id"]))
+            self.assertEqual(db.get(Topic, question.topic_id).labels["en"], distant)
+            self.assertEqual(db.scalar(select(func.count(Question.id))), 1,
+                             "an existing approved question should not be cloned")
+            self.assertEqual(db.scalar(select(func.count(QuestionAttempt.id))), 2)
+        self.assertEqual(self.request().json(), response.json())
+
     def test_q2_duplicate_exhaustion_recovers_in_unused_category(self):
         """Live regression: three Q2 duplicates must not strand the round."""
         from persistence.models import GameRun
