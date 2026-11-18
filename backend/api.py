@@ -188,7 +188,7 @@ from tagging.debug import debug_accepted_candidate, debug_rejected_candidate
 
 def generate_valid_question(difficulty: int, language: str, category: str, *,
                             tag_history=None, tag_context=None,
-                            too_easy_reserve: list | None = None,
+                            editorial_reserve: list | None = None,
                             question_number: int | None = None) -> QuizQuestion:
     """Run the shared bounded AI generation, validation, leak and quality policy."""
     try:
@@ -205,7 +205,7 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
     if tagged:
         from tagging.contract import TaggedQuestion
         from tagging.core import require_unique, critic_neighbors, threshold
-        from tagging.review import check_tagged_quality, is_strict_too_easy_reserve
+        from tagging.review import check_tagged_quality, editorial_reserve_score
         from tagging.quality_skill.fact_tool import known_false_fact
         from tagging.quality_skill.known_issues import known_qa_issue
         from tagging.repair import (
@@ -389,12 +389,15 @@ def generate_valid_question(difficulty: int, language: str, category: str, *,
             rejection_error_type = type(exc).__name__
             other_failures += 1
             failure_status = 502
-            if (tagged and difficulty < 15 and too_easy_reserve is not None
-                    and question is not None and is_strict_too_easy_reserve(question)):
-                # Keep only a fully checked, strictly too-easy-only question;
-                # publication is a separate last resort AFTER the global pool.
-                too_easy_reserve.append(question.model_copy(deep=True))
-                event("question_too_easy_reserve", outcome="eligible")
+            if tagged and editorial_reserve is not None and question is not None:
+                score = editorial_reserve_score(question)
+                if score is not None:
+                    # All correctness/ambiguity/leak/duplicate gates passed.
+                    # Keep a snapshot for last-resort selection after the
+                    # global pool; never persist as a reusable pool approval.
+                    editorial_reserve.append(question.model_copy(deep=True))
+                    event("question_editorial_reserve", outcome="eligible",
+                          score=score, requested_difficulty=difficulty)
             if tagged:
                 exclusions.append({"subject": question.fact.subject,
                                    "relation": question.fact.relation,
