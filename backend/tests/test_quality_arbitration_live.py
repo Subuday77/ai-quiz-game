@@ -138,6 +138,148 @@ class ArbitrationPolicyTests(unittest.TestCase):
         self.assertTrue(any(x.args[0] == "quality_arbitration_debug"
                             for x in debug.call_args_list))
 
+    def test_bonus_terra_timeout_uses_different_model_on_same_candidate(self):
+        from unittest.mock import MagicMock
+        q = sample_question().model_copy(update={"difficulty": 15})
+        terra = MagicMock()
+        luna = MagicMock()
+        terra.responses.create.side_effect = TimeoutError("temporary outage")
+        luna.responses.create.return_value = ProviderResult(
+            json.dumps(verdict().model_dump(mode="json")),
+            Completion.COMPLETE, "completed",
+        )
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+            "QUIZ_QUALITY_ARBITER_MODEL_ID": "gpt-6.1-terra",
+            "QUIZ_QUALITY_ARBITER_TIMEOUT_SECONDS": "10",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": "gpt-6-luna",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_TIMEOUT_SECONDS": "12",
+        }), patch("tagging.quality_skill.arbiter.LLMClient",
+                  side_effect=[terra, luna]) as llm:
+            accepted, report, why = arbitrate(
+                q, language="Russian", category="History",
+                requested_difficulty=15, shadow={"findings": []},
+                deadline=perf_counter()+35, timeout_seconds=12,
+            )
+        self.assertTrue(accepted)
+        self.assertEqual(why, "accepted")
+        self.assertEqual(report["model"], "gpt-6-luna")
+        self.assertEqual(report["checker_type"], "ai_fallback_arbiter")
+        self.assertEqual([call.kwargs["model_id"] for call in llm.call_args_list],
+                         ["gpt-6.1-terra", "gpt-6-luna"])
+        self.assertEqual(terra.responses.create.call_count, 1)
+        self.assertEqual(luna.responses.create.call_count, 1)
+        self.assertEqual(terra.responses.create.call_args.kwargs["input"],
+                         luna.responses.create.call_args.kwargs["input"],
+                         "the fallback must audit the same candidate and history")
+        self.assertEqual(terra.responses.create.call_args.kwargs["output_contract"],
+                         luna.responses.create.call_args.kwargs["output_contract"])
+
+    def test_bonus_terra_http_503_uses_fallback(self):
+        from httpx import Request, Response
+        from openai import InternalServerError
+        from unittest.mock import MagicMock
+        terra = MagicMock()
+        luna = MagicMock()
+        terra.responses.create.side_effect = InternalServerError(
+            "temporary 503", response=Response(
+                503, request=Request("POST", "https://api.openai.com/v1/responses")),
+            body=None,
+        )
+        luna.responses.create.return_value = ProviderResult(
+            json.dumps(verdict().model_dump(mode="json")),
+            Completion.COMPLETE, "completed",
+        )
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": "gpt-6-luna",
+        }), patch("tagging.quality_skill.arbiter.LLMClient",
+                  side_effect=[terra, luna]):
+            accepted, report, reason = arbitrate(
+                sample_question(), language="Russian", category="History",
+                requested_difficulty=15, shadow=None,
+                deadline=perf_counter()+35, timeout_seconds=12,
+            )
+        self.assertTrue(accepted)
+        self.assertEqual(reason, "accepted")
+        self.assertEqual(report["model"], "gpt-6-luna")
+
+    def test_bonus_both_arbiters_unavailable_still_fails_closed(self):
+        from unittest.mock import MagicMock
+        clients = [MagicMock(), MagicMock()]
+        for client in clients:
+            client.responses.create.side_effect = TimeoutError("unavailable")
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": "gpt-6-luna",
+        }), patch("tagging.quality_skill.arbiter.LLMClient",
+                  side_effect=clients) as llm:
+            accepted, report, reason = arbitrate(
+                sample_question(), language="Russian", category="History",
+                requested_difficulty=15, shadow=None,
+                deadline=perf_counter()+35, timeout_seconds=12,
+            )
+        self.assertEqual((accepted, report, reason), (False, None, "unavailable"))
+        self.assertEqual(llm.call_count, 2)
+
+    def test_bonus_arbiter_rejects_without_fallback_or_regeneration(self):
+        from unittest.mock import MagicMock
+        terra = MagicMock()
+        terra.responses.create.return_value = ProviderResult(
+            json.dumps(verdict(answer_leak=True).model_dump(mode="json")),
+            Completion.COMPLETE, "completed",
+        )
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": "gpt-6-luna",
+        }), patch("tagging.quality_skill.arbiter.LLMClient",
+                  return_value=terra) as llm:
+            accepted, report, reason = arbitrate(
+                sample_question(), language="Russian", category="History",
+                requested_difficulty=15, shadow=None,
+                deadline=perf_counter()+35, timeout_seconds=12,
+            )
+        self.assertFalse(accepted)
+        self.assertEqual(reason, "answer_leak")
+        self.assertEqual(report["model"], "gpt-6.1-terra")
+        self.assertEqual(llm.call_count, 1)
+
+    def test_no_bonus_fallback_for_flagged_ordinary_question(self):
+        from unittest.mock import MagicMock
+        terra = MagicMock()
+        terra.responses.create.side_effect = TimeoutError()
+        with patch.dict(os.environ, {
+            "QUIZ_QUALITY_ARBITER_MODE": "on",
+            "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": "gpt-6-luna",
+        }), patch("tagging.quality_skill.arbiter.LLMClient",
+                  return_value=terra) as llm:
+            accepted, report, reason = arbitrate(
+                sample_question(), language="Russian", category="History",
+                requested_difficulty=9, shadow={"would_arbitrate": True},
+                deadline=perf_counter()+35, timeout_seconds=12,
+            )
+        self.assertEqual((accepted, report, reason), (False, None, "unavailable"))
+        self.assertEqual(llm.call_count, 1)
+
+    def test_bonus_no_second_call_if_fallback_is_same_model_or_disabled(self):
+        from unittest.mock import MagicMock
+        for fallback_id in ("gpt-6.1-terra", ""):
+            with self.subTest(fallback_id=fallback_id):
+                terra = MagicMock()
+                terra.responses.create.side_effect = TimeoutError()
+                with patch.dict(os.environ, {
+                    "QUIZ_QUALITY_ARBITER_MODE": "on",
+                    "QUIZ_QUALITY_ARBITER_FALLBACK_MODEL_ID": fallback_id,
+                }), patch("tagging.quality_skill.arbiter.LLMClient",
+                          return_value=terra) as llm:
+                    result = arbitrate(
+                        sample_question(), language="Russian", category="History",
+                        requested_difficulty=15, shadow=None,
+                        deadline=perf_counter()+35, timeout_seconds=12,
+                    )
+                self.assertEqual(result, (False, None, "unavailable"))
+                self.assertEqual(llm.call_count, 1)
+
     def test_flagged_normal_question_is_arbitrated_and_failure_is_closed(self):
         q = sample_question()
         with patch.dict(os.environ, {"QUIZ_QUALITY_ARBITER_MODE": "on"}), patch(
