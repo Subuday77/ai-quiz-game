@@ -526,15 +526,8 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 .card-topline .eyebrow { margin: 0; }
 .card-topline .appeal-header-button { margin: -9px 0 3px auto; max-width: 245px;
   padding: 10px 14px; font-size: 12px; line-height: 1.35; }
-.appeal-allowance-inline { display: inline-flex; align-items: center; gap: 5px;
-  margin-inline-start: 12px; white-space: nowrap; color: #c6d9ff; }
-.appeal-info-icon { border: 1px solid #818db5; background: transparent;
-  color: #bce5f6; width: 21px; height: 21px; display: inline-grid; place-items: center;
-  border-radius: 50%; font-size: 14px; line-height: 1; padding: 0; }
-.appeal-info-icon:hover, .appeal-info-icon:focus-visible { background: #40476e; }
 @media (max-width: 640px) {
   .card-topline .appeal-header-button { max-width: 100%; margin: 2px 0; }
-  .appeal-allowance-inline { margin-inline-start: 0; }
 }
 
 /* Private question feedback shares the line with the question number. */
@@ -821,4 +814,463 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   pointer-events: none;
   -webkit-backdrop-filter: grayscale(97%);
   backdrop-filter: grayscale(97%);
+}
+
+/* Horizontal desktop game — atmospheric, but readable and fully CSS-rendered.
+   Keep the rail physically on the right even when the UI locale is RTL. */
+:host {
+  background:
+    radial-gradient(ellipse at 72% 8%, rgba(110, 65, 191, .42), transparent 43%),
+    radial-gradient(ellipse at 8% 22%, rgba(57, 45, 132, .46), transparent 48%),
+    radial-gradient(ellipse at 85% 90%, rgba(18, 79, 114, .42), transparent 48%),
+    #0c1024;
+}
+:host::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 4% 12%, #f5f1ffb0 0 1px, transparent 2px),
+    radial-gradient(circle at 13% 58%, #cbd4ff7d 0 1px, transparent 2px),
+    radial-gradient(circle at 24% 5%, #e4d1ffac 0 1px, transparent 2px),
+    radial-gradient(circle at 37% 31%, #e5faff9c 0 1px, transparent 2px),
+    radial-gradient(circle at 51% 8%, #e1d6ffb2 0 1px, transparent 2px),
+    radial-gradient(circle at 64% 47%, #def6ff87 0 1px, transparent 2px),
+    radial-gradient(circle at 72% 14%, #e9dfffcc 0 1.5px, transparent 2.5px),
+    radial-gradient(circle at 84% 37%, #e9eeff89 0 1px, transparent 2px),
+    radial-gradient(circle at 94% 6%, #f6e7ffad 0 1px, transparent 2px),
+    radial-gradient(circle at 97% 83%, #d4f2ff91 0 1px, transparent 2px);
+  opacity: .72;
+}
+.shell {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  max-width: 1480px;
+  padding: 30px clamp(16px, 3vw, 42px) 24px;
+}
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(304px, 344px);
+  align-items: stretch;
+  gap: clamp(16px, 2vw, 26px);
+}
+.game-stage, .game-sidebar { min-width: 0; }
+.game-stage { display: flex; flex-direction: column; }
+.game-stage .card { flex: 1 1 auto; }
+.game-sidebar { align-self: stretch; }
+.game-stage .brand {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  margin: 0 0 18px;
+  font-size: 18px;
+  letter-spacing: .10em;
+  text-shadow: 0 0 18px #a484ff5b;
+}
+.game-stage .brand .spark {
+  font-size: 30px;
+  color: #d3b3ff;
+  text-shadow: 0 0 22px #a977ffb8;
+}
+.game-stage .brand strong { color: #94edfa; }
+.game-stage .card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 560px;
+  border: 1px solid #9679e98a;
+  padding: clamp(24px, 3.3vw, 46px);
+  background:
+    radial-gradient(ellipse at 74% 0%, #724bb74d, transparent 45%),
+    radial-gradient(ellipse at 100% 100%, #18628d30, transparent 48%),
+    linear-gradient(148deg, #22234d 0%, #191c3f 53%, #171b39 100%);
+  box-shadow:
+    0 28px 80px #05081bb0,
+    0 0 36px #8657e11a,
+    inset 0 1px 0 #ffffff26;
+}
+.game-stage .card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  width: min(72%, 650px);
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 79% 14%, #e6c9ffbc 0 1px, transparent 3px),
+    radial-gradient(circle at 58% 24%, #e9eaff9c 0 1px, transparent 2px),
+    radial-gradient(circle at 90% 48%, #dffaff7d 0 1px, transparent 3px),
+    radial-gradient(ellipse at 90% 21%, #844fff36, transparent 50%),
+    radial-gradient(ellipse at 100% 83%, #3181cd1c, transparent 54%);
+}
+.game-stage .card::after {
+  content: '✦';
+  position: absolute;
+  inset-inline-end: clamp(20px, 5vw, 70px);
+  bottom: 30px;
+  pointer-events: none;
+  font-size: clamp(90px, 11vw, 175px);
+  line-height: 1;
+  color: #a49cff0e;
+  text-shadow: 0 0 50px #8878e01a;
+  z-index: -1;
+}
+.game-stage .card h1 {
+  font-size: clamp(32px, 3.45vw, 48px);
+  line-height: 1.13;
+  color: #faf6ff;
+  text-shadow: 0 0 25px #977ce245;
+}
+.game-stage .card .eyebrow {
+  color: #beb0ff;
+  letter-spacing: .2em;
+  margin-bottom: 22px;
+}
+.game-stage .card .intro {
+  max-width: 730px;
+  color: #d9dcf2;
+  line-height: 1.75;
+}
+.game-stage .card .setup {
+  max-width: 440px;
+  margin-top: 32px;
+}
+.game-stage .card select {
+  border: 1px solid #7779b5;
+  background: #292e57;
+}
+.game-stage .card .primary {
+  background: linear-gradient(105deg, #89e8f4 0%, #bd9dff 100%);
+  box-shadow: 0 7px 24px #a883fc42;
+  min-height: 49px;
+}
+.game-stage .card .outline-button {
+  background: #ffffff05;
+  border-color: #a49fd0b0;
+}
+.game-stage .card .outline-button:hover:not(:disabled) {
+  border-color: #ceb3ff;
+  background: #b99aff1c;
+}
+.game-stage .question h2 {
+  max-width: 850px;
+  font-size: clamp(22px, 2.3vw, 30px);
+  line-height: 1.5;
+  color: #f6f2ff;
+  font-weight: 700;
+}
+.game-stage .answers { gap: 15px; }
+.game-stage .answers button {
+  min-width: 0;
+  min-height: 86px;
+  border: 1px solid #9b83d993;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #343065dd, #22264ada);
+  box-shadow: inset 0 1px 0 #ffffff17;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.game-stage .answers button:hover:not(:disabled),
+.game-stage .answers button:focus-visible {
+  background: linear-gradient(135deg, #55418e, #31396a);
+  border-color: #d4b5ff;
+  box-shadow: 0 0 17px #ae86ff5b, inset 0 1px 0 #ffffff24;
+  transform: translateY(-2px);
+}
+.game-stage .answers .letter {
+  color: #f8ecff;
+  border-color: #a98deb;
+  background: linear-gradient(140deg, #7050b8, #49408b);
+}
+.game-stage .status .track {
+  height: 9px;
+  background: #51477875;
+}
+.game-stage .status .fill {
+  background: linear-gradient(90deg, #87ebf6, #bb84ff);
+  box-shadow: 0 0 16px #ae8bff85;
+}
+.game-stage .coffee-support {
+  border-color: #9287c165;
+  background: linear-gradient(105deg, #33305c88, #282d5780);
+}
+.game-stage .perk-shop {
+  border-top-color: #ae9df944;
+}
+
+.game-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 56px;
+}
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 1px solid #958bd070;
+  border-radius: 17px;
+  padding: 16px;
+  background:
+    radial-gradient(ellipse at 100% 0%, #775db026, transparent 56%),
+    linear-gradient(156deg, #292949ed, #1c2140f0);
+  box-shadow: 0 14px 33px #06081d6e, inset 0 1px 0 #ffffff1c;
+}
+.game-sidebar .sidebar-profile {
+  border-color: #a991ef8c;
+  background:
+    radial-gradient(ellipse at 100% 0%, #9563d745, transparent 60%),
+    linear-gradient(155deg, #3a3066f0, #242547ef);
+}
+.game-sidebar .account-controls {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: stretch;
+}
+.game-sidebar .account-controls .profile-controls { flex: 1 1 148px; min-width: 0; }
+.game-sidebar .account-controls .player-name {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: none;
+  text-align: start;
+}
+.game-sidebar .account-controls .account-button { min-height: 40px; }
+.game-sidebar .account-controls > .account-button { flex: 1 1 115px; }
+.game-sidebar .profile-menu {
+  min-width: min(240px, 85vw);
+  max-width: min(300px, 85vw);
+  inset-inline-start: 0;
+  inset-inline-end: auto;
+}
+.game-sidebar .dev-translation-tools { margin-top: 10px; }
+.game-sidebar .dev-reset-button { width: 100%; }
+
+.game-sidebar .ui-language-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(135px, 1.15fr);
+  margin: 0;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #d1d3f2;
+}
+.game-sidebar .ui-language-control label { white-space: normal; min-width: 0; }
+.game-sidebar .ui-language-control select {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 41px;
+  background: #302c59;
+  border-color: #a28ed0;
+}
+
+.game-sidebar .star-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+.game-sidebar .star-panel { padding: 16px 15px; }
+.game-sidebar .star-panel-title {
+  color: #e4dcff;
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: .065em;
+  margin-bottom: 12px;
+}
+.game-sidebar .star-items {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+}
+.game-sidebar .star-item {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 13px;
+  border: 1px solid #a3a6cb43;
+  border-radius: 11px;
+  background: linear-gradient(115deg, #4e477141, #33375d57);
+}
+.game-sidebar .star-item .star-icon {
+  flex: 0 0 23px;
+  font-size: 21px;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 0 7px currentColor);
+}
+.game-sidebar .star-item .star-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: start;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.35;
+  color: #e2e3fa;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.game-sidebar .star-item .star-number {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  color: #fbfaff;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.game-sidebar .star-item.bronze { border-color: #d6996e6e; }
+.game-sidebar .star-item.silver { border-color: #c2d3e86e; }
+.game-sidebar .star-item.gold { border-color: #ffd26f78; }
+.game-sidebar .star-item.platinum { border-color: #a9f1f57a; }
+
+/* All four wallet tiers use the same full width.
+   Conversion controls sit over each junction, not in a competing grid column.
+   Natural-height rows remain usable with long localized star names. */
+.game-sidebar .star-items-exchange {
+  display: flex;
+  flex-direction: column;
+  direction: ltr;
+  align-items: stretch;
+  gap: 9px;
+  overflow: visible;
+}
+.game-sidebar .star-items-exchange .star-item {
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 52px;
+}
+/* Exchange sits centered over the junction of adjacent rows.
+   Two compact pills are side-by-side, with vertical up/down direction arrows. */
+.game-sidebar .star-items-exchange .exchange-pair {
+  position: relative;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
+  margin-block: -19px -16px;
+  width: 100%;
+  margin-inline: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  pointer-events: none;
+}
+.game-sidebar .star-items-exchange .exchange-arrow {
+  display: inline-flex;
+  flex-direction: row;
+  flex: 0 0 57px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 57px;
+  min-height: 26px;
+  height: 26px;
+  padding: 2px 5px;
+  border: 1px solid #9681d0;
+  border-radius: 999px;
+  background: #3d3467;
+  box-shadow: 0 3px 9px #0c0b24c0;
+  color: #f7f2ff;
+  font-weight: 750;
+  pointer-events: auto;
+}
+/* The Premium-only Gold → Platinum conversion floats by itself at the
+   exact midpoint between the two ordinary exchange button positions. */
+.game-sidebar .star-items-exchange .exchange-pair.gold {
+  justify-content: center;
+  gap: 0;
+}
+.game-sidebar .star-items-exchange .exchange-pair.gold .exchange-arrow {
+  flex: 0 0 70px;
+  min-width: 70px;
+  margin-inline: auto;
+  border-color: #e9cd83;
+  background: linear-gradient(110deg, #58457e, #65518d);
+}
+.game-sidebar .exchange-arrow span {
+  font-size: 15px;
+  line-height: 1;
+}
+.game-sidebar .exchange-arrow small {
+  font-size: 9px;
+  line-height: 1;
+  color: #e2dcfa;
+}
+.game-sidebar .star-items-exchange .exchange-arrow:hover:not(:disabled),
+.game-sidebar .star-items-exchange .exchange-arrow:focus-visible {
+  border-color: #c6b0ff;
+  background: #65519b;
+  box-shadow: 0 0 11px #a18bff66;
+}
+.game-sidebar .star-items-exchange .exchange-arrow:disabled {
+  opacity: .47;
+  box-shadow: 0 2px 6px #0c0b2466;
+}
+.game-sidebar .stats-caption {
+  padding-top: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  color: #c0c9eb;
+}
+.game-sidebar .round-summary { gap: 6px; }
+
+@media (max-width: 1080px) {
+  .shell { max-width: 920px; }
+  .game-layout { grid-template-columns: minmax(0, 1fr); }
+  .game-stage .card { min-height: 440px; }
+  .game-sidebar {
+    padding-top: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .game-sidebar .star-dashboard {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 680px) {
+  .shell { padding: 22px 14px; }
+  .game-stage .brand { margin-bottom: 16px; font-size: 16px; }
+  .game-stage .card { padding: 22px 18px; min-height: 0; }
+  .game-stage .card::after { font-size: 90px; inset-inline-end: 10px; }
+  .game-stage .answers { grid-template-columns: minmax(0, 1fr); }
+  .game-sidebar { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .game-sidebar .star-dashboard {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .game-sidebar .sidebar-section, .game-sidebar .star-panel { padding: 15px; }
+}
+@media (max-width: 370px) {
+  .game-sidebar .ui-language-control { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .game-stage .answers button { transition: none; }
+  .game-stage .answers button:hover:not(:disabled),
+  .game-stage .answers button:focus-visible { transform: none; }
 }

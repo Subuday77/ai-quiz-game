@@ -44,7 +44,7 @@ const compiled = ts.transpileModule(componentSource, { compilerOptions }).output
 writeFileSync(join(temp, 'app.component.mjs'), compiled);
 const { AppComponent, appealQuestionExcerpt, filterAppealHistory, appealHistoryDecisionPresentation,
   appealHistoryRefundRows, appealHistoryQuotaRefund,
-  formatAppealHistoryDate } = await import(
+  formatAppealHistoryDate, formatAppealResetDate } = await import(
     pathToFileURL(join(temp, 'app.component.mjs')).href);
 const { LocalizationStore } = await import(pathToFileURL(join(temp, 'localization/store.mjs')).href);
 const { RESET_COPY, RESET_LANGUAGE_NAMES } = await import(
@@ -97,8 +97,18 @@ function setup({ warning = 15000, timeout = 45000, settingsError = false,
       if (url === '/api/v2/stars') {
         return of({ bronze: 0, silver: 0, gold: 0, platinum: 0 });
       }
+      if (url === '/api/v2/premium') {
+        // Premium loads during ngOnInit. It must not sit in the same pending
+        // requests queue as question/game HTTP calls in these offline tests.
+        return of({
+          active: false, checkout_ready: false, free_appeals_per_month: 5,
+          gold_to_platinum: false, star_discount_percent: 0,
+          priority_questions: false,
+        });
+      }
       if (url === '/api/v2/appeals/allowance') {
-        return of({ free_remaining: 5, free_total: 5, filed_this_month: 0,
+        return of({ free_remaining: 5, free_total: 5,
+                    refresh_at: '2026-12-01T00:00:00+00:00', filed_this_month: 0,
                     next_filing_fee_bronze: 0 });
       }
       if (url === '/api/v2/games/active') {
@@ -2931,4 +2941,163 @@ test('complaint action stays in the top-right header on both question and feedba
   assert.match(css, /\.card-topline \.appeal-header-button\s*\{/);
   assert.match(source, /this\.screen === 'feedback' && !!this\.feedback/);
   assert.doesNotMatch(source, /this\.feedback\?\.phase === 'lost' && !this\.feedback\.correct/);
+});
+
+test('monthly appeal reset uses API-supplied UTC midnight, independent of local time', () => {
+  assert.equal(formatAppealResetDate('2026-12-01T00:00:00+00:00'), '01.12.2026');
+  assert.equal(formatAppealResetDate('2027-01-01T00:00:00Z'), '01.01.2027');
+  assert.equal(formatAppealResetDate('nonsense'), '');
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /formatAppealResetDate\(allowance\.refresh_at\)/);
+  assert.match(history, /'appeals\.freeReset'/);
+  assert.match(history, /appeal-history-quota-reset/);
+  assert.doesNotMatch(history, /appeal-history-rules-reset/);
+  assert.ok(english['appeals.rulesFree'].includes('calendar month'));
+});
+
+test('complaint rules open at the first paragraph with the header focused', () => {
+  const history = source.slice(source.indexOf('async openAppealHistory()'),
+    source.indexOf('async openAccountSettings()'));
+  assert.match(history, /id="appeal-history-rules-title" tabindex="-1" autofocus/);
+  assert.match(history, /dialog\.showModal\(\)/);
+  assert.match(history, /dialog\.scrollTop = 0/);
+  assert.match(history, /\.focus\(\{ preventScroll: true \}\)/);
+  assert.ok(history.indexOf("'appeals.rulesFree'") < history.indexOf("'appeals.rulesWhen'"),
+    'monthly reset rule must be the first explanatory paragraph');
+});
+
+
+test('first, next and retried question generation always scroll to the absolute page top', () => {
+  const { app, posts, requests, scheduler } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  const scrollCalls = [];
+  globalThis.window = {
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    // The rule is not limited to mobile: desktop and mobile use the same top.
+    matchMedia: () => ({ matches: false }),
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    scrollTo: (...args) => scrollCalls.push(args),
+  };
+  const flushFrames = () => {
+    while (frames.length) frames.shift()();
+  };
+  const assertAtTop = count => {
+    assert.equal(scrollCalls.length, count);
+    assert.ok(scrollCalls.every(args => args.length === 2 && args[0] === 0 && args[1] === 0));
+  };
+  try {
+    app.gameId = '';
+    app.screen = 'setup';
+    scheduler.run(() => {
+      app.startGame();
+      assertAtTop(0);
+      succeed(posts[0], { game_id: 'started-round', language: 'English',
+        phase: 'main', correct_main_answers: 0 });
+      assert.equal(app.screen, 'question');
+      assertAtTop(1); // Immediately when generating Q1.
+      flushFrames();
+      assertAtTop(2); // After preparation view is rendered.
+      succeed(requests[0]); // Q1 arrives.
+      assertAtTop(3); // Scroll again as the question replaces preparation.
+      flushFrames();
+      assertAtTop(4);
+
+      // Next question, even though the player is no longer on setup.
+      app.screen = 'feedback';
+      app.continue();
+      assert.equal(requests.length, 2);
+      assertAtTop(5);
+      flushFrames();
+      assertAtTop(6);
+      succeed(requests[1], { ...question, number: 2, question_id: 'question-2' });
+      assertAtTop(7);
+      flushFrames();
+      assertAtTop(8);
+
+      // Retry while already on the question view is also an explicit request
+      // and must not preserve the player's former scroll position.
+      app.screen = 'question';
+      app.canRetryQuestion = true;
+      app.loading = false;
+      app.retryQuestion();
+      assert.equal(requests.length, 3);
+      assertAtTop(9);
+      flushFrames();
+      assertAtTop(10);
+      succeed(requests[2], { ...question, number: 3, question_id: 'question-3' });
+      assertAtTop(11);
+      flushFrames();
+      assertAtTop(12);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
+test('question scrolling is independent of viewport width and ignores duplicate requests', () => {
+  const { app, requests, scheduler } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  const scrollCalls = [];
+  globalThis.window = {
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    matchMedia: () => ({ matches: true }),
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    scrollTo: (...args) => scrollCalls.push(args),
+  };
+  try {
+    app.screen = 'feedback';
+    scheduler.run(() => {
+      app.loadQuestion();
+      assert.deepEqual(scrollCalls, [[0, 0]]);
+      app.loadQuestion(); // While loading, do not start another request.
+      assert.equal(requests.length, 1);
+      assert.equal(scrollCalls.length, 1);
+      frames.shift()();
+      frames.shift()();
+      assert.equal(scrollCalls.length, 2);
+      succeed(requests[0]);
+      assert.equal(scrollCalls.length, 3);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
+});
+
+test('mobile scheduled scroll is cancelled logically when leaving question view', () => {
+  const { app, requests, scheduler } = setup();
+  const original = globalThis.window;
+  const frames = [];
+  let scrolled = false;
+  globalThis.window = {
+    // Account boot checks location asynchronously; preserve its browser contract.
+    location: { search: '', hash: '', pathname: '/' },
+    history: { replaceState() {} },
+    matchMedia: () => ({ matches: true }),
+    requestAnimationFrame: callback => { frames.push(callback); return 1; },
+    scrollTo: () => { scrolled = true; },
+  };
+  try {
+    app.screen = 'setup';
+    scheduler.run(() => {
+      app.loadQuestion();
+      assert.equal(scrolled, true, 'scroll immediately when question preparation starts');
+      scrolled = false;
+      assert.equal(frames.length, 1);
+      frames.shift()();
+      app.screen = 'setup';
+      frames.shift()();
+      assert.equal(scrolled, false, 'do not yank the player away from a later screen');
+      succeed(requests[0]);
+    });
+  } finally {
+    if (original === undefined) delete globalThis.window;
+    else globalThis.window = original;
+  }
 });

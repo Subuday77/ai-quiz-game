@@ -41,7 +41,8 @@ test('Premium menu is compact and checkout opens a localized confirmation modal'
   assert.match(component, /premiumDialogOpen = false/);
   assert.match(html, /role="dialog" aria-modal="true"/);
   assert.match(html, /locale\.t\('premium\.dialogTitle'\)/);
-  assert.match(html, /locale\.t\('premium\.dialogIntro'\)/);
+  // The dialog shows active membership copy or the sign-up introduction.
+  assert.match(html, /locale\.t\(premium\?\.active \? 'premium\.activeDescription' : 'premium\.dialogIntro'\)/);
   assert.match(html, /locale\.t\('premium\.verifiedEmail'\)/);
   assert.match(html, /account\?\.email_verified && account\?\.email/);
   assert.match(html, /dir="ltr">\{\{ account\?\.email \}\}/);

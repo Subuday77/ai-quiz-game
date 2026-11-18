@@ -624,3 +624,127 @@ button:disabled { cursor: not-allowed; opacity: .55; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Complaint allowance belongs to My Complaints, not to the star wallet.
+   Rules open as a native secondary dialog without replacing history or
+   clearing its active filters/expanded items. */
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: .7rem;
+  padding: .74rem 1rem;
+  margin: 0 0 1.1rem;
+  border: 1px solid #7c8fae83;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #283d5bdd, #35305cdd);
+  color: #e6edff;
+  font-size: .96rem;
+  font-weight: 650;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota-value {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: .24rem;
+  min-width: 0;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-quota-reset {
+  color: #c4d9f1;
+  font-size: .85rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-open {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid #a1b3d9;
+  border-radius: 50%;
+  background: #343e6c;
+  color: #d4f4fc;
+  line-height: 1;
+  font: inherit;
+  font-size: .95rem;
+  cursor: pointer;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-open:hover,
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-open:focus-visible {
+  outline: 2px solid #83e7f2;
+  outline-offset: 2px;
+  background: #415785;
+}
+.swal2-popup.quiz-appeal-history-popup dialog.appeal-history-rules-dialog {
+  box-sizing: border-box;
+  position: fixed;
+  width: min(92vw, 680px);
+  max-width: 100%;
+  max-height: min(82dvh, 720px);
+  margin: auto;
+  padding: clamp(20px, 4vw, 32px);
+  overflow-y: auto;
+  color: #e8ecff;
+  background:
+    radial-gradient(circle at 95% 0%, #58417e 0%, transparent 45%),
+    linear-gradient(150deg, #282b50, #1b203d);
+  border: 1px solid #aa92e4;
+  border-radius: 19px;
+  box-shadow: 0 25px 90px #070a1df0;
+  text-align: start;
+  font-size: .95rem;
+  line-height: 1.65;
+}
+.swal2-popup.quiz-appeal-history-popup dialog.appeal-history-rules-dialog::backdrop {
+  background: #07091dcc;
+  backdrop-filter: blur(5px);
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-dialog h2 {
+  margin: 0 0 1rem;
+  color: #f4eeff;
+  font-size: clamp(1.25rem, 3vw, 1.65rem);
+  line-height: 1.25;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-dialog p {
+  margin: 0 0 1rem;
+  color: #d5d9f2;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-dialog .appeal-history-rules-close {
+  display: block;
+  min-width: 140px;
+  min-height: 42px;
+  margin: 1.25rem 0 0 auto;
+  padding: .58rem 1.25rem;
+  border: 1px solid #aa98e6;
+  border-radius: 10px;
+  background: #604998;
+  color: #f8f5ff;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-close:hover,
+.swal2-popup.quiz-appeal-history-popup .appeal-history-rules-close:focus-visible {
+  outline: 2px solid #83e7f2;
+  outline-offset: 2px;
+  background: #745fb0;
+}
+@media (max-width: 590px) {
+  .swal2-popup.quiz-appeal-history-popup .appeal-history-quota {
+    padding: .64rem .8rem;
+    margin-bottom: .85rem;
+  }
+  .swal2-popup.quiz-appeal-history-popup dialog.appeal-history-rules-dialog {
+    width: min(94vw, 680px);
+    padding: 18px;
+  }
+}

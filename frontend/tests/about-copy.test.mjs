@@ -12,7 +12,9 @@ function aboutSections() {
   const at = source.indexOf('export const ABOUT_SECTIONS');
   assert.notEqual(at, -1);
   const start = source.indexOf(' = ', at) + 3;
-  const end = source.indexOf(';\n', start);
+  // Search for the closing array terminator rather than a Unix-only newline:
+  // Windows Git checkouts may use CRLF in this TypeScript source.
+  const end = source.indexOf('];', start) + 1;
   assert.ok(start > 2 && end > start);
   return JSON.parse(source.slice(start, end));
 }
