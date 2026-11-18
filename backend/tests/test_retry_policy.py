@@ -297,7 +297,7 @@ class TaggedCriticBudgetTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as raised:
                 generate_valid_question(0, "English", "History",
                                         tag_history=[], tag_context=[],
-                                        too_easy_reserve=reserve)
+                                        editorial_reserve=reserve)
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(generator.call_count, 3)
         self.assertEqual(critic.call_count, 3)
