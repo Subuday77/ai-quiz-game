@@ -361,9 +361,41 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
         raise QualityReviewFailure("tag_review_insufficient_budget", retryable=False)
     if remaining <= 0:
         raise QualityReviewFailure("tag_review_budget_exhausted", retryable=False)
+    # Leave the independent Terra call a real time slot, instead of using
+    # the entire remaining deadline on the critic. Q16's full 18 seconds are
+    # already reserved before generation. For other flagged questions, use
+    # as much of the available budget as possible without extending it.
+    arbiter_reserve = 0.0
+    if mode == QualityMode.ENFORCE:
+        from tagging.quality_skill.arbiter import settings as arbiter_settings
+        from tagging.quality_skill.fact_tool import spatial_constraints
+        enabled, _, terra_timeout = arbiter_settings()
+        needs_terra = (
+            bool(spatial_constraints(question.question))
+            or (enabled and (requested_difficulty == 15
+                             or bool(shadow and shadow.get("would_arbitrate"))))
+        )
+        if needs_terra:
+            minimum_critic = min(timeout_seconds, max(
+                4.0, min_remaining_seconds - (
+                    terra_timeout if requested_difficulty == 15 else 0.0
+                )
+            ))
+            arbiter_reserve = min(
+                terra_timeout, max(0.0, deadline - clock() - minimum_critic)
+            )
+            if arbiter_reserve <= 0:
+                raise QualityReviewFailure("tag_review_insufficient_arbiter_budget",
+                                           retryable=False)
+            event("tagged_review_arbiter_budget_reserved",
+                  reserved_ms=round(arbiter_reserve * 1000),
+                  requested_difficulty=requested_difficulty)
+    reviewer_timeout = min(timeout_seconds, deadline - clock() - arbiter_reserve)
+    if reviewer_timeout <= 0:
+        raise QualityReviewFailure("tag_review_insufficient_budget", retryable=False)
     settings = ReviewerSettings.from_env()
     review_start = clock()
-    token = provider_timeout.set(min(timeout_seconds, remaining))
+    token = provider_timeout.set(reviewer_timeout)
     try:
         reviewer = LLMClient(settings.provider, model_id=settings.model_id,
                              structured_output_mode=settings.structured_output_mode,
@@ -381,7 +413,9 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
                 max_output_tokens=max(MAX_OUTPUT_TOKENS, 2400),
                 reasoning={"effort": "low"}, temperature=TEMPERATURE,
                 output_contract=OutputContract.TAGGED_REVIEW,
-                request_timeout=lambda: min(timeout_seconds, deadline - clock()),
+                request_timeout=lambda: min(
+                    reviewer_timeout, deadline - clock() - arbiter_reserve
+                ),
             )
             raw = json.loads(normalize_output(completed_text(response)))
             verdict = TaggedReview.model_validate(raw)
