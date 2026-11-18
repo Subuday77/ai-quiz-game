@@ -647,6 +647,10 @@ class PersistentGameAPITests(unittest.TestCase):
             first, cached = _claim_question_generation(db, game_id, user_id)
             self.assertIsNone(cached)
         self.assertTrue(first)
+        state = self.client.get(f"/api/v2/games/{game_id}")
+        self.assertEqual(state.status_code, 200, state.text)
+        self.assertIs(state.json()["question_generation_in_progress"], True)
+        self.assertNotIn("question_generation_token", state.json())
         change = self.client.patch(f"/api/v2/games/{game_id}/language",
                                    json={"language": "Russian"})
         self.assertEqual(change.status_code, 409)
@@ -693,6 +697,8 @@ class PersistentGameAPITests(unittest.TestCase):
             _release_question_generation(db, game_id, user_id, second)
         with Session(self.engine) as db:
             self.assertIsNone(db.get(GameRun, game_id).question_generation_token)
+        state = self.client.get(f"/api/v2/games/{game_id}")
+        self.assertIs(state.json()["question_generation_in_progress"], False)
 
     @patch("api.create_question", return_value=QUESTION)
     def test_generation_failure_releases_lease_and_cached_question_reuses_it(self, gen):
