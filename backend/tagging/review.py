@@ -523,6 +523,11 @@ def check_tagged_quality(question: TaggedQuestion, *, language: str,
     # In particular, every Q16 candidate must reach arbitration, including
     # those rejected only for weak distractors or an easier-than-target level.
     should_arbitrate = mode == QualityMode.ENFORCE and not hard_rejected
+    question._review_report["details"]["arbitration_required_for_reserve"] = bool(
+        mode == QualityMode.ENFORCE
+        and (requested_difficulty == 15 or required_spatial
+             or (shadow and shadow.get("would_arbitrate")))
+    )
     if should_arbitrate:
         from tagging.quality_skill.arbiter import arbitrate
         allowed, arbitration, reason = arbitrate(
@@ -682,6 +687,10 @@ def editorial_reserve_score(question: TaggedQuestion) -> float | None:
     over_threshold = score >= threshold
 
     arbitration = details.get("arbitration")
+    if arbitration is None and details.get("arbitration_required_for_reserve") is not False:
+        # A flagged ordinary question or Q16 without a completed independent
+        # review cannot become a reserve merely because the main critic passed.
+        return None
     consensus_too_easy = False
     if arbitration is not None:
         if not isinstance(arbitration, dict):
