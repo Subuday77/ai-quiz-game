@@ -455,19 +455,18 @@ test('new question refreshes stars spent on another device without F5', () => {
 });
 
 test('late wallet response cannot overwrite a newer cross-device star balance', () => {
-  const { app, requests, scheduler, walletRequests } = setup({ pendingWallet: true });
+  const { app, requests, walletRequests } = setup({ pendingWallet: true });
   assert.equal(walletRequests.length, 1, 'login started the first wallet read');
-  scheduler.run(() => {
-    app.loadQuestion();
-    succeed(requests[0], { ...question, number: 7 });
-    assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
 
-    // Resolve both delayed HTTP calls before virtual timeout timers run.
-    succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
-    succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
-    assert.equal(app.spendableStars.silver, 44,
-      'an older response must not resurrect the pre-spend balance');
-  });
+  // Manual Subject completion is sufficient here; virtual scheduler flushing
+  // can advance 10-second HTTP timeouts before delayed responses are supplied.
+  app.loadQuestion();
+  succeed(requests[0], { ...question, number: 7 });
+  assert.equal(walletRequests.length, 2, 'question triggered fresh wallet read');
+  succeed(walletRequests[1], { bronze: 0, silver: 44, gold: 0, platinum: 0 });
+  succeed(walletRequests[0], { bronze: 0, silver: 46, gold: 0, platinum: 0 });
+  assert.equal(app.spendableStars.silver, 44,
+    'an older response must not resurrect the pre-spend balance');
 });
 
 test('answering uses v2 and refreshes server-authoritative rewards', () => {
