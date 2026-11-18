@@ -647,6 +647,12 @@ class PersistentGameAPITests(unittest.TestCase):
             first, cached = _claim_question_generation(db, game_id, user_id)
             self.assertIsNone(cached)
         self.assertTrue(first)
+        change = self.client.patch(f"/api/v2/games/{game_id}/language",
+                                   json={"language": "Russian"})
+        self.assertEqual(change.status_code, 409)
+        self.assertEqual(change.json()["detail"], {"code": "question_generating"})
+        with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
+            self.assertEqual(db.get(GameRun, game_id).language, "English")
         with Session(self.engine, autoflush=False, expire_on_commit=False) as db:
             with self.assertRaises(HTTPException) as raised:
                 _claim_question_generation(db, game_id, user_id)
