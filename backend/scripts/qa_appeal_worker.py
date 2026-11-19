@@ -87,7 +87,8 @@ def _qa_case(db: Session, appeal_id: UUID):
             or run.user_id != user.id
             or appeal.question_number not in (10, 16)
             or appeal.before_answer
-            or appeal.context.get("run_status_at_submission") != "lost"
+            or appeal.context.get("run_status_at_submission") != (
+                "completed" if appeal.question_number == 16 else "lost")
             or appeal.context.get("lost_question_id") != str(question.id)):
         raise ValueError("Refusing non-QA appeal or malformed QA fixture")
     return appeal, user, run, question
@@ -126,7 +127,7 @@ def prepare(*, scenario: str, source_question_id: UUID = SOURCE_QUESTION_ID,
         run = GameRun(
             user_id=user.id,
             language=source.language,
-            status="lost",
+            status="completed" if number == 16 else "lost",
             correct_main_answers=number - 1 if number == 10 else 15,
             bonus_wager_accepted=number == 16,
             bonus_correct=False if number == 16 else None,
@@ -267,7 +268,7 @@ def verify(*, appeal_id: UUID) -> dict:
                                and moderation.upheld_count == 1
                                and moderation.permanently_blocked
                                and moderation.block_reason == "confirmed_error"),
-            "lost_run_preserved": run.status == "lost",
+            "lost_run_preserved": run.status == ("completed" if number == 16 else "lost"),
             "no_nonrefundable_fee": appeal.filing_fee_bronze == 0,
             "snapshot_unchanged": (appeal.question_snapshot["question"] == question.text
                                    and appeal.context["correct_key"] == "B"),
