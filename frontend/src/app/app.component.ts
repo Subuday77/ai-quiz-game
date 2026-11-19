@@ -64,6 +64,7 @@ interface GameInfo {
   language: string;
   mode?: GameMode; // Older cached/test fixtures default to classic.
   phase: string;
+  bonus_correct?: boolean | null;
   correct_main_answers: number;
   round_stars: StarCounts;
   main_question_index?: number;
@@ -830,7 +831,7 @@ export class AppComponent implements OnInit, OnDestroy {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[char]);
   }
 
-  private restoreLostQuestionForAppeal(runId: string): void {
+  private restoreFailedQuestionForAppeal(runId: string): void {
     if (!this.account || !runId) return;
     const accountId = this.account.id;
     this.subscriptions.add(this.http.get<PublicQuestion>(
@@ -838,7 +839,8 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(10000)).subscribe({
       next: question => {
         if (this.account?.id === accountId && this.gameId === runId &&
-            this.finishedPhase === 'lost' && this.screen === 'done') this.current = question;
+            (this.finishedPhase === 'lost' || this.finishedPhase === 'completed') &&
+            this.screen === 'done') this.current = question;
       },
       error: () => { /* Already appealed or not eligible; keep the result unchanged. */ },
     }));
@@ -848,7 +850,8 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && !!this.feedback)) ||
+          (this.screen === 'feedback' && !!this.feedback) ||
+          (this.screen === 'done' && !!this.finishedPhase)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
 
     this.appealBusy = true;
@@ -2468,7 +2471,9 @@ export class AppComponent implements OnInit, OnDestroy {
     // while the Retry action is visible.
     if (this.loading || this.canRetryQuestion || this.bonusDecisionAvailable) return;
     if (this.gameEnded) {
-      this.clearPendingResults();
+      // Keep the F5 bookmark for failed main questions and bonus wagers.
+      const failedBonus = this.current?.bonus === true && this.feedback?.correct === false;
+      if (this.finishedPhase !== 'lost' && !failedBonus) this.clearPendingResults();
       this.screen = 'done';
     } else {
       this.generatingNextQuestion = true;
@@ -3260,7 +3265,9 @@ export class AppComponent implements OnInit, OnDestroy {
       this.screen = 'done';
       this.forgetActiveGame();
       this.rememberPendingResults(run.game_id);
-      if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+      if (run.phase === 'lost' ||
+          (run.phase === 'completed' && run.bonus_correct === false))
+        this.restoreFailedQuestionForAppeal(run.game_id);
     } else if (run.phase === 'main' || run.phase === 'bonus') {
       this.rememberActiveGame(run.game_id);
       if (run.question_issued) {
@@ -3304,6 +3311,10 @@ export class AppComponent implements OnInit, OnDestroy {
             .map(t => t.key);
           this.current = null;
           this.screen = 'done';
+          this.rememberPendingResults(run.game_id);
+          if (run.phase === 'lost' ||
+              (run.phase === 'completed' && run.bonus_correct === false))
+            this.restoreFailedQuestionForAppeal(run.game_id);
           this.refreshStats();
         } else {
           this.current = null;
@@ -3428,11 +3439,14 @@ export class AppComponent implements OnInit, OnDestroy {
       .map(t => t.key);
     this.helperCard = run.helper ?? null;
     this.screen = 'done';
-    if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    if (run.phase === 'lost' ||
+        (run.phase === 'completed' && run.bonus_correct === false))
+      this.restoreFailedQuestionForAppeal(run.game_id);
     if (run.phase === 'completed' && run.round_stars.platinum > 0)
       this.openPlatinumCelebration(run.game_id);
     // Preserve the bookmark so an F5 does not erase the losing-card appeal path.
-    if (run.phase !== 'lost') this.clearPendingResults();
+    if (run.phase !== 'lost' && run.bonus_correct !== false)
+      this.clearPendingResults();
   }
 
   private rememberActiveGame(id: string): void {
