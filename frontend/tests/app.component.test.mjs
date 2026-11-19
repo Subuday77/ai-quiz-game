@@ -2821,6 +2821,34 @@ test('appeal history only renders bonus wager on Q16, with unambiguous forfeitur
   assert.match(source, /item\.question_number === 16[\s\S]*?'appeals\.wagerRefunded'/);
 });
 
+test('failed Q16 in both modes can be appealed after F5 from results', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /screen === 'done' && !!finishedPhase/);
+  assert.match(source, /this.screen === 'done' && !!this.finishedPhase/);
+  for (const mode of ['classic', 'easy']) {
+    const { app, requests } = setup();
+    app.screen = 'setup';
+    app.pendingResults = {
+      game_id: 'failed-' + mode, mode, language: 'Russian',
+      phase: 'completed', bonus_correct: false,
+      correct_main_answers: 15, main_question_index: 15,
+      round_stars: { bronze: 1, silver: mode === 'easy' ? 0 : 1,
+                     gold: mode === 'easy' ? 0 : 0, platinum: 0 },
+    };
+    app.showPendingResults();
+    assert.equal(app.screen, 'done');
+    assert.equal(app.gameId, 'failed-' + mode);
+    assert.equal(app.selectedMode, mode);
+    const request = requests.find(r =>
+      r.url === '/api/v2/games/failed-' + mode + '/appeals/lost-question');
+    assert.ok(request, 'failed Q16 restored from PostgreSQL');
+    succeed(request, { ...question, question_id: 'bonus-' + mode,
+                       number: 16, bonus: true });
+    assert.equal(app.current?.number, 16);
+    assert.equal(app.current?.bonus, true);
+  }
+});
+
 test('complaint form separates monthly allowance, filing fee and total debit', () => {
   assert.equal(english['appeals.costTitle'], 'Total complaint cost');
   assert.equal(english['appeals.filingPrice'], 'Complaint fee');
