@@ -14,7 +14,8 @@ from persistence.models import GameRun, Question, QuestionAppeal, User
 from persistence.gameplay import GameConflict, GameNotFound
 from persistence.appeal_service import quote_appeal, file_appeal, _filings_this_month
 from persistence.appeal_qa_quota import allowance
-from persistence.appeal_policy import appeal_fee_bronze
+from persistence.appeal_policy import appeal_fee_bronze, compensation_tier
+from game_logic import bonus_wager_tier
 from star_perks import PerkUnavailable
 from persistence.appeal_logging import emit
 
@@ -79,8 +80,9 @@ def _public(appeal: QuestionAppeal, db: Session | None = None) -> dict:
         "deposit": {"tier": appeal.deposit_tier, "amount": 1,
                     "refunded": appeal.deposit_refunded_at is not None},
         "filing_fee_bronze": appeal.filing_fee_bronze,
-        "compensation": {"tier": ("platinum" if appeal.question_number == 16 else
-                                 appeal.deposit_tier),
+        "compensation": {"tier": compensation_tier(
+                             appeal.question_number,
+                             mode=(appeal.context or {}).get("mode", "classic")),
                          "amount": 1 if appeal.compensated_at else 0},
         "bonus_wager_refunded": appeal.bonus_wager_refunded_at is not None,
         "expenses_refunded": (appeal.verdict_data or {}).get("expenses_refunded", []),
@@ -162,10 +164,9 @@ def appeal_quote(run_id: UUID, question_id: UUID,
             and attempt.id == last_losing_attempt_id
         )
         quote["loss_compensation_tier_if_upheld"] = (
-            "platinum" if attempt.number == 16 else
-            ("bronze" if attempt.number <= 5 else
-             "silver" if attempt.number <= 10 else "gold")
+            compensation_tier(attempt.number, mode=run.mode)
         ) if caused_loss else None
+        quote["bonus_wager_tier"] = bonus_wager_tier(run.mode)
         quote["bonus_wager_refund_if_upheld"] = bool(
             caused_loss and attempt.number == 16 and run.bonus_wager_accepted)
         from persistence.choice_order import display_choices
