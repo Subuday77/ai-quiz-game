@@ -240,7 +240,8 @@ test('guest cannot create an unprotected v2 game', () => {
 
 test('loss grayscale starts on losing feedback, survives results, and clears for a new game', () => {
   const { app } = setup();
-  assert.match(source, /host: \{ '\[class\.loss-mode\]': 'lossModeActive' \}/);
+  assert.match(source, /'\[class\.loss-mode\]': 'lossModeActive'/);
+  assert.match(source, /'\[class\.easy-mode\]': 'easyModeActive'/);
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
   assert.match(css, /:host\(\.loss-mode\)::after/);
   assert.match(css, /backdrop-filter: grayscale\(97%\)/);
@@ -1122,7 +1123,7 @@ test('Play Again creates a fresh unstarted DB round and never buys a helper', ()
   assert.equal(app.loading, true);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
-  assert.deepEqual(posts[0].body, { language: 'Russian' });
+  assert.deepEqual(posts[0].body, { language: 'Russian', mode: 'classic' });
   assert.equal(requests.length, 0);
   succeed(posts[0], {
     game_id: 'fresh-run', language: 'Russian', phase: 'main',
@@ -1263,7 +1264,7 @@ test('new-round cancellation and failed POST preserve purchases; success opens c
     app.startFreshGame();
     app.confirmNewGame();
     assert.equal(posts[0].url, '/api/v2/games/existing-game/replace');
-    assert.deepEqual(posts[0].body, { language: 'Spanish' });
+    assert.deepEqual(posts[0].body, { language: 'Spanish', mode: 'classic' });
     assert.equal(app.helperCard, oldHelper);
     posts[0].subject.error(new Error('network error'));
   });
