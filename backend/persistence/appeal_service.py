@@ -226,6 +226,7 @@ def file_appeal(db: Session, *, user_id: UUID, run_id: UUID,
                 "helper_purchase_id": str(helper.id) if helper else None,
                 "helper_used_on_question": helper_call_on_question,
                 "bonus_wager_accepted": run.bonus_wager_accepted,
+                "mode": run.mode,
                 "run_status_at_submission": run.status,
                 "lost_question_id": str(lost_attempt.question_id) if lost_attempt else None,
                 "prior_appeals_count": prior_appeals,
@@ -386,13 +387,15 @@ def settle_appeal(db: Session, *, appeal: QuestionAppeal, decision: str,
                         ]
                         appeal.verdict_data = data
     if decision == "upheld" and caused_loss:
-        _credit(db, appeal=appeal, tier=compensation_tier(appeal.question_number),
+        _credit(db, appeal=appeal, tier=compensation_tier(
+                    appeal.question_number, mode=appeal.context.get("mode", "classic")),
                 action="appeal-compensation")
         appeal.compensated_at = now
         if bonus_wager_refund(question_number=appeal.question_number,
                               upheld=True, caused_loss=caused_loss and
                               bool(appeal.context.get("bonus_wager_accepted"))):
-            _credit(db, appeal=appeal, tier="gold",
+            _credit(db, appeal=appeal,
+                    tier=("silver" if appeal.context.get("mode") == "easy" else "gold"),
                     action="appeal-bonus-wager-refund")
             appeal.bonus_wager_refunded_at = now
 
