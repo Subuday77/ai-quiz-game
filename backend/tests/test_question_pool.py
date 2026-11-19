@@ -309,6 +309,33 @@ class GlobalPoolTests(unittest.TestCase):
     def _silver_balance(self):
         return self.client.get("/api/v2/stars").json()["silver"]
 
+    def test_easy_q1_reuses_classic_q2_level_one_from_shared_db_first(self):
+        """Mode is run metadata, not a second question pool partition."""
+        with Session(self.engine) as db:
+            alice_run = db.get(GameRun, self.run_id)
+            alice_run.mode = "easy"
+            bob_run = create_game(db, user_id=self.bob, language="English")
+            bob_run.correct_main_answers = 1  # Classic Q2 requests difficulty 1.
+            db.commit()
+            question = candidate(difficulty=1)
+            question._review_report = review_report()
+            _, saved = offer_question(
+                db, run_id=bob_run.id, user_id=self.bob,
+                question=question, category=self.category,
+                provider="test", model="stub", dedup_enforce=True,
+            )
+            pooled_id = saved.id
+
+        with patch.dict(os.environ, {"QUIZ_DB_FIRST_GENERATION": "true"}), patch(
+            "persistence.question_pool.random.random", return_value=0.0
+        ), patch("api.generate_valid_question") as ai:
+            response = self.request()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["difficulty"], 1)
+        self.assertEqual(response.json()["number"], 1)
+        self.assertEqual(response.json()["question_id"], str(pooled_id))
+        ai.assert_not_called()
+
     def test_pool_first_q1_searches_other_allowed_categories_before_ai(self):
         with Session(self.engine) as db:
             run = db.get(GameRun, self.run_id)
