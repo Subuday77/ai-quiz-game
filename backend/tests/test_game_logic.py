@@ -19,6 +19,43 @@ class GameStateTests(unittest.TestCase):
         self.assertEqual(game.phase, "bonus")
         self.assertEqual(game.current_difficulty, 15)
 
+    def test_easy_mode_difficulty_curve_and_full_reward_economy(self):
+        game = GameState(mode="easy")
+        levels, rewards = [], []
+        for i in range(1, 16):
+            levels.append(game.current_difficulty)
+            result = game.submit_answer(True)
+            rewards.append(result.achievement)
+            if i == 5:
+                self.assertIsNone(result.achievement, "Q5 is encouragement only")
+        self.assertEqual(levels, [1, 1, 2, 2, 3, 3, 4, 4,
+                                  5, 5, 6, 6, 7, 7, 8])
+        self.assertEqual([ (i, star) for i, star in enumerate(rewards, 1) if star ],
+                         [(10, "bronze"), (15, "silver")])
+        self.assertEqual(game.phase, "bonus")
+        self.assertEqual(game.current_difficulty, 9)
+        result = game.submit_answer(True)
+        self.assertEqual(result.achievement, "gold")
+        self.assertEqual(game.phase, "completed")
+
+    def test_easy_mode_hint_blocks_bonus_and_skip_uses_physical_slot(self):
+        game = GameState(mode="easy")
+        for _ in range(3):
+            game.submit_answer(True)
+        game.skip_main_question()
+        self.assertEqual(game.current_difficulty, 3, "Q5 is level three")
+        self.assertEqual(game.correct_main_answers, 3)
+        for _ in range(11):
+            game.submit_answer(True)
+        self.assertEqual(game.phase, "completed")
+        self.assertEqual(game.correct_main_answers, 14)
+        self.assertEqual(game.current_difficulty if game.phase == "main" else 9, 9)
+
+    def test_mode_validation_is_strict_and_classic_remains_default(self):
+        with self.assertRaises(ValueError):
+            GameState(mode="other")
+        self.assertEqual(GameState().current_difficulty, 0)
+
     def test_hint_blocks_bonus_but_not_gold(self):
         game = GameState()
         game.record_hint_use()
