@@ -596,6 +596,8 @@ export class AppComponent implements OnInit, OnDestroy {
         if (this.gameId !== gameId || this.account?.id !== accountId) return;
         this.gameLanguage = game.language;
         this.selectedLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         if (this.account) this.account.preferred_language = game.language;
       },
       error: (err: unknown) => {
@@ -2035,6 +2037,8 @@ export class AppComponent implements OnInit, OnDestroy {
           this.gameId = game.game_id;
           this.gameLanguage = game.language;
           this.selectedLanguage = game.language;
+          this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+          this.selectedMode = this.gameMode;
           this.rememberActiveGame(game.game_id);
           this.loadCategoryInfo();
           this.refreshSpendableStars();
@@ -2492,6 +2496,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = game.game_id;
         this.gameLanguage = game.language;
         this.selectedLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.rememberActiveGame(game.game_id);
         this.loadCategoryInfo();
         this.refreshSpendableStars();
@@ -2539,6 +2545,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = game.game_id;
         this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.categoryInfo = null;
@@ -2682,6 +2690,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoreVersion++;
     this.restoringGame = false;
     this.account = null;
+    this.selectedMode = 'classic';
+    this.gameMode = 'classic';
     this.aboutOpen = false;
     this.aboutClaimed = false;
     this.aboutStatusLoading = false;
@@ -3153,6 +3163,8 @@ export class AppComponent implements OnInit, OnDestroy {
           this.gameId = run.game_id;
           this.gameLanguage = run.language;
           this.selectedLanguage = run.language;
+          this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+          this.selectedMode = this.gameMode;
           this.gameQuestionIssued = false;
           this.helperCard = run.helper ?? null;
           this.loadCategoryInfo();
@@ -3166,6 +3178,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.resumeRunLanguage = run.language;
         this.gameLanguage = run.language;
         this.selectedLanguage = run.language;
+        this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.resumeAvailable = true;
         this.screen = 'setup';
       },
@@ -3227,6 +3241,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.questionLoading = false;
     this.gameLanguage = run.language;
     this.selectedLanguage = run.language;
+    this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+    this.selectedMode = this.gameMode;
     this.progress = run.main_question_index ?? run.correct_main_answers;
     this.gameCorrectAnswers = run.correct_main_answers;
     this.skippedQuestions = run.skipped_questions ?? 0;
@@ -3272,6 +3288,8 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (run) => {
         this.loading = false;
         this.canRetryQuestion = false;
+        this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.progress = run.main_question_index ?? run.correct_main_answers;
         this.bonusDecisionAvailable = run.bonus_decision_available === true;
         this.gameQuestionIssued = run.question_issued === true;
@@ -3311,7 +3329,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.longWait = false;
     this.gameId = '';
     this.gameLanguage = '';
+    this.gameMode = this.selectedMode;
     this.languageSaving = false;
+    this.modeSaving = false;
     this.resumeAvailable = false;
     this.resumeCandidate = null;
     this.resumeRunLanguage = '';
@@ -3395,6 +3415,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameId = run.game_id;
     this.gameLanguage = run.language;
     this.selectedLanguage = run.language;
+    this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+    this.selectedMode = this.gameMode;
     this.progress = run.main_question_index ?? run.correct_main_answers;
     this.gameCorrectAnswers = run.correct_main_answers;
     this.skippedQuestions = run.skipped_questions ?? 0;
