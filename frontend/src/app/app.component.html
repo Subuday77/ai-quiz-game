@@ -37,7 +37,7 @@
         <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
         <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
-        <p class="intro" *ngIf="screen === 'setup'">{{ locale.t('hero.intro') }}</p>
+        <p class="intro" *ngIf="screen === 'setup'">{{ locale.t(selectedMode === 'easy' ? 'hero.introEasy' : 'hero.intro') }}</p>
         <div class="coffee-support" *ngIf="screen === 'setup'">
           <span class="coffee-prompt">{{ locale.t('support.coffeePrompt') }}</span>
           <a *ngIf="donationUrl; else coffeePending"
@@ -57,7 +57,7 @@
         <p class="intro resume-note" *ngIf="screen === 'setup' && resumeAvailable && account">{{ locale.t('hero.resumed') }}</p>
 
         <div class="status" *ngIf="screen !== 'setup'">
-          <div><span>{{ locale.t('game.progress') }}</span><strong>{{ currentQuestionNumber }} / {{ currentQuestionTotal }}</strong></div>
+          <div><span>{{ locale.t('game.progress') }} <span class="mode-label" *ngIf="selectedMode === 'easy'">{{ locale.t('game.modeEasy') }}</span></span><strong>{{ currentQuestionNumber }} / {{ currentQuestionTotal }}</strong></div>
           <div class="track"><div class="fill" [style.width.%]="progress / 15 * 100"></div></div>
         </div>
 
@@ -73,26 +73,39 @@
         </section>
         <div *ngIf="bonusDecisionAvailable && screen === 'setup' && !needsEmailVerification" class="bonus-decision">
           <h2>{{ locale.t('helper.bonusChoiceTitle') }}</h2>
-          <p>{{ locale.t('helper.bonusRisk') }}</p>
+          <p>{{ locale.t(selectedMode === 'easy' ? 'helper.bonusRiskEasy' : 'helper.bonusRisk') }}</p>
           <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
-            {{ locale.t('helper.playBonus') }}
+            {{ locale.t(selectedMode === 'easy' ? 'helper.playBonusEasy' : 'helper.playBonus') }}
           </button>
           <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
-            {{ locale.t('helper.keepGold') }}
+            {{ locale.t(selectedMode === 'easy' ? 'helper.keepSilver' : 'helper.keepGold') }}
           </button>
           <button type="button" class="outline-button" (click)="requestNewGame()" [disabled]="loading || restoringGame">
             {{ locale.t('game.startNew') }}
           </button>
         </div>
         <div *ngIf="screen === 'setup' && !bonusDecisionAvailable && !needsEmailVerification" class="setup">
-          <label for="language">{{ locale.t('game.questionLanguage') }}</label>
-          <select id="language" [(ngModel)]="selectedLanguage"
-                  (ngModelChange)="changeQuestionLanguage($event)"
-                  [disabled]="loading || languageSaving || perksBusy || categoryLoading || !canEditPregameLanguage || authLoading || restoringGame">
-            <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
-          </select>
-          <span *ngIf="languageSaving" class="gear-loader" aria-hidden="true"></span>
-          <span *ngIf="languageSaving" class="sr-only" role="status">{{ locale.t('game.languageSaving') }}</span>
+          <div class="setup-choice-row">
+            <div class="setup-choice">
+              <label for="language">{{ locale.t('game.questionLanguage') }}</label>
+              <select id="language" [(ngModel)]="selectedLanguage"
+                      (ngModelChange)="changeQuestionLanguage($event)"
+                      [disabled]="loading || languageSaving || modeSaving || perksBusy || categoryLoading || !canEditPregameLanguage || authLoading || restoringGame">
+                <option *ngFor="let language of languages" [value]="language">{{ locale.t('questionLanguage.' + language) }}</option>
+              </select>
+            </div>
+            <div class="setup-choice" *ngIf="canEditPregameMode">
+              <label for="game-mode">{{ locale.t('game.modeLabel') }}</label>
+              <select id="game-mode" [(ngModel)]="selectedMode"
+                      (ngModelChange)="changeGameMode($event)"
+                      [disabled]="loading || modeSaving || languageSaving || perksBusy || categoryLoading || helperBusy || authLoading || restoringGame">
+                <option value="classic">{{ locale.t('game.modeClassic') }}</option>
+                <option value="easy">{{ locale.t('game.modeEasy') }}</option>
+              </select>
+            </div>
+          </div>
+          <span *ngIf="languageSaving || modeSaving" class="gear-loader" aria-hidden="true"></span>
+          <span *ngIf="languageSaving || modeSaving" class="sr-only" role="status">{{ locale.t(languageSaving ? 'game.languageSaving' : 'game.modeSaving') }}</span>
           <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && error !== 'game.restoreFailed' && (categoryInfo === null || categoryInfo.can_exclude)">
             <button class="outline-button" type="button" (click)="openCategoryExclusions()"
                     [disabled]="loading || languageSaving || perksBusy || configLoading || authBusy || restoringGame || categoryLoading">
@@ -168,16 +181,16 @@
               {{ locale.t('game.seeResults') }}
             </button>
             <button *ngIf="!resumeAvailable" class="primary" type="button" (click)="startGame()"
-                    [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
+                    [disabled]="loading || languageSaving || modeSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy || categoriesToExclude.length > 0 || error === 'game.restoreFailed'">
               {{ locale.t(setupButtonLabelKey) }}
             </button>
             <button *ngIf="resumeAvailable" class="primary" type="button" (click)="startGame()"
-                    [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
+                    [disabled]="loading || languageSaving || modeSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
               {{ locale.t(setupButtonLabelKey) }}
             </button>
             <button *ngIf="account && (gameQuestionIssued || resumeCandidate)" class="outline-button"
                     type="button" (click)="requestNewGame()"
-                    [disabled]="loading || languageSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
+                    [disabled]="loading || languageSaving || modeSaving || configLoading || authLoading || authBusy || restoringGame || categoryLoading || perksBusy || helperBusy">
               {{ locale.t('game.startNew') }}
             </button>
             <span *ngIf="loading" class="gear-loader" aria-hidden="true"></span>
@@ -298,17 +311,20 @@
         <div *ngIf="screen === 'feedback' && feedback as result" class="feedback">
           <p *ngIf="result.correct">{{ locale.t('game.answerCorrect') }}</p>
           <p *ngIf="!result.correct"><strong>{{ locale.format('game.answerIncorrect', { letter: result.correct_answer, answer: correctAnswerText }) }}</strong></p>
+          <div class="achievement easy-encouragement" *ngIf="selectedMode === 'easy' && result.correct && current?.number === 5">
+            {{ locale.t('game.easyMilestone5') }}
+          </div>
           <div class="achievement" *ngIf="result.achievement">
             {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
           </div>
           <div class="bonus-decision" *ngIf="bonusDecisionAvailable">
             <h3>{{ locale.t('helper.bonusChoiceTitle') }}</h3>
-            <p>{{ locale.t('helper.bonusRisk') }}</p>
+            <p>{{ locale.t(selectedMode === 'easy' ? 'helper.bonusRiskEasy' : 'helper.bonusRisk') }}</p>
             <button type="button" class="primary" (click)="acceptBonus()" [disabled]="loading">
-              {{ locale.t('helper.playBonus') }}
+              {{ locale.t(selectedMode === 'easy' ? 'helper.playBonusEasy' : 'helper.playBonus') }}
             </button>
             <button type="button" class="outline-button" (click)="declineBonus()" [disabled]="loading">
-              {{ locale.t('helper.keepGold') }}
+              {{ locale.t(selectedMode === 'easy' ? 'helper.keepSilver' : 'helper.keepGold') }}
             </button>
           </div>
           <div class="question-actions">
