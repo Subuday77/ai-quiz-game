@@ -1398,3 +1398,105 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .platinum-victory-medal, .platinum-victory-spark { animation: none; }
   .platinum-victory-continue:hover { transform: none; }
 }
+
+
+/* Game mode: keep the same layout but give Easy a distinct evergreen palette. */
+.game-stage .card .setup { max-width: 555px; }
+.setup-choice-row {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px; align-items: end;
+}
+.setup-choice { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.setup-choice select { width: 100%; min-width: 0; box-sizing: border-box; }
+.mode-label {
+  margin-inline-start: 9px; padding: 4px 9px; border-radius: 999px;
+  color: #c1f8d5; background: #215c3a; font-weight: 850;
+  border: 1px solid #74dca772; letter-spacing: .03em;
+}
+.easy-encouragement {
+  color: #c3ffe1; border-color: #65b98b;
+  background: linear-gradient(110deg, #1d5a3b, #274e40);
+}
+@media (max-width: 510px) {
+  .setup-choice-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+:host(.easy-mode) {
+  background:
+    radial-gradient(ellipse at 15% 0%, #215f48 0, transparent 50%),
+    radial-gradient(ellipse at 95% 95%, #154b46 0, transparent 55%),
+    #101f25;
+}
+:host(.easy-mode) .game-stage .brand .spark { color: #86f3ad; text-shadow: 0 0 22px #39c98f75; }
+:host(.easy-mode) .game-stage .brand strong { color: #9affc9; }
+:host(.easy-mode) .game-stage .card {
+  border-color: #75dba475;
+  background:
+    radial-gradient(ellipse at 75% 0%, #267d4a70, transparent 48%),
+    radial-gradient(ellipse at 100% 100%, #19696044, transparent 55%),
+    linear-gradient(148deg, #183d33 0%, #122f2a 53%, #14282c 100%);
+  box-shadow: 0 28px 80px #050f10af, 0 0 38px #33a36d19, inset 0 1px 0 #e7ffe526;
+}
+:host(.easy-mode) .game-stage .card::before {
+  background:
+    radial-gradient(circle at 79% 14%, #d5ffe2ae 0 1px, transparent 3px),
+    radial-gradient(circle at 58% 24%, #e3ffed88 0 1px, transparent 2px),
+    radial-gradient(ellipse at 90% 21%, #34bc7950, transparent 50%),
+    radial-gradient(ellipse at 100% 83%, #209ca730, transparent 54%);
+}
+:host(.easy-mode) .game-stage .card::after { color: #83ffc10e; text-shadow: 0 0 45px #40c98922; }
+:host(.easy-mode) .game-stage .card h1 { color: #f1fff6; text-shadow: 0 0 25px #8de9a92d; }
+:host(.easy-mode) .game-stage .card .eyebrow { color: #a5efbd; }
+:host(.easy-mode) .game-stage .card .intro { color: #d1ebdf; }
+:host(.easy-mode) .game-stage .card select {
+  color: #f2fff8; border-color: #74b994;
+  background: #21483a;
+}
+:host(.easy-mode) .game-stage .card select:focus-visible {
+  outline: 2px solid #9cf5bc; outline-offset: 2px;
+}
+:host(.easy-mode) .game-stage .card .primary,
+:host(.easy-mode) .account-signup {
+  color: #10261c;
+  background: linear-gradient(105deg, #7ce7ae 0%, #b8f29d 100%);
+  box-shadow: 0 7px 24px #44c78b35;
+}
+:host(.easy-mode) .game-stage .card .outline-button {
+  color: #e1ffed; border-color: #7fbfa69a; background: #b5f5c70a;
+}
+:host(.easy-mode) .game-stage .card .outline-button:hover:not(:disabled) {
+  border-color: #bcffd0; background: #9cfdc424;
+}
+:host(.easy-mode) .game-stage .question h2 { color: #f2fff7; }
+:host(.easy-mode) .game-stage .question-label { color: #a6f5c3; }
+:host(.easy-mode) .game-stage .answers button {
+  color: #f0fff7; border-color: #61ad8f99;
+  background: linear-gradient(135deg, #255b46eb, #203f39da);
+}
+:host(.easy-mode) .game-stage .answers button:hover:not(:disabled),
+:host(.easy-mode) .game-stage .answers button:focus-visible {
+  border-color: #b6ffd1;
+  background: linear-gradient(135deg, #327658, #285b4e);
+  box-shadow: 0 0 17px #6edba957, inset 0 1px 0 #ffffff24;
+}
+:host(.easy-mode) .game-stage .answers .letter {
+  color: #eaffee; border-color: #78d8aa;
+  background: linear-gradient(140deg, #398a5b, #276747);
+}
+:host(.easy-mode) .game-stage .status .track { background: #215d4a78; }
+:host(.easy-mode) .game-stage .status .fill {
+  background: linear-gradient(90deg, #72e9a4, #b2f0a2);
+  box-shadow: 0 0 16px #7beba580;
+}
+:host(.easy-mode) .game-stage .coffee-support {
+  border-color: #74bd8a65;
+  background: linear-gradient(105deg, #22584188, #234a4480);
+}
+:host(.easy-mode) .game-stage .perk-shop { border-top-color: #72e4b044; }
+:host(.easy-mode) .game-sidebar .sidebar-section,
+:host(.easy-mode) .game-sidebar .star-panel {
+  border-color: #65c49c40;
+  background: linear-gradient(150deg, #193b33, #172f31);
+}
+:host(.easy-mode) .game-stage .gear-loader {
+  --gear-hole: #1b4434; --gear-primary: #7ce7ae; --gear-secondary: #b8f29d;
+}
