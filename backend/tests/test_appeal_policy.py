@@ -72,6 +72,11 @@ class AppealPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             appeal_deposit_tier(17)
 
+    def test_easy_bonus_compensation_is_gold_not_platinum(self):
+        self.assertEqual(compensation_tier(16, mode="easy"), "gold")
+        self.assertEqual(compensation_tier(16, mode="classic"), "platinum")
+        self.assertEqual(compensation_tier(10, mode="easy"), "silver")
+
     def test_only_five_checkboxes_remain(self):
         self.assertEqual(ALL_REASONS, {
             "multiple_correct", "no_correct", "incorrect_key",
