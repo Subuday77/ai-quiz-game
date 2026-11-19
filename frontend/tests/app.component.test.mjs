@@ -688,6 +688,86 @@ test('normal Start game immediately requests Q1 without requiring a second click
   assert.equal(app.screen, 'question');
 });
 
+test('Easy setup posts mode and paints the green variant before Q1', () => {
+  const { app, posts } = setup();
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /id="game-mode"/);
+  assert.match(template, /\*ngIf="canEditPregameMode"/);
+  assert.match(template, /changeGameMode\(\$event\)/);
+  assert.match(template, /game\.easyMilestone5/);
+  assert.match(css, /:host\(\.easy-mode\) \.game-stage \.card/);
+  for (const key of ['game.modeLabel', 'game.modeEasy', 'game.modeClassic',
+                     'game.easyMilestone5', 'hero.introEasy',
+                     'helper.bonusRiskEasy', 'helper.playBonusEasy', 'helper.keepSilver']) {
+    assert.ok(english[key], key);
+  }
+
+  app.gameId = '';
+  app.changeGameMode('easy');
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(app.easyModeActive, true);
+  app.startGame();
+  assert.deepEqual(posts[0].body, { language: 'English', mode: 'easy' });
+  succeed(posts[0], { game_id: 'easy-fresh', language: 'English', mode: 'easy',
+                      phase: 'main', correct_main_answers: 0 });
+  assert.equal(app.selectedMode, 'easy');
+});
+
+test('pregame mode PATCH is persisted; resume and Q1 lock the selector', () => {
+  const { app, patches } = setup();
+  app.gameId = 'pregame-easy';
+  app.gameQuestionIssued = false;
+  assert.equal(app.canEditPregameMode, true);
+  app.changeGameMode('easy');
+  assert.equal(patches[0].url, '/api/v2/games/pregame-easy/mode');
+  assert.deepEqual(patches[0].body, { mode: 'easy' });
+  succeed(patches[0], { game_id: 'pregame-easy', language: 'English',
+                        mode: 'easy', phase: 'main' });
+  assert.equal(app.selectedMode, 'easy');
+  app.resumeAvailable = true;
+  assert.equal(app.canEditPregameMode, false);
+  app.changeGameMode('classic');
+  assert.equal(app.selectedMode, 'easy', 'cannot override a resumable round');
+  app.resumeAvailable = false;
+  app.gameQuestionIssued = true;
+  assert.equal(app.canEditPregameMode, false);
+  app.changeGameMode('classic');
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(patches.length, 1, 'no mode mutation inside a started round');
+});
+
+test('Easy Q16 failure forfeits silver and never opens Platinum ceremony', () => {
+  const { app, posts } = setup();
+  app.selectedMode = 'easy';
+  app.currentStars = { bronze: 1, silver: 1, gold: 0, platinum: 0 };
+  app.stars = ['bronze', 'silver'];
+  app.current = { ...question, number: 16, difficulty: 9, bonus: true };
+  app.screen = 'question';
+  app.answer('A');
+  succeed(posts.at(-1), {
+    correct: false, correct_answer: 'B', phase: 'completed',
+    correct_main_answers: 15, achievement: null,
+  });
+  assert.equal(app.currentStars.silver, 0);
+  assert.equal(app.currentStars.gold, 0);
+  assert.equal(app.platinumCelebrationOpen, false);
+});
+
+test('Easy run mode is restored from the server before a resumed question', () => {
+  const { app } = setup();
+  app.resumeCandidate = {
+    game_id: 'easy-resume', language: 'German', mode: 'easy', phase: 'main',
+    correct_main_answers: 3, main_question_index: 3, question_issued: true,
+    round_stars: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
+  };
+  app.resumeAvailable = true;
+  app.selectedMode = 'classic';
+  app.startGame();
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(app.canEditPregameMode, false);
+});
+
 test('after paying for category exclusions the question language remains editable', () => {
   const { app, requests, posts, patches, scheduler } = setup();
   app.gameId = '';
