@@ -87,6 +87,7 @@ class BonusWagerTests(unittest.TestCase):
 
     def test_easy_q16_loss_forfeits_only_silver(self):
         self.run.mode = "easy"
+        self.db.query(StarAward).filter_by(tier="gold").delete()
         self.db.add(StarAward(user_id=self.user.id, run_id=self.run.id, tier="silver"))
         self.db.commit()
         accept_bonus(self.db, user_id=self.user.id, run_id=self.run.id)
