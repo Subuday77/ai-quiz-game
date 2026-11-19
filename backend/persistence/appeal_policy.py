@@ -54,10 +54,10 @@ def appeal_deposit_tier(question_number: int) -> str:
     return "gold"
 
 
-def compensation_tier(question_number: int) -> str:
+def compensation_tier(question_number: int, *, mode: str = "classic") -> str:
     """Only an upheld loss on the appealed question grants this reward."""
     if question_number == 16:
-        return "platinum"
+        return "gold" if mode == "easy" else "platinum"
     return appeal_deposit_tier(question_number)
 
 
@@ -114,5 +114,5 @@ def must_close_technical(submitted_at: datetime, now: datetime) -> bool:
 
 def bonus_wager_refund(*, question_number: int, upheld: bool,
                        caused_loss: bool) -> bool:
-    """Return the independent gold wager only for an upheld Q16 loss."""
+    """Return the independent silver/gold wager only for upheld Q16 loss."""
     return question_number == 16 and upheld and caused_loss
