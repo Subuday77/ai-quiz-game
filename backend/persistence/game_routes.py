@@ -162,6 +162,8 @@ class GameInfo(BaseModel):
     # Read-only, lease-derived status. Never expose the generation token to clients.
     question_generation_in_progress: bool = False
     bonus_decision_available: bool = False
+    # Wrong Q16 has phase 'completed'; needed for restored appeal access.
+    bonus_correct: bool | None = None
     helper: dict | None = None
     replacement_game_id: UUID | None = None
 
@@ -220,6 +222,7 @@ def _game_info(db: Session, run) -> GameInfo:
     return GameInfo(
         game_id=run.id, language=run.language, mode=run.mode, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        bonus_correct=run.bonus_correct,
         round_stars=round_stars,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
