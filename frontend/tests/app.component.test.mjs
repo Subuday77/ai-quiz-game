@@ -3668,6 +3668,17 @@ test('Easy interactive controls are green, shared About and complaint history st
   assert.doesNotMatch(globalCss, /\.quiz-appeal-history-popup\.quiz-easy-appeal-popup/);
 });
 
+test('category spending dialogs use green accents only while Easy is selected', () => {
+  const globalCss = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const categorySection = source.slice(source.indexOf('async excludeCategories():'),
+    source.indexOf('private changeCategory(', source.indexOf('async excludeCategories():')));
+  assert.match(categorySection, /this\.selectedMode === 'easy'/);
+  assert.match(categorySection, /quiz-easy-perk-popup/);
+  assert.match(categorySection, /confirmButtonColor: '#287852'/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-select/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-cancel/);
+});
+
 test('bonus Q16 choice buttons have equal height in both modes and stack on mobile', () => {
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
   assert.match(css, /\.bonus-decision > button \{[\s\S]*?align-self: stretch;[\s\S]*?min-height: 54px;[\s\S]*?margin-top: 0/);
