@@ -1420,28 +1420,12 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 @media (max-width: 510px) {
   .setup-choice-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
-:host(.easy-mode) {
-  background:
-    radial-gradient(ellipse at 15% 0%, #215f48 0, transparent 50%),
-    radial-gradient(ellipse at 95% 95%, #154b46 0, transparent 55%),
-    #101f25;
-}
+/* The root palette crossfades via .shell::before, not an instant background swap. */
 :host(.easy-mode) .game-stage .brand .spark { color: #86f3ad; text-shadow: 0 0 22px #39c98f75; }
 :host(.easy-mode) .game-stage .brand strong { color: #9affc9; }
 :host(.easy-mode) .game-stage .card {
   border-color: #75dba475;
-  background:
-    radial-gradient(ellipse at 75% 0%, #267d4a70, transparent 48%),
-    radial-gradient(ellipse at 100% 100%, #19696044, transparent 55%),
-    linear-gradient(148deg, #183d33 0%, #122f2a 53%, #14282c 100%);
   box-shadow: 0 28px 80px #050f10af, 0 0 38px #33a36d19, inset 0 1px 0 #e7ffe526;
-}
-:host(.easy-mode) .game-stage .card::before {
-  background:
-    radial-gradient(circle at 79% 14%, #d5ffe2ae 0 1px, transparent 3px),
-    radial-gradient(circle at 58% 24%, #e3ffed88 0 1px, transparent 2px),
-    radial-gradient(ellipse at 90% 21%, #34bc7950, transparent 50%),
-    radial-gradient(ellipse at 100% 83%, #209ca730, transparent 54%);
 }
 :host(.easy-mode) .game-stage .card::after { color: #83ffc10e; text-shadow: 0 0 45px #40c98922; }
 :host(.easy-mode) .game-stage .card h1 { color: #f1fff6; text-shadow: 0 0 25px #8de9a92d; }
@@ -1454,7 +1438,10 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 :host(.easy-mode) .game-stage .card select:focus-visible {
   outline: 2px solid #9cf5bc; outline-offset: 2px;
 }
-:host(.easy-mode) .game-stage .card .primary,
+:host(.easy-mode) .game-stage .card .primary {
+  color: #10261c;
+  box-shadow: 0 7px 24px #44c78b35;
+}
 :host(.easy-mode) .account-signup {
   color: #10261c;
   background: linear-gradient(105deg, #7ce7ae 0%, #b8f29d 100%);
@@ -1495,8 +1482,250 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 :host(.easy-mode) .game-sidebar .sidebar-section,
 :host(.easy-mode) .game-sidebar .star-panel {
   border-color: #65c49c40;
-  background: linear-gradient(150deg, #193b33, #172f31);
 }
 :host(.easy-mode) .game-stage .gear-loader {
   --gear-hole: #1b4434; --gear-primary: #7ce7ae; --gear-secondary: #b8f29d;
+}
+
+
+/* Mode switching: keep the existing Classic gradients intact and fade the
+   Easy surfaces in. CSS cannot interpolate gradient backgrounds directly. */
+.shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 15% 0%, #215f48 0, transparent 50%),
+    radial-gradient(ellipse at 95% 95%, #154b46 0, transparent 55%),
+    #101f25;
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .shell::before { opacity: 1; }
+.game-stage .card .card-easy-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 79% 14%, #d5ffe2ae 0 1px, transparent 3px),
+    radial-gradient(circle at 58% 24%, #e3ffed88 0 1px, transparent 2px),
+    radial-gradient(ellipse at 75% 0%, #267d4a70, transparent 48%),
+    radial-gradient(ellipse at 100% 100%, #19696044, transparent 55%),
+    linear-gradient(148deg, #183d33 0%, #122f2a 53%, #14282c 100%);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-stage .card .card-easy-backdrop { opacity: 1; }
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel { position: relative; isolation: isolate; }
+.game-sidebar .sidebar-section::before,
+.game-sidebar .star-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(150deg, #193b33, #172f31);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-sidebar .sidebar-section::before,
+:host(.easy-mode) .game-sidebar .star-panel::before { opacity: 1; }
+
+/* Both translated introductions contribute to a shared grid cell's height.
+   Mode changes therefore crossfade copy without shifting the setup buttons. */
+.intro-mode-stack { display: grid; margin: 1em 0; }
+.intro-mode-stack .intro {
+  grid-area: 1 / 1;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .42s ease, color .42s ease;
+}
+.intro-mode-stack .intro.intro-active { opacity: 1; }
+
+/* Extra controls in the pre-game menu never insert a layout-changing spinner. */
+.question-actions.resume-actions {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.question-actions.resume-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 290px);
+  min-height: 52px;
+  margin-top: 0;
+  text-align: center;
+}
+
+/* Q16: same baseline and row height regardless of which button's label wraps. */
+.bonus-decision > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: 54px;
+  margin-top: 0;
+  line-height: 1.35;
+  text-align: center;
+}
+@media (max-width: 680px) {
+  .bonus-decision > button { flex: 1 1 100%; width: 100%; }
+}
+
+/* Animate solid colors/borders while the large gradient layers crossfade. */
+.game-stage .brand strong,
+.game-stage .brand .spark,
+.game-stage .card,
+.game-stage .card h1,
+.game-stage .card .eyebrow,
+.game-stage .card select,
+.game-stage .card .outline-button,
+.game-stage .card .primary,
+.game-stage .shop-toggle,
+.game-stage .achievement,
+.game-stage .question-vote,
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel,
+.game-sidebar .account-button,
+.game-sidebar .ui-language-control select,
+.game-sidebar .exchange-arrow {
+  transition: color .42s ease, border-color .42s ease,
+    background-color .42s ease, box-shadow .42s ease, text-shadow .42s ease;
+}
+/* Preserve the existing hover lift, but crossfade the main CTA gradient. */
+.game-stage .card .primary {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: transform .16s ease, color .42s ease, box-shadow .42s ease;
+}
+.game-stage .card .primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(105deg, #7ce7ae 0%, #b8f29d 100%);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-stage .card .primary::before { opacity: 1; }
+
+/* Easy gameplay palette: sidebar, shop, categories, votes and helper. */
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button) {
+  color: #d9ffec;
+  border-color: #64b48f;
+  background: #204b3a;
+}
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button):hover:not(:disabled),
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button):focus-visible {
+  background: #2d664c; border-color: #a3f0b9;
+}
+:host(.easy-mode) .game-sidebar .player-name { color: #a2efc2; }
+:host(.easy-mode) .game-sidebar .profile-menu {
+  background: #193e32; border-color: #5aab83;
+}
+:host(.easy-mode) .game-sidebar .ui-language-control { color: #cbefdf; }
+:host(.easy-mode) .game-sidebar .ui-language-control select {
+  color: #ecfff5; background: #214c3b; border-color: #6ac596;
+}
+:host(.easy-mode) .game-sidebar .star-panel-title,
+:host(.easy-mode) .game-sidebar .stats-caption { color: #b6ddca; }
+:host(.easy-mode) .game-sidebar .star-item {
+  background: #24453cba;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow {
+  color: #e9fff1; background: #255a44; border-color: #69bf90;
+  box-shadow: 0 3px 9px #0c251e80;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-pair.gold .exchange-arrow {
+  background: linear-gradient(110deg, #396851, #47765b);
+  border-color: #e9cd83;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow:hover:not(:disabled),
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow:focus-visible {
+  background: #347958; border-color: #b0f2c6; box-shadow: 0 0 11px #78e4ab55;
+}
+:host(.easy-mode) .game-sidebar .exchange-arrow small { color: #cfefdf; }
+:host(.easy-mode) .game-stage .shop-toggle {
+  color: #eafff2; border-color: #61b68b; background: #1f4939;
+}
+:host(.easy-mode) .game-stage .shop-toggle:hover { background: #2c6149; }
+:host(.easy-mode) .game-stage .shop-toggle:focus-visible { outline-color: #94ebad; }
+:host(.easy-mode) .game-stage .perk-actions button,
+:host(.easy-mode) .game-stage .perk-actions select {
+  color: #eafff2; background: #214a39; border-color: #63b58b;
+}
+:host(.easy-mode) .game-stage .perk-current-category { color: #a1eac2; }
+:host(.easy-mode) .game-stage .category-preferences {
+  background: #1d4234; border-color: #5cad81;
+}
+:host(.easy-mode) .game-stage .category-preferences p { color: #c4e6d4; }
+:host(.easy-mode) .game-stage .category-exclusion-list { border-color: #579d79; }
+:host(.easy-mode) .game-stage .category-exclusion-list label { color: #e2ffef; }
+:host(.easy-mode) .game-stage .category-exclusion-list input { accent-color: #78e4a5; }
+:host(.easy-mode) .game-stage .question-vote {
+  color: #d6f9e6; background: #214637; border-color: #5ba67c;
+}
+:host(.easy-mode) .game-stage .question-vote:hover:not(:disabled) {
+  background: #31604a; border-color: #a5efbd;
+}
+:host(.easy-mode) .game-stage .question-vote.selected {
+  background: #36745b; border-color: #9df3b9; color: #b7ffd5;
+  box-shadow: 0 0 0 2px #9df3b926;
+}
+:host(.easy-mode) .game-stage .question-vote:focus-visible { outline-color: #9df3b9; }
+:host(.easy-mode) .game-stage .achievement:not(.easy-encouragement) {
+  color: #f5f9da;
+  border-color: #75c89d;
+  background: linear-gradient(110deg, #254e40, #2b5d45);
+}
+:host(.easy-mode) .game-stage .achievement.achievement-silver {
+  color: #dce9f6;
+}
+:host(.easy-mode) .game-stage .bonus-decision {
+  border-color: #62b48a;
+}
+:host(.easy-mode) .game-stage .helper-tile,
+:host(.easy-mode) .game-stage .helper-speech,
+:host(.easy-mode) .game-stage .helper-modal {
+  color: #e7fff1; background: #204736; border-color: #68b78e;
+}
+:host(.easy-mode) .game-stage .helper-tile small { color: #badfcb; }
+:host(.easy-mode) .game-stage .helper-modal h3 { color: #b3edc5; }
+:host(.easy-mode) .game-stage .helper-profession-picker { border-color: #68b78e; }
+
+/* Non-game sections retain their Classic/shared blue palette in both modes.
+   In particular, do not green the About entry point or complaint entry. */
+:host(.easy-mode) .game-stage .card .about-open-button,
+:host(.easy-mode) .game-stage .card .appeal-header-button {
+  color: #f0efff; background: #ffffff05; border-color: #a49fd0b0;
+}
+:host(.easy-mode) .game-stage .card .about-open-button:hover:not(:disabled),
+:host(.easy-mode) .game-stage .card .appeal-header-button:hover:not(:disabled) {
+  color: #f0efff; background: #b99aff1c; border-color: #ceb3ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell::before, .game-stage .card .card-easy-backdrop,
+  .game-sidebar .sidebar-section::before, .game-sidebar .star-panel::before,
+  .game-stage .card .primary::before, .intro-mode-stack .intro {
+    transition: none !important;
+  }
+  .game-stage .brand strong, .game-stage .brand .spark, .game-stage .card,
+  .game-stage .card h1, .game-stage .card .eyebrow, .game-stage .card select,
+  .game-stage .card .outline-button, .game-stage .card .primary,
+  .game-stage .shop-toggle, .game-stage .achievement, .game-stage .question-vote,
+  .game-sidebar .sidebar-section, .game-sidebar .star-panel,
+  .game-sidebar .account-button, .game-sidebar .ui-language-control select,
+  .game-sidebar .exchange-arrow { transition: none !important; }
 }
