@@ -3621,3 +3621,55 @@ test('restoring an earned Q16 Platinum star reopens an unseen ceremony', () => {
   assert.equal(app.screen, 'done', 'restored results should not request another question');
   assert.equal(app.platinumCelebrationOpen, false);
 });
+
+
+test('switching Classic/Easy retains pregame geometry and never shows a save spinner', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /class="intro-mode-stack"/);
+  assert.match(template, /\[class\.intro-active\]="selectedMode === 'classic'"/);
+  assert.match(template, /\[class\.intro-active\]="selectedMode === 'easy'"/);
+  assert.match(template, /\[class\.resume-actions\]="resumeAvailable"/);
+  assert.doesNotMatch(template, /\*ngIf="languageSaving \|\| modeSaving" class="gear-loader"/);
+  assert.match(template, /class="card-easy-backdrop"/);
+  assert.match(css, /\.intro-mode-stack \{ display: grid;/);
+  assert.match(css, /\.intro-mode-stack \.intro \{[\s\S]*?grid-area: 1 \/ 1/);
+  assert.match(css, /\.shell::before \{[\s\S]*?transition: opacity \.42s ease/);
+  assert.match(css, /\.game-stage \.card \.card-easy-backdrop \{[\s\S]*?transition: opacity \.42s ease/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  const { app, patches } = setup();
+  app.gameQuestionIssued = false;
+  app.changeGameMode('easy');
+  assert.equal(app.modeSaving, true);
+  succeed(patches[0], { game_id: 'existing-game', language: 'English', mode: 'easy' });
+  assert.equal(app.modeSaving, false);
+  assert.equal(app.selectedMode, 'easy');
+});
+
+test('Easy interactive controls are green, shared About and complaint history stay blue', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const globalCss = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.doesNotMatch(template, /perks\.reportsSoon/);
+  assert.equal(english['perks.reportsSoon'], undefined);
+  for (const selector of [
+    '.game-sidebar .account-button', '.game-sidebar .ui-language-control select',
+    '.game-sidebar .star-items-exchange .exchange-arrow',
+    '.game-stage .shop-toggle', '.game-stage .category-preferences',
+    '.game-stage .category-exclusion-list input', '.game-stage .question-vote',
+    '.game-stage .achievement', '.game-stage .helper-tile',
+  ]) assert.ok(css.includes(':host(.easy-mode) ' + selector), selector);
+  assert.match(css, /\.game-stage \.card \.about-open-button,/);
+  assert.match(css, /\.game-stage \.card \.appeal-header-button/);
+  assert.match(source, /quiz-easy-appeal-popup/);
+  assert.match(source, /popup: filingPopupClass/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-appeal-popup\.quiz-easy-appeal-popup/);
+  assert.doesNotMatch(globalCss, /\.quiz-appeal-history-popup\.quiz-easy-appeal-popup/);
+});
+
+test('bonus Q16 choice buttons have equal height in both modes and stack on mobile', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(css, /\.bonus-decision > button \{[\s\S]*?align-self: stretch;[\s\S]*?min-height: 54px;[\s\S]*?margin-top: 0/);
+  assert.match(css, /@media \(max-width: 680px\) \{[\s\S]*?\.bonus-decision > button \{ flex: 1 1 100%; width: 100%; \}/);
+  assert.match(css, /\.question-actions\.resume-actions > button \{[\s\S]*?min-height: 52px/);
+});
