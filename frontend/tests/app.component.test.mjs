@@ -3679,12 +3679,26 @@ test('category spending dialogs use green accents only while Easy is selected', 
   assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-cancel/);
 });
 
-test('Easy finished round uses a green star summary while Classic stays unchanged', () => {
+test('finished rounds showcase each earned star on its own colored row in both modes', () => {
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
   const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
-  assert.match(template, /class="star-list" \*ngIf="stars\.length"/);
-  assert.match(css, /:host\(\.easy-mode\) \.game-stage \.star-list \{[^}]*border-color: #75c89d;[^}]*background: linear-gradient\(110deg, #254e40, #2b5d45\)/);
-  assert.match(css, /\.achievement, \.star-list \{[^}]*background: #46416d/);
+  const results = template.slice(template.indexOf('<div *ngIf="screen === \'done\'"'),
+    template.indexOf('<p class="intro" role="status"', template.indexOf('<div *ngIf="screen === \'done\'"')));
+  assert.match(results, /class="star-list" \*ngIf="stars\.length" role="list"/);
+  assert.match(results, /class="star-award" \*ngFor="let tier of stars" \[attr\.data-tier\]="tier"/);
+  assert.match(results, /role="listitem"/);
+  assert.match(results, /class="star-award-icon" aria-hidden="true">★/);
+  assert.match(results, /class="star-award-name">\{\{ locale\.t\('stars\.' \+ tier\) \}\}/);
+  assert.match(results, /class="star-award-spark" aria-hidden="true">✦/);
+  assert.doesNotMatch(results, /\bstarNames\b/);
+  assert.match(css, /\.star-list \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.star-award \{[\s\S]*?min-height: 88px;/);
+  for (const tier of ['bronze', 'silver', 'gold', 'platinum']) {
+    assert.match(css, new RegExp('\\.star-award\\[data-tier="' + tier + '"\\] \\{'));
+    assert.ok(english['stars.' + tier], 'tier localized: ' + tier);
+  }
+  assert.match(css, /@media \(max-width: 520px\) \{/);
+  assert.doesNotMatch(css, /:host\(\.easy-mode\) \.game-stage \.star-list/);
 });
 
 test('bonus Q16 choice buttons have equal height in both modes and stack on mobile', () => {
