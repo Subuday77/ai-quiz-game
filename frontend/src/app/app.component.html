@@ -17,6 +17,7 @@
       </section>
 
       <section class="card">
+        <div class="card-easy-backdrop" aria-hidden="true"></div>
         <div class="card-topline">
           <div class="eyebrow">{{ locale.t('hero.tagline') }}</div>
           <button *ngIf="current && ((screen === 'question' && !questionLoading) || screen === 'feedback' || (screen === 'done' && !!finishedPhase))"
@@ -104,7 +105,6 @@
               </select>
             </div>
           </div>
-          <span *ngIf="languageSaving || modeSaving" class="gear-loader" aria-hidden="true"></span>
           <span *ngIf="languageSaving || modeSaving" class="sr-only" role="status">{{ locale.t(languageSaving ? 'game.languageSaving' : 'game.modeSaving') }}</span>
           <div class="category-pregame-action" *ngIf="account && !resumeAvailable && !resumeCandidate && !gameQuestionIssued && error !== 'game.restoreFailed' && (categoryInfo === null || categoryInfo.can_exclude)">
             <button class="outline-button" type="button" (click)="openCategoryExclusions()"
@@ -175,7 +175,7 @@
                   (click)="retryRestoreGame()" [disabled]="loading || restoringGame">
             {{ locale.t('game.retryRestore') }}
           </button>
-          <div class="question-actions">
+          <div class="question-actions" [class.resume-actions]="resumeAvailable">
             <button *ngIf="pendingResults && !resumeAvailable && !resumeCandidate" class="outline-button"
                     type="button" (click)="showPendingResults()" [disabled]="loading || restoringGame">
               {{ locale.t('game.seeResults') }}
@@ -298,7 +298,6 @@
                   {{ locale.t('perks.changeCategory') }}
                   <span class="tier-price silver">★ {{ locale.t('stars.silver') }}</span>
                 </button>
-                <button class="outline-button" type="button" disabled>{{ locale.t('perks.reportsSoon') }}</button>
               </div>
               <div class="perk-counter">
                 {{ locale.t('perks.categoryChanges') }}: {{ categoryInfo?.changes_used ?? 0 }}/2 ·
