@@ -2865,7 +2865,8 @@ test('complaint form separates monthly allowance, filing fee and total debit', (
 
 test('appeal popup uses dark theme, soft blur fade and animated double chevron', () => {
   const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
-  assert.match(source, /customClass:\s*\{ popup: 'quiz-appeal-popup' \}/);
+  assert.match(source, /customClass:\s*\{ popup: filingPopupClass \}/);
+  assert.match(source, /popup: filingPopupClass \+ ' quiz-appeal-confirm-popup'/);
   assert.match(source, /quiz-appeal-confirm-popup/);
   assert.match(source, /<span class="appeal-scroll-chevron"><\/span>/);
   assert.doesNotMatch(source, /aria-hidden="true">⌄<\/div>/);
