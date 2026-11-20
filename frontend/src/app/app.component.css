@@ -1687,6 +1687,13 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   box-shadow: 0 0 0 2px #9df3b926;
 }
 :host(.easy-mode) .game-stage .question-vote:focus-visible { outline-color: #9df3b9; }
+/* The finished-round star summary is not an .achievement element:
+   keep its earned-star gold text, but use the same Easy green surface. */
+:host(.easy-mode) .game-stage .star-list {
+  color: #f6dfa0;
+  border-color: #75c89d;
+  background: linear-gradient(110deg, #254e40, #2b5d45);
+}
 :host(.easy-mode) .game-stage .achievement:not(.easy-encouragement) {
   color: #f5f9da;
   border-color: #75c89d;
