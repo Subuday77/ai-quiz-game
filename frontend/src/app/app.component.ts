@@ -2775,6 +2775,10 @@ export class AppComponent implements OnInit, OnDestroy {
         this.exclusionCost > this.spendableStars.silver ||
         info.allowed.length - this.categoriesToExclude.length < 16) return;
     const { default: Swal } = await import('sweetalert2');
+    const style = this.selectedMode === 'easy'
+      ? { background: '#18392d', color: '#edfff4', confirmButtonColor: '#287852',
+          customClass: { popup: 'quiz-easy-perk-popup' } }
+      : { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
     const decision = await Swal.fire({
       titleText: this.locale.t('perks.excludeTitle'),
       text: this.locale.format('perks.excludeConfirm', {
@@ -2783,8 +2787,7 @@ export class AppComponent implements OnInit, OnDestroy {
       showCancelButton: true,
       confirmButtonText: this.locale.t('perks.confirm'),
       cancelButtonText: this.locale.t('auth.cancel'),
-      background: '#1b1e3e', color: '#f1f3ff',
-      confirmButtonColor: '#8170d8',
+      ...style,
     });
     if (!decision.isConfirmed || this.perksBusy || !this.gameId) return;
     this.perksBusy = true;
@@ -2814,7 +2817,10 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!state?.can_change || !this.current || this.current.bonus || this.screen !== 'question' ||
         this.loading || this.perksBusy || this.spendableStars.silver < 1) return;
     const { default: Swal } = await import('sweetalert2');
-    const style = { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
+    const style = this.selectedMode === 'easy'
+      ? { background: '#18392d', color: '#edfff4', confirmButtonColor: '#287852',
+          customClass: { popup: 'quiz-easy-perk-popup' } }
+      : { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
     while (this.current && !this.loading && !this.perksBusy) {
       const choice = await Swal.fire({
         titleText: this.locale.t('perks.changeCategory'),
