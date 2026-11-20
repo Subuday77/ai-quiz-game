@@ -345,7 +345,14 @@
         <div *ngIf="screen === 'done'" class="results">
           <p>{{ locale.t(finishedPhase === 'lost' ? 'game.resultsLost' : 'game.resultsCompleted') }}</p>
           <p>{{ locale.format('game.roundScore', { count: gameCorrectAnswers }) }}</p>
-          <div class="star-list" *ngIf="stars.length">★ {{ starNames }}</div>
+          <div class="star-list" *ngIf="stars.length" role="list">
+            <div class="star-award" *ngFor="let tier of stars" [attr.data-tier]="tier"
+                 role="listitem">
+              <span class="star-award-icon" aria-hidden="true">★</span>
+              <strong class="star-award-name">{{ locale.t('stars.' + tier) }}</strong>
+              <span class="star-award-spark" aria-hidden="true">✦</span>
+            </div>
+          </div>
           <button class="primary" type="button" (click)="restart()">{{ locale.t('game.playAgain') }}</button>
         </div>
 
