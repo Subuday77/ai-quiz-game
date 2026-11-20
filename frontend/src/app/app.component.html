@@ -318,7 +318,8 @@
           <div class="achievement easy-encouragement" *ngIf="selectedMode === 'easy' && result.correct && current?.number === 5">
             {{ locale.t('game.easyMilestone5') }}
           </div>
-          <div class="achievement" *ngIf="result.achievement">
+          <div class="achievement" *ngIf="result.achievement"
+               [class.achievement-silver]="result.achievement === 'silver'">
             {{ locale.format('game.starUnlocked', { tier: locale.t('stars.' + result.achievement) }) }}
           </div>
           <div class="bonus-decision" *ngIf="bonusDecisionAvailable">
