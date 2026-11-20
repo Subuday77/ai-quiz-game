@@ -821,3 +821,32 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .swal2-popup.quiz-easy-appeal-popup .appeal-scroll-chevron {
   border-color: #a4edc0;
 }
+
+
+/* Pre-game category exclusion and in-game category changes are game controls.
+   These dialogs follow Easy; shared About, account and appeal history do not. */
+.swal2-popup.quiz-easy-perk-popup {
+  border: 1px solid #65b58c;
+  border-radius: 16px;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-title { color: #f2fff7; }
+.swal2-popup.quiz-easy-perk-popup .swal2-html-container,
+.swal2-popup.quiz-easy-perk-popup .swal2-input-label { color: #d5f2e2; }
+.swal2-popup.quiz-easy-perk-popup .swal2-select,
+.swal2-popup.quiz-easy-perk-popup .swal2-select option {
+  color-scheme: dark;
+  color: #e8fff1;
+  border-color: #65b58c;
+  background: #204c39;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-select option:checked {
+  background-color: #287852;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-deny {
+  color: #e8fff1;
+  background: #356a50;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-cancel {
+  color: #e8fff1;
+  background: #315344;
+}
