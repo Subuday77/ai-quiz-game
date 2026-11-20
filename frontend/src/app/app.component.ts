@@ -924,10 +924,14 @@ export class AppComponent implements OnInit, OnDestroy {
         reasons: [], comment: '', source_links: [],
       };
       let confirmed = false;
+      // Only the filing and cost-confirmation dialogs adopt the game palette.
+      // Appeal history, rules and verdicts retain their shared blue design.
+      const filingPopupClass = this.selectedMode === 'easy'
+        ? 'quiz-appeal-popup quiz-easy-appeal-popup' : 'quiz-appeal-popup';
       while (!confirmed) {
         const result = await Swal.fire({
           titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
-          customClass: { popup: 'quiz-appeal-popup' },
+          customClass: { popup: filingPopupClass }
           confirmButtonText: this.locale.t('appeals.submit'),
           cancelButtonText: this.locale.t('helper.close'),
           html: '<p class="appeal-quota-header">' + safe(quotaText) + '</p>' +
@@ -982,7 +986,7 @@ export class AppComponent implements OnInit, OnDestroy {
         const confirmedResult = await Swal.fire({
           titleText: this.locale.t('appeals.confirmTitle'),
           width: '650px', showCancelButton: true, reverseButtons: true,
-          customClass: { popup: 'quiz-appeal-popup quiz-appeal-confirm-popup' },
+          customClass: { popup: filingPopupClass + ' quiz-appeal-confirm-popup' }
           confirmButtonText: this.locale.t('appeals.confirmAndSend'),
           cancelButtonText: this.locale.t('appeals.back'),
           html: '<div class="appeal-confirm-cost"><p>' +
