@@ -843,10 +843,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   background-color: #287852;
 }
 .swal2-popup.quiz-easy-perk-popup .swal2-deny {
-  color: #e8fff1;
-  background: #356a50;
+  color: #e8fff1 !important;
+  background: #356a50 !important;
 }
 .swal2-popup.quiz-easy-perk-popup .swal2-cancel {
-  color: #e8fff1;
-  background: #315344;
+  color: #e8fff1 !important;
+  background: #315344 !important;
 }
