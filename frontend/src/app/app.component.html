@@ -38,7 +38,12 @@
         <h1 *ngIf="screen === 'feedback'">{{ locale.t(feedback?.correct ? 'hero.correct' : 'hero.incorrect') }}</h1>
         <h1 *ngIf="screen === 'done'">{{ locale.t(finishedPhase === 'lost' ? 'hero.lost' : 'hero.completed') }}</h1>
 
-        <p class="intro" *ngIf="screen === 'setup'">{{ locale.t(selectedMode === 'easy' ? 'hero.introEasy' : 'hero.intro') }}</p>
+        <div class="intro-mode-stack" *ngIf="screen === 'setup'">
+          <p class="intro" [class.intro-active]="selectedMode === 'classic'"
+             [attr.aria-hidden]="selectedMode !== 'classic'">{{ locale.t('hero.intro') }}</p>
+          <p class="intro" [class.intro-active]="selectedMode === 'easy'"
+             [attr.aria-hidden]="selectedMode !== 'easy'">{{ locale.t('hero.introEasy') }}</p>
+        </div>
         <div class="coffee-support" *ngIf="screen === 'setup'">
           <span class="coffee-prompt">{{ locale.t('support.coffeePrompt') }}</span>
           <a *ngIf="donationUrl; else coffeePending"
