@@ -45,3 +45,12 @@ jobs:
         run: docker build -f backend/Dockerfile -t quiz-backend:ci .
       - name: Build Angular static-web image
         run: docker build -f frontend/Dockerfile -t quiz-web:ci frontend
+      - name: Validate nginx and versioned Angular assets
+        run: |
+          docker run --rm --add-host backend:127.0.0.1 quiz-web:ci nginx -t
+          docker run --rm --entrypoint sh quiz-web:ci -ec '
+            cd /usr/share/nginx/html
+            ls main-*.js styles-*.css polyfills-*.js >/dev/null
+            grep -Eq "main-[A-Za-z0-9_-]+[.]js" index.html
+            grep -Eq "styles-[A-Za-z0-9_-]+[.]css" index.html
+          '
