@@ -1488,6 +1488,9 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 }
 
 
+/* Preserve the account dropdown's overlay above neighboring sidebar panels. */
+.game-sidebar .sidebar-profile { z-index: 2; }
+
 /* Mode switching: keep the existing Classic gradients intact and fade the
    Easy surfaces in. CSS cannot interpolate gradient backgrounds directly. */
 .shell::before {
