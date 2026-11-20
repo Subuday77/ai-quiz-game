@@ -3671,7 +3671,7 @@ test('Easy interactive controls are green, shared About and complaint history st
 test('category spending dialogs use green accents only while Easy is selected', () => {
   const globalCss = readFileSync(join(root, 'src/styles.css'), 'utf8');
   const categorySection = source.slice(source.indexOf('async excludeCategories():'),
-    source.indexOf('private changeCategory(', source.indexOf('async excludeCategories():')));
+    source.indexOf('async openCategoryChangeDialog():', source.indexOf('async excludeCategories():')));
   assert.match(categorySection, /this\.selectedMode === 'easy'/);
   assert.match(categorySection, /quiz-easy-perk-popup/);
   assert.match(categorySection, /confirmButtonColor: '#287852'/);
