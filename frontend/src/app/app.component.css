@@ -25,7 +25,135 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 .answers button { background: #26294a; border: 1px solid #515879; color: #eff2ff; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; text-align: start; gap: 14px; min-height: 74px; }
 .answers button:hover:not(:disabled), .answers button:focus-visible { border-color: #8ce9ef; background: #32375d; outline: none; }
 .letter { display: grid; place-items: center; border-radius: 9px; border: 1px solid #6c769e; flex: 0 0 36px; height: 36px; color: #a3dce8; font-weight: 800; }
-.achievement, .star-list { padding: 14px 18px; background: #46416d; border: 1px solid #8b7fc7; border-radius: 12px; color: #f6dfa0; margin-bottom: 15px; }
+.achievement { padding: 14px 18px; background: #46416d; border: 1px solid #8b7fc7; border-radius: 12px; color: #f6dfa0; margin-bottom: 15px; }
+
+/* The round's earned stars deserve an individual, metallic showcase.
+   Identical in Classic and Easy: tier colors, not game-mode colors. */
+.star-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 22px 0 16px;
+}
+.star-award {
+  --award-rgb: 197 211 232;
+  --award-metal: #c5d3e8;
+  --award-ink: #f0f6ff;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 12px 23px 12px 13px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--award-rgb) / .48);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 9% 50%, rgb(var(--award-rgb) / .22), transparent 39%),
+    linear-gradient(105deg, rgb(var(--award-rgb) / .14), rgb(var(--award-rgb) / .035) 68%, #0a17242b);
+  box-shadow: inset 0 1px 0 rgb(var(--award-rgb) / .28),
+    0 9px 24px #03071024;
+}
+.star-award::before {
+  content: '';
+  position: absolute;
+  inset-block: 12px;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--award-metal);
+  box-shadow: 0 0 17px rgb(var(--award-rgb) / .55);
+}
+.star-award::after {
+  content: '';
+  position: absolute;
+  top: -80%;
+  right: -10%;
+  width: 36%;
+  height: 240%;
+  transform: rotate(27deg);
+  pointer-events: none;
+  opacity: .45;
+  background: linear-gradient(90deg, transparent, rgb(var(--award-rgb) / .055), transparent);
+}
+.star-award[data-tier="bronze"] {
+  --award-rgb: 216 146 98;
+  --award-metal: #e6a673;
+  --award-ink: #ffdbb9;
+}
+.star-award[data-tier="silver"] {
+  --award-rgb: 176 207 237;
+  --award-metal: #cadcf5;
+  --award-ink: #e7f1ff;
+}
+.star-award[data-tier="gold"] {
+  --award-rgb: 245 194 84;
+  --award-metal: #ffce6a;
+  --award-ink: #ffebb2;
+}
+.star-award[data-tier="platinum"] {
+  --award-rgb: 143 218 235;
+  --award-metal: #a6f3f7;
+  --award-ink: #e3fdff;
+  background:
+    radial-gradient(ellipse at 8% 50%, #7deef02e, transparent 43%),
+    linear-gradient(108deg, #8defff23, #a98cff12 64%, #72d9f10a);
+  border-color: #a4e6eb85;
+}
+.star-award-icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  color: var(--award-metal);
+  font-size: 47px;
+  line-height: 1;
+  text-shadow: 0 2px 1px #0b0e2659, 0 0 22px rgb(var(--award-rgb) / .52);
+  background: radial-gradient(circle, rgb(var(--award-rgb) / .2), transparent 72%);
+  filter: drop-shadow(0 5px 6px #050a184d);
+}
+.star-award[data-tier="platinum"] .star-award-icon {
+  text-shadow: 0 0 13px #91f6ffcc, 0 0 27px #bdabff88;
+}
+.star-award-name {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  color: var(--award-ink);
+  font-size: clamp(20px, 2.6vw, 25px);
+  font-weight: 800;
+  letter-spacing: .012em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.star-award-spark {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  color: var(--award-metal);
+  opacity: .72;
+  font-size: 20px;
+  text-shadow: 0 0 12px rgb(var(--award-rgb) / .55);
+}
+@media (max-width: 520px) {
+  .star-list { gap: 9px; }
+  .star-award {
+    grid-template-columns: 52px minmax(0, 1fr) 15px;
+    gap: 10px;
+    min-height: 72px;
+    padding: 9px 14px 9px 9px;
+    border-radius: 13px;
+  }
+  .star-award-icon { width: 50px; height: 50px; font-size: 38px; }
+  .star-award-name { font-size: clamp(17px, 4.5vw, 21px); }
+  .star-award-spark { font-size: 15px; }
+}
 .error { margin-top: 18px; color: #ffb9bb; background: #7c324433; border-radius: 8px; padding: 12px; line-height: 1.4; }
 footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; }
 @media (max-width: 640px) { .brand { margin-bottom: 35px; } .answers { grid-template-columns: 1fr; } .card { min-height: auto; } }
@@ -1687,13 +1815,6 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   box-shadow: 0 0 0 2px #9df3b926;
 }
 :host(.easy-mode) .game-stage .question-vote:focus-visible { outline-color: #9df3b9; }
-/* The finished-round star summary is not an .achievement element:
-   keep its earned-star gold text, but use the same Easy green surface. */
-:host(.easy-mode) .game-stage .star-list {
-  color: #f6dfa0;
-  border-color: #75c89d;
-  background: linear-gradient(110deg, #254e40, #2b5d45);
-}
 :host(.easy-mode) .game-stage .achievement:not(.easy-encouragement) {
   color: #f5f9da;
   border-color: #75c89d;
