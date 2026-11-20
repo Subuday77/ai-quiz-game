@@ -201,7 +201,6 @@
   "perks.manualCategory": "Chosen category",
   "perks.randomCategory": "Change to a random category",
   "perks.chooseCategory": "Choose a category",
-  "perks.reportsSoon": "Report a question — coming soon",
   "perks.actionFailed": "Could not apply this perk. Check your balance and try again.",
   "perks.exchangeFailed": "Exchange failed. Enter a whole-star amount that fits the 10:1 rate.",
   "perks.balanceUnavailable": "Could not retrieve your available stars.",
