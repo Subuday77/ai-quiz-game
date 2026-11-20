@@ -3679,6 +3679,14 @@ test('category spending dialogs use green accents only while Easy is selected', 
   assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-cancel/);
 });
 
+test('Easy finished round uses a green star summary while Classic stays unchanged', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /class="star-list" \*ngIf="stars\.length"/);
+  assert.match(css, /:host\(\.easy-mode\) \.game-stage \.star-list \{[^}]*border-color: #75c89d;[^}]*background: linear-gradient\(110deg, #254e40, #2b5d45\)/);
+  assert.match(css, /\.achievement, \.star-list \{[^}]*background: #46416d/);
+});
+
 test('bonus Q16 choice buttons have equal height in both modes and stack on mobile', () => {
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
   assert.match(css, /\.bonus-decision > button \{[\s\S]*?align-self: stretch;[\s\S]*?min-height: 54px;[\s\S]*?margin-top: 0/);
