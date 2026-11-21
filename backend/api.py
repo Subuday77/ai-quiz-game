@@ -34,6 +34,7 @@ from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
 from persistence.auth import router as auth_router  # noqa: E402
 from persistence.account_email_routes import router as email_account_router  # noqa: E402
+from persistence.contact_routes import router as public_contact_router  # noqa: E402
 from persistence.analytics import router as profile_router  # noqa: E402
 from localization.routes import router as localization_router  # noqa: E402
 from localization.dev_tools import router as localization_dev_router  # noqa: E402
