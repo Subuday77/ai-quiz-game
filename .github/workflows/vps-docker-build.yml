@@ -56,6 +56,7 @@ jobs:
             grep -q "/api/contact" contact.html
             grep -Eq "main-[A-Za-z0-9_-]+[.]js" index.html
             grep -Eq "styles-[A-Za-z0-9_-]+[.]css" index.html
+          '
       - name: Serve public pages without Angular login or API
         run: |
           docker run --rm -d --name quiz-public-pages --add-host backend:127.0.0.1 -p 127.0.0.1:18098:80 quiz-web:ci
@@ -69,4 +70,3 @@ jobs:
           done
           curl -fsS http://127.0.0.1:18098/site-pages.js >/dev/null
           curl -fsS http://127.0.0.1:18098/site-pages.css >/dev/null
-          '
