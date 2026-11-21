@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111a31">
+  <meta name="description" content="Get in touch with the AI Quiz Game team about questions, feedback, suggestions, or support.">
+  <title>Contact Us | AI Quiz Game</title>
+  <link rel="canonical" href="https://squizthebot.com/contact">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2">
+  <link rel="stylesheet" href="/site-pages.css">
+  <script defer src="/site-pages.js"></script>
+</head>
+<body>
+  <div class="info-shell">
+    <header class="info-header">
+      <a class="info-brand" href="/" aria-label="AI Quiz Game home"><span aria-hidden="true">✦</span> AI QUIZ <strong>GAME</strong></a>
+      <nav class="info-nav" aria-label="Site navigation">
+        <a href="/" data-i18n="site.home">Play</a>
+        <a href="/about" data-i18n="site.aboutLink">About Us</a>
+        <a href="/contact" aria-current="page" data-i18n="site.contactLink">Contact Us</a>
+      </nav>
+    </header>
+    <main class="info-panel info-contact" id="main-content">
+      <div class="info-kicker" data-i18n="site.eyebrow">KNOWLEDGE IS YOUR SUPERPOWER</div>
+      <h1 data-i18n="site.contactTitle">Contact Us</h1>
+      <p class="info-lead" data-i18n="site.contactLead">Have a question, suggestion, or something to report? We'd love to hear from you.</p>
+      <section class="info-section">
+        <h2 data-i18n="site.contactFormTitle">Send us a message</h2>
+        <p data-i18n="site.contactIntro">Use the form below to contact the AI Quiz Game team about the game, feedback, technical issues, or other inquiries. We'll reply when possible.</p>
+      </section>
+      <form id="contact-form" class="info-form" method="post" action="/api/contact" autocomplete="on">
+        <label for="contact-name" data-i18n="site.contactName">Your name</label>
+        <input id="contact-name" name="name" type="text" maxlength="80" autocomplete="name" required>
+        <label for="contact-email" data-i18n="site.contactEmail">Your email address</label>
+        <input id="contact-email" name="email" type="email" maxlength="254" autocomplete="email" required>
+        <label for="contact-message" data-i18n="site.contactMessage">Your message</label>
+        <textarea id="contact-message" name="message" rows="6" maxlength="2000" required></textarea>
+        <div class="info-honeypot" aria-hidden="true">
+          <label for="contact-website">Website (leave empty)</label>
+          <input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <p class="info-note" data-i18n="site.contactPrivacy">We use your contact details to respond to your message. Please do not send passwords or payment information.</p>
+        <button class="info-button" type="submit" id="contact-submit" data-i18n="site.contactSend">Send message</button>
+        <p id="contact-status" class="info-form-status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <footer class="info-footer">
+      <span>© AI Quiz Game</span>
+      <nav aria-label="Footer navigation">
+        <a href="/about" data-i18n="site.aboutLink">About Us</a>
+        <a href="/contact" data-i18n="site.contactLink">Contact Us</a>
+      </nav>
+    </footer>
+  </div>
+</body>
+</html>
