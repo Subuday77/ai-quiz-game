@@ -27,10 +27,20 @@
   });
 
   if (lang !== 'en') {
-    fetch('/api/localization/dictionary/' + encodeURIComponent(lang), { cache: 'no-store' })
-      .then(res => { if (!res.ok) throw Error('Dictionary unavailable'); return res.json(); })
-      .then(data => {
-        if (data.language_code !== lang || data.fallback || data.missing_count || !data.dictionary) return;
+    const loadDictionary = async attempt => {
+      try {
+        const res = await fetch('/api/localization/dictionary/' + encodeURIComponent(lang), {
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.language_code !== lang || !data.dictionary) return;
+        if (data.fallback || data.missing_count > 0) {
+          // Newly introduced English keys may still be translating. Follow
+          // the game's bounded polling convention, without a visible flash.
+          if (attempt < 8) setTimeout(() => loadDictionary(attempt + 1), 2500);
+          return;
+        }
         words = data.dictionary;
         document.querySelectorAll('[data-i18n]').forEach(el => {
           const replacement = words[el.dataset.i18n];
@@ -39,7 +49,9 @@
         document.documentElement.lang = lang;
         document.documentElement.dir = lang === 'he' || lang === 'ar' ? 'rtl' : 'ltr';
         document.title = (document.querySelector('h1')?.textContent || document.title) + ' | AI Quiz Game';
-      }).catch(() => {/* English is available without the localization API. */});
+      } catch {/* English is available without the localization API. */}
+    };
+    loadDictionary(0);
   }
 
   const form = document.getElementById('contact-form');
