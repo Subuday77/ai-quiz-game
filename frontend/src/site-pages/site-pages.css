@@ -9,6 +9,29 @@ body {
     radial-gradient(ellipse at 96% 90%, #174962, transparent 48%),
     #0c1127;
 }
+/* The head's blocking preload marks localized pages before first paint.
+   Keep English HTML crawlable and readable when JavaScript is disabled. */
+html.site-localizing .info-shell { visibility: hidden; }
+html.site-localizing body::before {
+  content: '✦';
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: #acecf7;
+  font-size: 42px;
+  text-shadow: 0 0 26px #ad9dffab;
+  animation: public-page-loading 1.35s ease-in-out infinite alternate;
+}
+@keyframes public-page-loading {
+  from { opacity: .5; transform: scale(.94); }
+  to { opacity: 1; transform: scale(1.06); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.site-localizing body::before { animation: none; }
+}
+
 a { color: inherit; }
 .info-shell { max-width: 1080px; margin: auto; padding: 28px clamp(16px, 4vw, 38px); }
 .info-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 28px; }
