@@ -682,7 +682,13 @@
       </div>
     </section>
   </div>
-  <footer>{{ locale.t('footer.note') }}</footer>
+  <footer class="site-footer">
+    <span>{{ locale.t('footer.note') }}</span>
+    <nav class="site-footer-links" [attr.aria-label]="locale.t('site.navigation')">
+      <a [href]="'/about?lang=' + locale.code">{{ locale.t('site.aboutLink') }}</a>
+      <a [href]="'/contact?lang=' + locale.code">{{ locale.t('site.contactLink') }}</a>
+    </nav>
+  </footer>
 </main>
 <!-- The old interface stays unchanged underneath. A complete new dictionary
      replaces it only after loading; no intermediate English screen is shown. -->
