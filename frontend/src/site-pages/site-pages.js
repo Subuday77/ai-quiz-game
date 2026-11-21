@@ -7,7 +7,16 @@
   const requested = (params.get('lang') || navigator.language.split('-')[0] || 'en').toLowerCase();
   const lang = allowed.has(requested) ? requested : 'en';
   let words = {};
-  const t = key => words[key] || document.querySelector('[data-i18n="' + key + '"]')?.textContent || key;
+  // The public form remains readable and usable in English even when the
+  // optional dictionary API has not responded (or is temporarily unavailable).
+  const englishStatus = {
+    'site.contactSending': 'Sending your message…',
+    'site.contactSent': 'Thanks! Your message has been sent.',
+    'site.contactFailed': "We couldn't send your message. Please try again later.",
+    'site.contactRateLimit': 'Too many messages sent. Please try again later.',
+  };
+  const t = key => words[key] || englishStatus[key] ||
+    document.querySelector('[data-i18n="' + key + '"]')?.textContent || key;
 
   document.querySelectorAll('a[href^="/"]').forEach(link => {
     const url = new URL(link.href);
