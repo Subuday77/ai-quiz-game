@@ -96,18 +96,19 @@ class ContactSmtpTests(unittest.TestCase):
 
     def test_real_smtp_message_is_addressed_only_to_configured_operator(self):
         sent = []
+        logins = []
         class FakeSmtp:
             def __enter__(self): return self
             def __exit__(self, *_): return False
             def starttls(self, **kwargs): pass
             def login(self, username, password):
-                self_credentials = (username, password)
-                self.assertEqual(self_credentials, ("smtp-user", "smtp-password"))
+                logins.append((username, password))
             def send_message(self, message): sent.append(message)
         fake = FakeSmtp()
         with patch("persistence.contact_routes.smtplib.SMTP", return_value=fake):
             send_contact_email(self.payload)
         self.assertEqual(len(sent), 1)
+        self.assertEqual(logins, [("smtp-user", "smtp-password")])
         self.assertEqual(sent[0]["From"], "no-reply@example.com")
         self.assertEqual(sent[0]["To"], "operator@example.com")
         self.assertEqual(sent[0]["Reply-To"], "alex@example.net")
