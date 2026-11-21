@@ -23,6 +23,7 @@
   "site.contactMessage": "Your message",
   "site.contactPrivacy": "We use your contact details to respond to your message. Please do not send passwords or payment information.",
   "site.contactSend": "Send message",
+  "site.close": "Close",
   "site.contactSending": "Sending your message…",
   "site.contactSent": "Thanks! Your message has been sent.",
   "site.contactFailed": "We couldn't send your message. Please try again later.",
