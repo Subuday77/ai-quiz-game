@@ -3741,3 +3741,36 @@ test('AdSense pages are crawlable, independent of login and localized through th
   assert.match(template, /'\/about\?lang=' \+ locale\.code/);
   assert.match(template, /'\/contact\?lang=' \+ locale\.code/);
 });
+
+
+test('pending results and start game buttons share a baseline and height', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /class="question-actions" \[class\.resume-actions\]="resumeAvailable"/);
+  assert.match(css, /\.game-stage \.card \.setup > \.question-actions \{[\s\S]*?align-items: stretch;/);
+  assert.match(css, /\.game-stage \.card \.setup > \.question-actions > button \{[\s\S]*?min-height: 52px;[\s\S]*?margin-top: 0;/);
+  assert.match(css, /@media \(max-width: 580px\) \{[\s\S]*?\.game-stage \.card \.setup > \.question-actions \{[\s\S]*?flex-direction: column;/);
+});
+
+test('earned bronze, silver, gold and platinum remain colored on lost rounds in either mode', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.doesNotMatch(css, /:host\(\.loss-mode\)::after\s*\{/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-list,/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-award \{\s*filter: none;/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results > :not\(\.star-list\)/);
+  for (const tier of ['bronze', 'silver', 'gold', 'platinum']) {
+    assert.ok(css.includes('.star-award[data-tier="' + tier + '"]'));
+  }
+});
+
+test('public Contact page has a localized bottom Close action that returns to the game', () => {
+  const html = readFileSync(join(root, 'src/site-pages/contact.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/site-pages/site-pages.css'), 'utf8');
+  const formEnd = html.indexOf('</form>');
+  const actions = html.indexOf('class="info-bottom-actions"');
+  const mainEnd = html.indexOf('</main>');
+  assert.ok(formEnd !== -1 && formEnd < actions && actions < mainEnd);
+  assert.match(html, /<a class="info-button info-button-secondary" href="\/" data-i18n="site\.close">Close<\/a>/);
+  assert.equal(english['site.close'], 'Close');
+  assert.match(css, /\.info-bottom-actions \{[\s\S]*?justify-content: center;/);
+});
