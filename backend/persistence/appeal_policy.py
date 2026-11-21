@@ -43,10 +43,16 @@ def appeal_fee_bronze(previous_monthly_appeals: int) -> int:
             if previous_monthly_appeals >= FREE_MONTHLY_APPEALS else 0)
 
 
-def appeal_deposit_tier(question_number: int) -> str:
-    """Question 1-5 bronze, 6-10 silver, 11-16 gold."""
+def appeal_deposit_tier(question_number: int, *, mode: str = "classic") -> str:
+    """Classic: Q1-5 bronze, Q6-10 silver, Q11-16 gold.
+    Easy: Q1-10 bronze, Q11-16 silver; the Q16 wager is separate.
+    """
     if isinstance(question_number, bool) or not 1 <= question_number <= 16:
         raise ValueError("Question number must be between 1 and 16")
+    if mode == "easy":
+        return "bronze" if question_number <= 10 else "silver"
+    if mode != "classic":
+        raise ValueError("Unknown game mode")
     if question_number <= 5:
         return "bronze"
     if question_number <= 10:
@@ -54,11 +60,29 @@ def appeal_deposit_tier(question_number: int) -> str:
     return "gold"
 
 
-def compensation_tier(question_number: int) -> str:
+def compensation_tier(question_number: int, *, mode: str = "classic") -> str:
     """Only an upheld loss on the appealed question grants this reward."""
     if question_number == 16:
-        return "platinum"
-    return appeal_deposit_tier(question_number)
+        return "gold" if mode == "easy" else "platinum"
+    return appeal_deposit_tier(question_number, mode=mode)
+
+
+def compensable_loss(*, question_number: int, before_answer: bool,
+                     answered_wrong: bool, run_status: str,
+                     bonus_correct: bool | None,
+                     lost_question_id: str | None,
+                     appealed_question_id: str) -> bool:
+    """Only a wrong answer that ended the round earns compensation.
+
+    Failed Q16 finishes as 'completed', not 'lost', in both game modes.
+    """
+    if before_answer or not answered_wrong or not loss_compensation_allowed(
+            lost_question_id=lost_question_id,
+            appealed_question_id=appealed_question_id):
+        return False
+    if question_number == 16:
+        return run_status == "completed" and bonus_correct is False
+    return run_status == "lost"
 
 
 def validate_complaint(reasons: list[str], comment: str | None, *,
@@ -114,5 +138,5 @@ def must_close_technical(submitted_at: datetime, now: datetime) -> bool:
 
 def bonus_wager_refund(*, question_number: int, upheld: bool,
                        caused_loss: bool) -> bool:
-    """Return the independent gold wager only for an upheld Q16 loss."""
+    """Return the independent silver/gold wager only for upheld Q16 loss."""
     return question_number == 16 and upheld and caused_loss

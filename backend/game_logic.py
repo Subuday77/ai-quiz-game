@@ -6,6 +6,12 @@ from typing import Literal
 MAIN_QUESTION_COUNT = 15
 BONUS_DIFFICULTY = 15  # Main questions use difficulty levels 0 through 14.
 STAR_MILESTONES = {5: "bronze", 10: "silver", 15: "gold"}
+EASY_STAR_MILESTONES = {10: "bronze", 15: "silver"}
+GameMode = Literal["classic", "easy"]
+
+
+def bonus_wager_tier(mode: GameMode) -> str:
+    return "silver" if mode == "easy" else "gold"
 
 GamePhase = Literal["main", "bonus", "completed", "lost"]
 
@@ -31,12 +37,15 @@ class GameState:
     hints_used: int = 0
     phase: GamePhase = "main"
     bonus_correct: bool | None = None
+    mode: GameMode = "classic"
 
     def __post_init__(self) -> None:
         if self.main_question_index is None:
             self.main_question_index = self.correct_main_answers
         if not 0 <= self.correct_main_answers <= self.main_question_index <= MAIN_QUESTION_COUNT:
             raise ValueError("Invalid main round progress")
+        if self.mode not in ("classic", "easy"):
+            raise ValueError("Invalid game mode")
 
     @property
     def current_difficulty(self) -> int:
@@ -48,9 +57,11 @@ class GameState:
             # and is never altered by this normalization.
             if self.main_question_index < self.correct_main_answers:
                 self.main_question_index = self.correct_main_answers
+            if self.mode == "easy":
+                return (self.main_question_index + 2) // 2
             return self.main_question_index
         if self.phase == "bonus":
-            return BONUS_DIFFICULTY
+            return 9 if self.mode == "easy" else BONUS_DIFFICULTY
         raise RuntimeError("The game has already ended")
 
     def record_hint_use(self) -> None:
@@ -86,7 +97,8 @@ class GameState:
             return AnswerResult(
                 correct=is_correct,
                 phase=self.phase,
-                achievement="platinum" if is_correct else None,
+                achievement=("gold" if self.mode == "easy" else "platinum")
+                if is_correct else None,
             )
 
         if not is_correct:
@@ -95,7 +107,8 @@ class GameState:
 
         self.correct_main_answers += 1
         self.main_question_index += 1
-        achievement = STAR_MILESTONES.get(self.correct_main_answers)
+        achievements = EASY_STAR_MILESTONES if self.mode == "easy" else STAR_MILESTONES
+        achievement = achievements.get(self.correct_main_answers)
         if self.main_question_index == MAIN_QUESTION_COUNT:
             self.phase = ("bonus" if self.hints_used == 0
                           and self.correct_main_answers == MAIN_QUESTION_COUNT

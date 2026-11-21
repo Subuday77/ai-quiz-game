@@ -25,10 +25,147 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 .answers button { background: #26294a; border: 1px solid #515879; color: #eff2ff; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; text-align: start; gap: 14px; min-height: 74px; }
 .answers button:hover:not(:disabled), .answers button:focus-visible { border-color: #8ce9ef; background: #32375d; outline: none; }
 .letter { display: grid; place-items: center; border-radius: 9px; border: 1px solid #6c769e; flex: 0 0 36px; height: 36px; color: #a3dce8; font-weight: 800; }
-.achievement, .star-list { padding: 14px 18px; background: #46416d; border: 1px solid #8b7fc7; border-radius: 12px; color: #f6dfa0; margin-bottom: 15px; }
+.achievement { padding: 14px 18px; background: #46416d; border: 1px solid #8b7fc7; border-radius: 12px; color: #f6dfa0; margin-bottom: 15px; }
+
+/* The round's earned stars deserve an individual, metallic showcase.
+   Identical in Classic and Easy: tier colors, not game-mode colors. */
+.star-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 22px 0 16px;
+}
+.star-award {
+  --award-rgb: 197 211 232;
+  --award-metal: #c5d3e8;
+  --award-ink: #f0f6ff;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 88px;
+  padding: 12px 23px 12px 13px;
+  overflow: hidden;
+  border: 1px solid rgb(var(--award-rgb) / .48);
+  border-radius: 16px;
+  background:
+    radial-gradient(ellipse at 9% 50%, rgb(var(--award-rgb) / .22), transparent 39%),
+    linear-gradient(105deg, rgb(var(--award-rgb) / .14), rgb(var(--award-rgb) / .035) 68%, #0a17242b);
+  box-shadow: inset 0 1px 0 rgb(var(--award-rgb) / .28),
+    0 9px 24px #03071024;
+}
+.star-award::before {
+  content: '';
+  position: absolute;
+  inset-block: 12px;
+  inset-inline-start: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--award-metal);
+  box-shadow: 0 0 17px rgb(var(--award-rgb) / .55);
+}
+.star-award::after {
+  content: '';
+  position: absolute;
+  top: -80%;
+  right: -10%;
+  width: 36%;
+  height: 240%;
+  transform: rotate(27deg);
+  pointer-events: none;
+  opacity: .45;
+  background: linear-gradient(90deg, transparent, rgb(var(--award-rgb) / .055), transparent);
+}
+.star-award[data-tier="bronze"] {
+  --award-rgb: 216 146 98;
+  --award-metal: #e6a673;
+  --award-ink: #ffdbb9;
+}
+.star-award[data-tier="silver"] {
+  --award-rgb: 176 207 237;
+  --award-metal: #cadcf5;
+  --award-ink: #e7f1ff;
+}
+.star-award[data-tier="gold"] {
+  --award-rgb: 245 194 84;
+  --award-metal: #ffce6a;
+  --award-ink: #ffebb2;
+}
+.star-award[data-tier="platinum"] {
+  --award-rgb: 143 218 235;
+  --award-metal: #a6f3f7;
+  --award-ink: #e3fdff;
+  background:
+    radial-gradient(ellipse at 8% 50%, #7deef02e, transparent 43%),
+    linear-gradient(108deg, #8defff23, #a98cff12 64%, #72d9f10a);
+  border-color: #a4e6eb85;
+}
+.star-award-icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  color: var(--award-metal);
+  font-size: 47px;
+  line-height: 1;
+  text-shadow: 0 2px 1px #0b0e2659, 0 0 22px rgb(var(--award-rgb) / .52);
+  background: radial-gradient(circle, rgb(var(--award-rgb) / .2), transparent 72%);
+  filter: drop-shadow(0 5px 6px #050a184d);
+}
+.star-award[data-tier="platinum"] .star-award-icon {
+  text-shadow: 0 0 13px #91f6ffcc, 0 0 27px #bdabff88;
+}
+.star-award-name {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  color: var(--award-ink);
+  font-size: clamp(20px, 2.6vw, 25px);
+  font-weight: 800;
+  letter-spacing: .012em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.star-award-spark {
+  position: relative;
+  z-index: 1;
+  justify-self: end;
+  color: var(--award-metal);
+  opacity: .72;
+  font-size: 20px;
+  text-shadow: 0 0 12px rgb(var(--award-rgb) / .55);
+}
+@media (max-width: 520px) {
+  .star-list { gap: 9px; }
+  .star-award {
+    grid-template-columns: 52px minmax(0, 1fr) 15px;
+    gap: 10px;
+    min-height: 72px;
+    padding: 9px 14px 9px 9px;
+    border-radius: 13px;
+  }
+  .star-award-icon { width: 50px; height: 50px; font-size: 38px; }
+  .star-award-name { font-size: clamp(17px, 4.5vw, 21px); }
+  .star-award-spark { font-size: 15px; }
+}
 .error { margin-top: 18px; color: #ffb9bb; background: #7c324433; border-radius: 8px; padding: 12px; line-height: 1.4; }
 footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; }
 @media (max-width: 640px) { .brand { margin-bottom: 35px; } .answers { grid-template-columns: 1fr; } .card { min-height: auto; } }
+
+/* Informational pages remain available during gameplay and before sign-in. */
+.site-footer { display: flex; flex-direction: column; gap: 9px; align-items: center; }
+.site-footer-links { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.site-footer-links a {
+  color: #cbd7ee; text-decoration: underline; text-underline-offset: 3px;
+  font-size: 13px; font-weight: 650;
+}
+.site-footer-links a:hover, .site-footer-links a:focus-visible { color: #a7edfc; }
 
 /* Two always-visible star counters. Prototype all-time totals live in this browser only. */
 .star-dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
@@ -804,17 +941,8 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .email-verification-gate { padding: 20px 16px; }
 }
 
-/* Loss mode uses a fixed, click-through visual layer rather than filtering the
-   app root. This preserves the layout/positioning of fixed dialogs and controls. */
-:host(.loss-mode)::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 2147483646;
-  pointer-events: none;
-  -webkit-backdrop-filter: grayscale(97%);
-  backdrop-filter: grayscale(97%);
-}
+/* Loss mode is desaturated selectively below. A full-screen grayscale
+   backdrop would also turn earned bronze/silver/gold/platinum awards grey. */
 
 /* Horizontal desktop game — atmospheric, but readable and fully CSS-rendered.
    Keep the rail physically on the right even when the UI locale is RTL. */
@@ -1397,4 +1525,397 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
 @media (prefers-reduced-motion: reduce) {
   .platinum-victory-medal, .platinum-victory-spark { animation: none; }
   .platinum-victory-continue:hover { transform: none; }
+}
+
+
+/* Game mode: keep the same layout but give Easy a distinct evergreen palette. */
+.game-stage .card .setup { max-width: 555px; }
+.setup-choice-row {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px; align-items: end;
+}
+.setup-choice { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.setup-choice select { width: 100%; min-width: 0; box-sizing: border-box; }
+.mode-label {
+  margin-inline-start: 9px; padding: 4px 9px; border-radius: 999px;
+  color: #c1f8d5; background: #215c3a; font-weight: 850;
+  border: 1px solid #74dca772; letter-spacing: .03em;
+}
+.easy-encouragement {
+  color: #c3ffe1; border-color: #65b98b;
+  background: linear-gradient(110deg, #1d5a3b, #274e40);
+}
+@media (max-width: 510px) {
+  .setup-choice-row { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+/* The root palette crossfades via .shell::before, not an instant background swap. */
+:host(.easy-mode) .game-stage .brand .spark { color: #86f3ad; text-shadow: 0 0 22px #39c98f75; }
+:host(.easy-mode) .game-stage .brand strong { color: #9affc9; }
+:host(.easy-mode) .game-stage .card {
+  border-color: #75dba475;
+  box-shadow: 0 28px 80px #050f10af, 0 0 38px #33a36d19, inset 0 1px 0 #e7ffe526;
+}
+:host(.easy-mode) .game-stage .card::after { color: #83ffc10e; text-shadow: 0 0 45px #40c98922; }
+:host(.easy-mode) .game-stage .card h1 { color: #f1fff6; text-shadow: 0 0 25px #8de9a92d; }
+:host(.easy-mode) .game-stage .card .eyebrow { color: #a5efbd; }
+:host(.easy-mode) .game-stage .card .intro { color: #d1ebdf; }
+:host(.easy-mode) .game-stage .card select {
+  color: #f2fff8; border-color: #74b994;
+  background: #21483a;
+}
+:host(.easy-mode) .game-stage .card select:focus-visible {
+  outline: 2px solid #9cf5bc; outline-offset: 2px;
+}
+:host(.easy-mode) .game-stage .card .primary {
+  color: #10261c;
+  box-shadow: 0 7px 24px #44c78b35;
+}
+:host(.easy-mode) .account-signup {
+  color: #10261c;
+  background: linear-gradient(105deg, #7ce7ae 0%, #b8f29d 100%);
+  box-shadow: 0 7px 24px #44c78b35;
+}
+:host(.easy-mode) .game-stage .card .outline-button {
+  color: #e1ffed; border-color: #7fbfa69a; background: #b5f5c70a;
+}
+:host(.easy-mode) .game-stage .card .outline-button:hover:not(:disabled) {
+  border-color: #bcffd0; background: #9cfdc424;
+}
+:host(.easy-mode) .game-stage .question h2 { color: #f2fff7; }
+:host(.easy-mode) .game-stage .question-label { color: #a6f5c3; }
+:host(.easy-mode) .game-stage .answers button {
+  color: #f0fff7; border-color: #61ad8f99;
+  background: linear-gradient(135deg, #255b46eb, #203f39da);
+}
+:host(.easy-mode) .game-stage .answers button:hover:not(:disabled),
+:host(.easy-mode) .game-stage .answers button:focus-visible {
+  border-color: #b6ffd1;
+  background: linear-gradient(135deg, #327658, #285b4e);
+  box-shadow: 0 0 17px #6edba957, inset 0 1px 0 #ffffff24;
+}
+:host(.easy-mode) .game-stage .answers .letter {
+  color: #eaffee; border-color: #78d8aa;
+  background: linear-gradient(140deg, #398a5b, #276747);
+}
+:host(.easy-mode) .game-stage .status .track { background: #215d4a78; }
+:host(.easy-mode) .game-stage .status .fill {
+  background: linear-gradient(90deg, #72e9a4, #b2f0a2);
+  box-shadow: 0 0 16px #7beba580;
+}
+:host(.easy-mode) .game-stage .coffee-support {
+  border-color: #74bd8a65;
+  background: linear-gradient(105deg, #22584188, #234a4480);
+}
+:host(.easy-mode) .game-stage .perk-shop { border-top-color: #72e4b044; }
+:host(.easy-mode) .game-sidebar .sidebar-section,
+:host(.easy-mode) .game-sidebar .star-panel {
+  border-color: #65c49c40;
+}
+:host(.easy-mode) .game-stage .gear-loader {
+  --gear-hole: #1b4434; --gear-primary: #7ce7ae; --gear-secondary: #b8f29d;
+}
+
+
+/* Preserve the account dropdown's overlay above neighboring sidebar panels. */
+.game-sidebar .sidebar-profile { z-index: 2; }
+
+/* Mode switching: keep the existing Classic gradients intact and fade the
+   Easy surfaces in. CSS cannot interpolate gradient backgrounds directly. */
+.shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 15% 0%, #215f48 0, transparent 50%),
+    radial-gradient(ellipse at 95% 95%, #154b46 0, transparent 55%),
+    #101f25;
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .shell::before { opacity: 1; }
+.game-stage .card .card-easy-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 79% 14%, #d5ffe2ae 0 1px, transparent 3px),
+    radial-gradient(circle at 58% 24%, #e3ffed88 0 1px, transparent 2px),
+    radial-gradient(ellipse at 75% 0%, #267d4a70, transparent 48%),
+    radial-gradient(ellipse at 100% 100%, #19696044, transparent 55%),
+    linear-gradient(148deg, #183d33 0%, #122f2a 53%, #14282c 100%);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-stage .card .card-easy-backdrop { opacity: 1; }
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel { position: relative; isolation: isolate; }
+.game-sidebar .sidebar-section::before,
+.game-sidebar .star-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(150deg, #193b33, #172f31);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-sidebar .sidebar-section::before,
+:host(.easy-mode) .game-sidebar .star-panel::before { opacity: 1; }
+
+/* Both translated introductions contribute to a shared grid cell's height.
+   Mode changes therefore crossfade copy without shifting the setup buttons. */
+.intro-mode-stack { display: grid; margin: 1em 0; }
+.intro-mode-stack .intro {
+  grid-area: 1 / 1;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .42s ease, color .42s ease;
+}
+.intro-mode-stack .intro.intro-active { opacity: 1; }
+
+/* Extra controls in the pre-game menu never insert a layout-changing spinner. */
+.question-actions.resume-actions {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.question-actions.resume-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 290px);
+  min-height: 52px;
+  margin-top: 0;
+  text-align: center;
+}
+
+/* Reset .primary's global top margin for every setup action, including
+   pending-results + start-game, and give adjacent buttons one equal height. */
+.game-stage .card .setup > .question-actions {
+  align-items: stretch;
+  gap: 12px;
+}
+.game-stage .card .setup > .question-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  margin-top: 0;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+@media (max-width: 580px) {
+  .game-stage .card .setup > .question-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .game-stage .card .setup > .question-actions > button,
+  .game-stage .card .setup > .question-actions.resume-actions > button {
+    width: 100%;
+  }
+}
+
+/* Q16: same baseline and row height regardless of which button's label wraps. */
+.bonus-decision > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  min-height: 54px;
+  margin-top: 0;
+  line-height: 1.35;
+  text-align: center;
+}
+@media (max-width: 680px) {
+  .bonus-decision > button { flex: 1 1 100%; width: 100%; }
+}
+
+/* Animate solid colors/borders while the large gradient layers crossfade. */
+.game-stage .brand strong,
+.game-stage .brand .spark,
+.game-stage .card,
+.game-stage .card h1,
+.game-stage .card .eyebrow,
+.game-stage .card select,
+.game-stage .card .outline-button,
+.game-stage .card .primary,
+.game-stage .shop-toggle,
+.game-stage .achievement,
+.game-stage .question-vote,
+.game-sidebar .sidebar-section,
+.game-sidebar .star-panel,
+.game-sidebar .account-button,
+.game-sidebar .ui-language-control select,
+.game-sidebar .exchange-arrow {
+  transition: color .42s ease, border-color .42s ease,
+    background-color .42s ease, box-shadow .42s ease, text-shadow .42s ease;
+}
+/* Preserve the existing hover lift, but crossfade the main CTA gradient. */
+.game-stage .card .primary {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: transform .16s ease, color .42s ease, box-shadow .42s ease;
+}
+.game-stage .card .primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(105deg, #7ce7ae 0%, #b8f29d 100%);
+  opacity: 0;
+  transition: opacity .42s ease;
+}
+:host(.easy-mode) .game-stage .card .primary::before { opacity: 1; }
+
+/* Easy gameplay palette: sidebar, shop, categories, votes and helper. */
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button) {
+  color: #d9ffec;
+  border-color: #64b48f;
+  background: #204b3a;
+}
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button):hover:not(:disabled),
+:host(.easy-mode) .game-sidebar .account-button:not(.premium-account-button):focus-visible {
+  background: #2d664c; border-color: #a3f0b9;
+}
+:host(.easy-mode) .game-sidebar .player-name { color: #a2efc2; }
+:host(.easy-mode) .game-sidebar .profile-menu {
+  background: #193e32; border-color: #5aab83;
+}
+:host(.easy-mode) .game-sidebar .ui-language-control { color: #cbefdf; }
+:host(.easy-mode) .game-sidebar .ui-language-control select {
+  color: #ecfff5; background: #214c3b; border-color: #6ac596;
+}
+:host(.easy-mode) .game-sidebar .star-panel-title,
+:host(.easy-mode) .game-sidebar .stats-caption { color: #b6ddca; }
+:host(.easy-mode) .game-sidebar .star-item {
+  background: #24453cba;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow {
+  color: #e9fff1; background: #255a44; border-color: #69bf90;
+  box-shadow: 0 3px 9px #0c251e80;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-pair.gold .exchange-arrow {
+  background: linear-gradient(110deg, #396851, #47765b);
+  border-color: #e9cd83;
+}
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow:hover:not(:disabled),
+:host(.easy-mode) .game-sidebar .star-items-exchange .exchange-arrow:focus-visible {
+  background: #347958; border-color: #b0f2c6; box-shadow: 0 0 11px #78e4ab55;
+}
+:host(.easy-mode) .game-sidebar .exchange-arrow small { color: #cfefdf; }
+:host(.easy-mode) .game-stage .shop-toggle {
+  color: #eafff2; border-color: #61b68b; background: #1f4939;
+}
+:host(.easy-mode) .game-stage .shop-toggle:hover { background: #2c6149; }
+:host(.easy-mode) .game-stage .shop-toggle:focus-visible { outline-color: #94ebad; }
+:host(.easy-mode) .game-stage .perk-actions button,
+:host(.easy-mode) .game-stage .perk-actions select {
+  color: #eafff2; background: #214a39; border-color: #63b58b;
+}
+:host(.easy-mode) .game-stage .perk-current-category { color: #a1eac2; }
+:host(.easy-mode) .game-stage .category-preferences {
+  background: #1d4234; border-color: #5cad81;
+}
+:host(.easy-mode) .game-stage .category-preferences p { color: #c4e6d4; }
+:host(.easy-mode) .game-stage .category-exclusion-list { border-color: #579d79; }
+:host(.easy-mode) .game-stage .category-exclusion-list label { color: #e2ffef; }
+:host(.easy-mode) .game-stage .category-exclusion-list input { accent-color: #78e4a5; }
+:host(.easy-mode) .game-stage .question-vote {
+  color: #d6f9e6; background: #214637; border-color: #5ba67c;
+}
+:host(.easy-mode) .game-stage .question-vote:hover:not(:disabled) {
+  background: #31604a; border-color: #a5efbd;
+}
+:host(.easy-mode) .game-stage .question-vote.selected {
+  background: #36745b; border-color: #9df3b9; color: #b7ffd5;
+  box-shadow: 0 0 0 2px #9df3b926;
+}
+:host(.easy-mode) .game-stage .question-vote:focus-visible { outline-color: #9df3b9; }
+:host(.easy-mode) .game-stage .achievement:not(.easy-encouragement) {
+  color: #f5f9da;
+  border-color: #75c89d;
+  background: linear-gradient(110deg, #254e40, #2b5d45);
+}
+:host(.easy-mode) .game-stage .achievement.achievement-silver {
+  color: #dce9f6;
+}
+:host(.easy-mode) .game-stage .bonus-decision {
+  border-color: #62b48a;
+}
+:host(.easy-mode) .game-stage .helper-tile,
+:host(.easy-mode) .game-stage .helper-speech,
+:host(.easy-mode) .game-stage .helper-modal {
+  color: #e7fff1; background: #204736; border-color: #68b78e;
+}
+:host(.easy-mode) .game-stage .helper-tile small { color: #badfcb; }
+:host(.easy-mode) .game-stage .helper-modal h3 { color: #b3edc5; }
+:host(.easy-mode) .game-stage .helper-profession-picker { border-color: #68b78e; }
+
+/* Non-game sections retain their Classic/shared blue palette in both modes.
+   In particular, do not green the About entry point or complaint entry. */
+:host(.easy-mode) .game-stage .card .about-open-button,
+:host(.easy-mode) .game-stage .card .appeal-header-button {
+  color: #f0efff; background: #ffffff05; border-color: #a49fd0b0;
+}
+:host(.easy-mode) .game-stage .card .about-open-button:hover:not(:disabled),
+:host(.easy-mode) .game-stage .card .appeal-header-button:hover:not(:disabled) {
+  color: #f0efff; background: #b99aff1c; border-color: #ceb3ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell::before, .game-stage .card .card-easy-backdrop,
+  .game-sidebar .sidebar-section::before, .game-sidebar .star-panel::before,
+  .game-stage .card .primary::before, .intro-mode-stack .intro {
+    transition: none !important;
+  }
+  .game-stage .brand strong, .game-stage .brand .spark, .game-stage .card,
+  .game-stage .card h1, .game-stage .card .eyebrow, .game-stage .card select,
+  .game-stage .card .outline-button, .game-stage .card .primary,
+  .game-stage .shop-toggle, .game-stage .achievement, .game-stage .question-vote,
+  .game-sidebar .sidebar-section, .game-sidebar .star-panel,
+  .game-sidebar .account-button, .game-sidebar .ui-language-control select,
+  .game-sidebar .exchange-arrow { transition: none !important; }
+}
+
+
+/* Keep the muted defeat look WITHOUT desaturating the collected star awards.
+   Apply grayscale only to non-reward surfaces, never to a shared ancestor
+   of .star-list; otherwise the metallic tier colors cannot show through. */
+:host(.loss-mode) {
+  background: radial-gradient(ellipse at 68% 13%, #3a3d41, transparent 58%),
+              linear-gradient(155deg, #282b2d, #171a1c);
+}
+:host(.loss-mode) .shell::before { opacity: 0; }
+:host(.loss-mode) .game-sidebar,
+:host(.loss-mode) .game-stage .brand { filter: grayscale(1); }
+:host(.loss-mode) .game-stage .card {
+  background: radial-gradient(ellipse at 78% 4%, #47494b77, transparent 53%),
+              linear-gradient(150deg, #36383a, #222426);
+  border-color: #81858a;
+  box-shadow: 0 26px 72px #111213a8, inset 0 1px #ffffff23;
+}
+:host(.loss-mode.easy-mode) .game-stage .card .card-easy-backdrop { opacity: 0; }
+:host(.loss-mode) .game-stage .card::before { filter: grayscale(1); opacity: .35; }
+:host(.loss-mode) .game-stage .card::after { color: #babdc315; }
+:host(.loss-mode) .game-stage .card > :not(.results):not(.card-easy-backdrop) {
+  filter: grayscale(1);
+}
+:host(.loss-mode) .game-stage .card .results > :not(.star-list) {
+  filter: grayscale(1);
+}
+:host(.loss-mode) .game-stage .card .results .star-list,
+:host(.loss-mode) .game-stage .card .results .star-award {
+  filter: none;
 }

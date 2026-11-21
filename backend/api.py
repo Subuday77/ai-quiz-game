@@ -34,6 +34,7 @@ from question_generator import create_question  # noqa: E402
 from question_schema import Choice, PublicQuestion, QuizQuestion  # noqa: E402
 from persistence.auth import router as auth_router  # noqa: E402
 from persistence.account_email_routes import router as email_account_router  # noqa: E402
+from persistence.contact_routes import router as public_contact_router  # noqa: E402
 from persistence.analytics import router as profile_router  # noqa: E402
 from localization.routes import router as localization_router  # noqa: E402
 from localization.dev_tools import router as localization_dev_router  # noqa: E402
@@ -44,6 +45,7 @@ app = FastAPI(title="AI Quiz Game", version="0.1.0", lifespan=appeal_lifespan)
 app.include_router(auth_router)  # Legacy username login during safe migration.
 app.include_router(premium_router)
 app.include_router(email_account_router)  # Email-first account endpoints.
+app.include_router(public_contact_router)  # Rate-limited, public website inquiries.
 app.include_router(profile_router)  # Derived statistics are initially empty until game DB migration.
 app.include_router(localization_router)
 app.include_router(localization_dev_router)

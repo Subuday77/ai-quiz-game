@@ -238,13 +238,15 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(posts.length, 0);
 });
 
-test('loss grayscale starts on losing feedback, survives results, and clears for a new game', () => {
+test('selective loss styling starts on losing feedback, survives results, and clears for a new game', () => {
   const { app } = setup();
-  assert.match(source, /host: \{ '\[class\.loss-mode\]': 'lossModeActive' \}/);
+  assert.match(source, /'\[class\.loss-mode\]': 'lossModeActive'/);
+  assert.match(source, /'\[class\.easy-mode\]': 'easyModeActive'/);
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
-  assert.match(css, /:host\(\.loss-mode\)::after/);
-  assert.match(css, /backdrop-filter: grayscale\(97%\)/);
-  assert.match(css, /pointer-events: none/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \{/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-sidebar,/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-list,/);
+  assert.doesNotMatch(css, /:host\(\.loss-mode\)::after/);
 
   app.screen = 'question';
   app.finishedPhase = 'lost';
@@ -687,6 +689,86 @@ test('normal Start game immediately requests Q1 without requiring a second click
   assert.equal(app.screen, 'question');
 });
 
+test('Easy setup posts mode and paints the green variant before Q1', () => {
+  const { app, posts } = setup();
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /id="game-mode"/);
+  assert.match(template, /\*ngIf="canEditPregameMode"/);
+  assert.match(template, /changeGameMode\(\$event\)/);
+  assert.match(template, /game\.easyMilestone5/);
+  assert.match(css, /:host\(\.easy-mode\) \.game-stage \.card/);
+  for (const key of ['game.modeLabel', 'game.modeEasy', 'game.modeClassic',
+                     'game.easyMilestone5', 'hero.introEasy',
+                     'helper.bonusRiskEasy', 'helper.playBonusEasy', 'helper.keepSilver']) {
+    assert.ok(english[key], key);
+  }
+
+  app.gameId = '';
+  app.changeGameMode('easy');
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(app.easyModeActive, true);
+  app.startGame();
+  assert.deepEqual(posts[0].body, { language: 'English', mode: 'easy' });
+  succeed(posts[0], { game_id: 'easy-fresh', language: 'English', mode: 'easy',
+                      phase: 'main', correct_main_answers: 0 });
+  assert.equal(app.selectedMode, 'easy');
+});
+
+test('pregame mode PATCH is persisted; resume and Q1 lock the selector', () => {
+  const { app, patches } = setup();
+  app.gameId = 'pregame-easy';
+  app.gameQuestionIssued = false;
+  assert.equal(app.canEditPregameMode, true);
+  app.changeGameMode('easy');
+  assert.equal(patches[0].url, '/api/v2/games/pregame-easy/mode');
+  assert.deepEqual(patches[0].body, { mode: 'easy' });
+  succeed(patches[0], { game_id: 'pregame-easy', language: 'English',
+                        mode: 'easy', phase: 'main' });
+  assert.equal(app.selectedMode, 'easy');
+  app.resumeAvailable = true;
+  assert.equal(app.canEditPregameMode, false);
+  app.changeGameMode('classic');
+  assert.equal(app.selectedMode, 'easy', 'cannot override a resumable round');
+  app.resumeAvailable = false;
+  app.gameQuestionIssued = true;
+  assert.equal(app.canEditPregameMode, false);
+  app.changeGameMode('classic');
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(patches.length, 1, 'no mode mutation inside a started round');
+});
+
+test('Easy Q16 failure forfeits silver and never opens Platinum ceremony', () => {
+  const { app, posts } = setup();
+  app.selectedMode = 'easy';
+  app.currentStars = { bronze: 1, silver: 1, gold: 0, platinum: 0 };
+  app.stars = ['bronze', 'silver'];
+  app.current = { ...question, number: 16, difficulty: 9, bonus: true };
+  app.screen = 'question';
+  app.answer('A');
+  succeed(posts.at(-1), {
+    correct: false, correct_answer: 'B', phase: 'completed',
+    correct_main_answers: 15, achievement: null,
+  });
+  assert.equal(app.currentStars.silver, 0);
+  assert.equal(app.currentStars.gold, 0);
+  assert.equal(app.platinumCelebrationOpen, false);
+});
+
+test('Easy run mode is restored from the server before a resumed question', () => {
+  const { app } = setup();
+  app.resumeCandidate = {
+    game_id: 'easy-resume', language: 'German', mode: 'easy', phase: 'main',
+    correct_main_answers: 3, main_question_index: 3, question_issued: true,
+    round_stars: { bronze: 0, silver: 0, gold: 0, platinum: 0 },
+  };
+  app.resumeAvailable = true;
+  app.selectedMode = 'classic';
+  app.startGame();
+  assert.equal(app.selectedMode, 'easy');
+  assert.equal(app.canEditPregameMode, false);
+});
+
 test('after paying for category exclusions the question language remains editable', () => {
   const { app, requests, posts, patches, scheduler } = setup();
   app.gameId = '';
@@ -1122,7 +1204,7 @@ test('Play Again creates a fresh unstarted DB round and never buys a helper', ()
   assert.equal(app.loading, true);
   assert.equal(posts.length, 1);
   assert.equal(posts[0].url, '/api/v2/games/terminal-round/replay');
-  assert.deepEqual(posts[0].body, { language: 'Russian' });
+  assert.deepEqual(posts[0].body, { language: 'Russian', mode: 'classic' });
   assert.equal(requests.length, 0);
   succeed(posts[0], {
     game_id: 'fresh-run', language: 'Russian', phase: 'main',
@@ -1263,7 +1345,7 @@ test('new-round cancellation and failed POST preserve purchases; success opens c
     app.startFreshGame();
     app.confirmNewGame();
     assert.equal(posts[0].url, '/api/v2/games/existing-game/replace');
-    assert.deepEqual(posts[0].body, { language: 'Spanish' });
+    assert.deepEqual(posts[0].body, { language: 'Spanish', mode: 'classic' });
     assert.equal(app.helperCard, oldHelper);
     posts[0].subject.error(new Error('network error'));
   });
@@ -2740,6 +2822,34 @@ test('appeal history only renders bonus wager on Q16, with unambiguous forfeitur
   assert.match(source, /item\.question_number === 16[\s\S]*?'appeals\.wagerRefunded'/);
 });
 
+test('failed Q16 in both modes can be appealed after F5 from results', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /screen === 'done' && !!finishedPhase/);
+  assert.match(source, /this.screen === 'done' && !!this.finishedPhase/);
+  for (const mode of ['classic', 'easy']) {
+    const { app, requests } = setup();
+    app.screen = 'setup';
+    app.pendingResults = {
+      game_id: 'failed-' + mode, mode, language: 'Russian',
+      phase: 'completed', bonus_correct: false,
+      correct_main_answers: 15, main_question_index: 15,
+      round_stars: { bronze: 1, silver: mode === 'easy' ? 0 : 1,
+                     gold: mode === 'easy' ? 0 : 0, platinum: 0 },
+    };
+    app.showPendingResults();
+    assert.equal(app.screen, 'done');
+    assert.equal(app.gameId, 'failed-' + mode);
+    assert.equal(app.selectedMode, mode);
+    const request = requests.find(r =>
+      r.url === '/api/v2/games/failed-' + mode + '/appeals/lost-question');
+    assert.ok(request, 'failed Q16 restored from PostgreSQL');
+    succeed(request, { ...question, question_id: 'bonus-' + mode,
+                       number: 16, bonus: true });
+    assert.equal(app.current?.number, 16);
+    assert.equal(app.current?.bonus, true);
+  }
+});
+
 test('complaint form separates monthly allowance, filing fee and total debit', () => {
   assert.equal(english['appeals.costTitle'], 'Total complaint cost');
   assert.equal(english['appeals.filingPrice'], 'Complaint fee');
@@ -2756,7 +2866,8 @@ test('complaint form separates monthly allowance, filing fee and total debit', (
 
 test('appeal popup uses dark theme, soft blur fade and animated double chevron', () => {
   const styles = readFileSync(join(root, 'src/styles.css'), 'utf8');
-  assert.match(source, /customClass:\s*\{ popup: 'quiz-appeal-popup' \}/);
+  assert.match(source, /customClass:\s*\{ popup: filingPopupClass \}/);
+  assert.match(source, /popup: filingPopupClass \+ ' quiz-appeal-confirm-popup'/);
   assert.match(source, /quiz-appeal-confirm-popup/);
   assert.match(source, /<span class="appeal-scroll-chevron"><\/span>/);
   assert.doesNotMatch(source, /aria-hidden="true">⌄<\/div>/);
@@ -3511,4 +3622,156 @@ test('restoring an earned Q16 Platinum star reopens an unseen ceremony', () => {
   app.finishPlatinumCelebration();
   assert.equal(app.screen, 'done', 'restored results should not request another question');
   assert.equal(app.platinumCelebrationOpen, false);
+});
+
+
+test('switching Classic/Easy retains pregame geometry and never shows a save spinner', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(template, /class="intro-mode-stack"/);
+  assert.match(template, /\[class\.intro-active\]="selectedMode === 'classic'"/);
+  assert.match(template, /\[class\.intro-active\]="selectedMode === 'easy'"/);
+  assert.match(template, /\[class\.resume-actions\]="resumeAvailable"/);
+  assert.doesNotMatch(template, /\*ngIf="languageSaving \|\| modeSaving" class="gear-loader"/);
+  assert.match(template, /class="card-easy-backdrop"/);
+  assert.match(css, /\.intro-mode-stack \{ display: grid;/);
+  assert.match(css, /\.intro-mode-stack \.intro \{[\s\S]*?grid-area: 1 \/ 1/);
+  assert.match(css, /\.shell::before \{[\s\S]*?transition: opacity \.42s ease/);
+  assert.match(css, /\.game-stage \.card \.card-easy-backdrop \{[\s\S]*?transition: opacity \.42s ease/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  const { app, patches } = setup();
+  app.gameQuestionIssued = false;
+  app.changeGameMode('easy');
+  assert.equal(app.modeSaving, true);
+  succeed(patches[0], { game_id: 'existing-game', language: 'English', mode: 'easy' });
+  assert.equal(app.modeSaving, false);
+  assert.equal(app.selectedMode, 'easy');
+});
+
+test('Easy interactive controls are green, shared About and complaint history stay blue', () => {
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const globalCss = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  assert.doesNotMatch(template, /perks\.reportsSoon/);
+  assert.equal(english['perks.reportsSoon'], undefined);
+  for (const selector of [
+    '.game-sidebar .account-button', '.game-sidebar .ui-language-control select',
+    '.game-sidebar .star-items-exchange .exchange-arrow',
+    '.game-stage .shop-toggle', '.game-stage .category-preferences',
+    '.game-stage .category-exclusion-list input', '.game-stage .question-vote',
+    '.game-stage .achievement', '.game-stage .helper-tile',
+  ]) assert.ok(css.includes(':host(.easy-mode) ' + selector), selector);
+  assert.match(css, /\.game-stage \.card \.about-open-button,/);
+  assert.match(css, /\.game-stage \.card \.appeal-header-button/);
+  assert.match(source, /quiz-easy-appeal-popup/);
+  assert.match(source, /popup: filingPopupClass/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-appeal-popup\.quiz-easy-appeal-popup/);
+  assert.doesNotMatch(globalCss, /\.quiz-appeal-history-popup\.quiz-easy-appeal-popup/);
+});
+
+test('category spending dialogs use green accents only while Easy is selected', () => {
+  const globalCss = readFileSync(join(root, 'src/styles.css'), 'utf8');
+  const categorySection = source.slice(source.indexOf('async excludeCategories():'),
+    source.indexOf('async openCategoryChangeDialog():', source.indexOf('async excludeCategories():')));
+  assert.match(categorySection, /this\.selectedMode === 'easy'/);
+  assert.match(categorySection, /quiz-easy-perk-popup/);
+  assert.match(categorySection, /confirmButtonColor: '#287852'/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-select/);
+  assert.match(globalCss, /\.swal2-popup\.quiz-easy-perk-popup \.swal2-cancel/);
+});
+
+test('finished rounds showcase each earned star on its own colored row in both modes', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  const results = template.slice(template.indexOf('<div *ngIf="screen === \'done\'"'),
+    template.indexOf('<p class="intro" role="status"', template.indexOf('<div *ngIf="screen === \'done\'"')));
+  assert.match(results, /class="star-list" \*ngIf="stars\.length" role="list"/);
+  assert.match(results, /class="star-award" \*ngFor="let tier of stars" \[attr\.data-tier\]="tier"/);
+  assert.match(results, /role="listitem"/);
+  assert.match(results, /class="star-award-icon" aria-hidden="true">★/);
+  assert.match(results, /class="star-award-name">\{\{ locale\.t\('stars\.' \+ tier\) \}\}/);
+  assert.match(results, /class="star-award-spark" aria-hidden="true">✦/);
+  assert.doesNotMatch(results, /\bstarNames\b/);
+  assert.match(css, /\.star-list \{\s*display: grid;\s*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.match(css, /\.star-award \{[\s\S]*?min-height: 88px;/);
+  for (const tier of ['bronze', 'silver', 'gold', 'platinum']) {
+    assert.match(css, new RegExp('\\.star-award\\[data-tier="' + tier + '"\\] \\{'));
+    assert.ok(english['stars.' + tier], 'tier localized: ' + tier);
+  }
+  assert.match(css, /@media \(max-width: 520px\) \{/);
+  assert.doesNotMatch(css, /:host\(\.easy-mode\) \.game-stage \.star-list/);
+});
+
+test('bonus Q16 choice buttons have equal height in both modes and stack on mobile', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.match(css, /\.bonus-decision > button \{[\s\S]*?align-self: stretch;[\s\S]*?min-height: 54px;[\s\S]*?margin-top: 0/);
+  assert.match(css, /@media \(max-width: 680px\) \{[\s\S]*?\.bonus-decision > button \{ flex: 1 1 100%; width: 100%; \}/);
+  assert.match(css, /\.question-actions\.resume-actions > button \{[\s\S]*?min-height: 52px/);
+});
+
+
+test('AdSense pages are crawlable, independent of login and localized through the canonical dictionary', () => {
+  const angular = JSON.parse(readFileSync(join(root, 'angular.json'), 'utf8'));
+  const assets = angular.projects['ai-quiz-frontend'].architect.build.options.assets;
+  assert.ok(assets.some(a => a.input === 'src/site-pages' && a.output === '/'));
+  const nginx = readFileSync(join(root, 'nginx.conf'), 'utf8');
+  for (const name of ['about', 'contact']) {
+    const html = readFileSync(join(root, 'src/site-pages/' + name + '.html'), 'utf8');
+    assert.match(html, new RegExp('<title>.+\\| AI Quiz Game<\\/title>'));
+    assert.match(html, new RegExp('rel="canonical" href="https://squizthebot\\.com/' + name + '"'));
+    assert.match(html, /<h1 data-i18n="site\./);
+    assert.match(html, /<main /);
+    assert.match(html, /<footer /);
+    assert.match(nginx, new RegExp('location = \\/' + name + ' \\{'));
+    for (const match of html.matchAll(/data-i18n="([^"]+)"/g)) {
+      assert.ok(english[match[1]], 'missing dictionary key: ' + match[1]);
+    }
+  }
+  const pageScript = readFileSync(join(root, 'src/site-pages/site-pages.js'), 'utf8');
+  assert.match(pageScript, /\/api\/localization\/dictionary\//);
+  assert.match(pageScript, /data\.fallback \|\| data\.missing_count/);
+  const contact = readFileSync(join(root, 'src/site-pages/contact.html'), 'utf8');
+  assert.match(contact, /action="\/api\/contact"/);
+  assert.match(contact, /name="website"/);
+  assert.match(pageScript, /method: 'POST'/);
+  assert.match(pageScript, /response\.status === 429/);
+  const sitemap = readFileSync(join(root, 'src/sitemap.xml'), 'utf8');
+  assert.match(sitemap, /https:\/\/squizthebot\.com\/about/);
+  assert.match(sitemap, /https:\/\/squizthebot\.com\/contact/);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /'\/about\?lang=' \+ locale\.code/);
+  assert.match(template, /'\/contact\?lang=' \+ locale\.code/);
+});
+
+
+test('pending results and start game buttons share a baseline and height', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /class="question-actions" \[class\.resume-actions\]="resumeAvailable"/);
+  assert.match(css, /\.game-stage \.card \.setup > \.question-actions \{[\s\S]*?align-items: stretch;/);
+  assert.match(css, /\.game-stage \.card \.setup > \.question-actions > button \{[\s\S]*?min-height: 52px;[\s\S]*?margin-top: 0;/);
+  assert.match(css, /@media \(max-width: 580px\) \{[\s\S]*?\.game-stage \.card \.setup > \.question-actions \{[\s\S]*?flex-direction: column;/);
+});
+
+test('earned bronze, silver, gold and platinum remain colored on lost rounds in either mode', () => {
+  const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
+  assert.doesNotMatch(css, /:host\(\.loss-mode\)::after\s*\{/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-list,/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-award \{\s*filter: none;/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results > :not\(\.star-list\)/);
+  for (const tier of ['bronze', 'silver', 'gold', 'platinum']) {
+    assert.ok(css.includes('.star-award[data-tier="' + tier + '"]'));
+  }
+});
+
+test('public Contact page has a localized bottom Close action that returns to the game', () => {
+  const html = readFileSync(join(root, 'src/site-pages/contact.html'), 'utf8');
+  const css = readFileSync(join(root, 'src/site-pages/site-pages.css'), 'utf8');
+  const formEnd = html.indexOf('</form>');
+  const actions = html.indexOf('class="info-bottom-actions"');
+  const mainEnd = html.indexOf('</main>');
+  assert.ok(formEnd !== -1 && formEnd < actions && actions < mainEnd);
+  assert.match(html, /<a class="info-button info-button-secondary" href="\/" data-i18n="site\.close">Close<\/a>/);
+  assert.equal(english['site.close'], 'Close');
+  assert.match(css, /\.info-bottom-actions \{[\s\S]*?justify-content: center;/);
 });

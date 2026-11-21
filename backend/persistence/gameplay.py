@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from game_logic import AnswerResult, GameState
+from game_logic import AnswerResult, GameMode, GameState
 from persistence.models import GameRun, Question, QuestionAttempt, QuestionReview, StarAward, Topic, User
 from persistence.choice_order import display_key, last_choice_order, new_choice_order
 from persistence.seed_topics import category_slug
@@ -43,9 +43,12 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def create_game(db: Session, *, user_id: UUID, language: str) -> GameRun:
+def create_game(db: Session, *, user_id: UUID, language: str,
+                mode: GameMode = "classic") -> GameRun:
     """Commit a new player-owned round. Authentication is done by the caller."""
-    run = GameRun(user_id=user_id, language=language, status="main")
+    if mode not in ("classic", "easy"):
+        raise ValueError("Invalid game mode")
+    run = GameRun(user_id=user_id, language=language, mode=mode, status="main")
     db.add(run)
     try:
         db.commit()
@@ -87,6 +90,7 @@ def game_state(run: GameRun, db: Session | None = None) -> GameState:
         hints_used=run.hints_used,
         phase=run.status,
         bonus_correct=run.bonus_correct,
+        mode=run.mode,
     )
 
 

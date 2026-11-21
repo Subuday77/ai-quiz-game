@@ -748,3 +748,105 @@ button:disabled { cursor: not-allowed; opacity: .55; }
     padding: 18px;
   }
 }
+
+
+/* Only new complaint filing and cost confirmation follow Easy's green palette.
+   History, verdicts, appeal rules and About stay on their shared blue design. */
+.swal2-popup.quiz-appeal-popup.quiz-easy-appeal-popup {
+  color: #edfff4;
+  background:
+    radial-gradient(circle at 92% 0%, #236a4c 0%, transparent 44%),
+    linear-gradient(155deg, #1c4034 0%, #142d2b 100%);
+  border-color: #64b58c;
+  box-shadow: 0 24px 84px #061c16c9, inset 0 1px #ffffff10;
+}
+.swal2-popup.quiz-easy-appeal-popup .swal2-title { color: #f2fff7; }
+.swal2-popup.quiz-easy-appeal-popup .swal2-html-container,
+.swal2-popup.quiz-easy-appeal-popup .appeal-form,
+.swal2-popup.quiz-easy-appeal-popup .appeal-confirm-cost { color: #d6eee0; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-quota-header {
+  color: #c5f3d8;
+  background: linear-gradient(100deg, #24553dcc, #284d3bcc);
+  border-color: #68bd9066;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-form {
+  scrollbar-color: #65b58a #1c4034;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-form::-webkit-scrollbar-track {
+  background: #1c4034;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-form::-webkit-scrollbar-thumb {
+  background: #65b58a; border-color: #1c4034;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-form > p:first-child { color: #f2fff7; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-options li {
+  color: #e0ffeb; background: #204c3c; border-color: #528e6d;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-options li strong { color: #9eecbc; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-choice {
+  background: #20463899; border-color: #528f7099;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-choice:hover {
+  background: #2d614a; border-color: #9be8b6;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-choice input { accent-color: #80dea5; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-form > label { color: #d8f5e3; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-form textarea {
+  color: #f2fff7; background: #1b4134; border-color: #62a780;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-form textarea:focus {
+  border-color: #99e7b7; outline-color: #99e7b7;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-cost {
+  color: #edfff4;
+  background: linear-gradient(135deg, #25513b, #234739);
+  border-color: #6eb68c;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-cost h3 { color: #f2fff7; }
+.swal2-popup.quiz-easy-appeal-popup .appeal-confirm-total {
+  color: #f0fff6; background: #26513f; border-color: #6ab88f;
+}
+.swal2-popup.quiz-easy-appeal-popup .swal2-confirm {
+  color: #10261c !important;
+  background: linear-gradient(100deg, #7ce7ae, #b8f29d) !important;
+}
+.swal2-popup.quiz-easy-appeal-popup .swal2-cancel {
+  color: #e3ffed !important; background: #295442 !important;
+  border-color: #69ae86;
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-scroll-hint {
+  background: linear-gradient(to bottom, transparent 4%, #1d40344d 36%,
+    #1d4034ef 86%, #1d4034 100%);
+}
+.swal2-popup.quiz-easy-appeal-popup .appeal-scroll-chevron {
+  border-color: #a4edc0;
+}
+
+
+/* Pre-game category exclusion and in-game category changes are game controls.
+   These dialogs follow Easy; shared About, account and appeal history do not. */
+.swal2-popup.quiz-easy-perk-popup {
+  border: 1px solid #65b58c;
+  border-radius: 16px;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-title { color: #f2fff7; }
+.swal2-popup.quiz-easy-perk-popup .swal2-html-container,
+.swal2-popup.quiz-easy-perk-popup .swal2-input-label { color: #d5f2e2; }
+.swal2-popup.quiz-easy-perk-popup .swal2-select,
+.swal2-popup.quiz-easy-perk-popup .swal2-select option {
+  color-scheme: dark;
+  color: #e8fff1;
+  border-color: #65b58c;
+  background: #204c39;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-select option:checked {
+  background-color: #287852;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-deny {
+  color: #e8fff1 !important;
+  background: #356a50 !important;
+}
+.swal2-popup.quiz-easy-perk-popup .swal2-cancel {
+  color: #e8fff1 !important;
+  background: #315344 !important;
+}

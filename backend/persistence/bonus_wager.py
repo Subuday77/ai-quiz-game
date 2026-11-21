@@ -1,17 +1,18 @@
-"""Server-owned optional Q16 gold wager; existing star ledger is authoritative."""
+"""Server-owned optional Q16 wager; existing star ledger is authoritative."""
 from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from game_logic import bonus_wager_tier
 from persistence.gameplay import GameConflict, owned_game, pending_question
 from persistence.models import GameRun, QuestionAttempt, WalletTransaction
 from persistence.star_economy import lock_user_stars, star_balance
 
 
 def accept_bonus(db: Session, *, user_id: UUID, run_id: UUID) -> GameRun:
-    """Stake one earned gold star before Q16, once per game."""
+    """Stake one silver (easy) or gold (classic) star before Q16, once."""
     try:
         lock_user_stars(db, user_id)
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
@@ -26,12 +27,13 @@ def accept_bonus(db: Session, *, user_id: UUID, run_id: UUID) -> GameRun:
             QuestionAttempt.run_id == run_id, QuestionAttempt.number == 16
         )) is not None:
             raise GameConflict("Bonus round already started")
-        if star_balance(db, user_id, "gold") < 1:
-            raise GameConflict("A gold star is required for the bonus wager")
+        tier = bonus_wager_tier(run.mode)
+        if star_balance(db, user_id, tier) < 1:
+            raise GameConflict(f"A {tier} star is required for the bonus wager")
         db.add(WalletTransaction(
             user_id=user_id, run_id=run.id,
             idempotency_key=f"bonus-wager:{run.id}:stake",
-            amount=-1, reason="star/gold/bonus-wager",
+            amount=-1, reason=f"star/{tier}/bonus-wager",
         ))
         run.bonus_wager_accepted = True
         db.commit()
@@ -42,7 +44,7 @@ def accept_bonus(db: Session, *, user_id: UUID, run_id: UUID) -> GameRun:
 
 
 def decline_bonus(db: Session, *, user_id: UUID, run_id: UUID) -> GameRun:
-    """Player declines Q16 and keeps earned gold."""
+    """Player declines Q16 and keeps the stakable silver/gold star."""
     try:
         run = owned_game(db, run_id=run_id, user_id=user_id, for_update=True)
         if run.status != "bonus" or run.correct_main_answers != 15:
@@ -59,10 +61,10 @@ def decline_bonus(db: Session, *, user_id: UUID, run_id: UUID) -> GameRun:
 
 
 def credit_won_gold(db: Session, *, run: GameRun) -> None:
-    """Stage gold recovery in the same transaction as successful Q16 answer."""
+    """Stage same-tier wager recovery in successful Q16 answer transaction."""
     if run.bonus_wager_accepted:
         db.add(WalletTransaction(
             user_id=run.user_id, run_id=run.id,
             idempotency_key=f"bonus-wager:{run.id}:win",
-            amount=1, reason="star/gold/bonus-win",
+            amount=1, reason=f"star/{bonus_wager_tier(run.mode)}/bonus-win",
         ))

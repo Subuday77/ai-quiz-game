@@ -10,6 +10,7 @@ import secrets
 from uuid import UUID, NAMESPACE_URL, uuid5
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, StrictInt
@@ -17,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from consts import LANGUAGE_DICT, QUESTION_CATEGORIES
+from game_logic import GameMode, bonus_wager_tier
 from category_taxonomy import prefer_other_family, paid_random_change_candidates
 from diagnostics import event
 from persistence.auth import authenticated_user, verified_game_user, validate_origin
@@ -44,6 +46,11 @@ router = APIRouter(prefix="/api/v2/games", tags=["Games — PostgreSQL"],
 
 class NewGame(BaseModel):
     language: str = "English"
+    mode: GameMode = "classic"
+
+
+class ModeChange(BaseModel):
+    mode: GameMode
 
 
 def _replacement_id(run_id: UUID, user_id: UUID) -> UUID:
@@ -145,6 +152,7 @@ class ChangeCategoryInput(BaseModel):
 class GameInfo(BaseModel):
     game_id: UUID
     language: str
+    mode: GameMode
     phase: str
     correct_main_answers: int
     round_stars: dict[str, int]
@@ -154,6 +162,8 @@ class GameInfo(BaseModel):
     # Read-only, lease-derived status. Never expose the generation token to clients.
     question_generation_in_progress: bool = False
     bonus_decision_available: bool = False
+    # Wrong Q16 has phase 'completed'; needed for restored appeal access.
+    bonus_correct: bool | None = None
     helper: dict | None = None
     replacement_game_id: UUID | None = None
 
@@ -207,10 +217,12 @@ def _game_info(db: Session, run) -> GameInfo:
     # A lost Q16 wager consumes this round's gold for the results display,
     # though the historical StarAward stays immutable.
     if run.bonus_wager_accepted and run.bonus_correct is False:
-        round_stars["gold"] = max(0, round_stars["gold"] - 1)
+        tier = bonus_wager_tier(run.mode)
+        round_stars[tier] = max(0, round_stars[tier] - 1)
     return GameInfo(
-        game_id=run.id, language=run.language, phase=run.status,
+        game_id=run.id, language=run.language, mode=run.mode, phase=run.status,
         correct_main_answers=run.correct_main_answers,
+        bonus_correct=run.bonus_correct,
         round_stars=round_stars,
         main_question_index=state.main_question_index,
         skipped_questions=int(skipped),
@@ -443,7 +455,8 @@ def new_game(payload: NewGame, request: Request,
         db.rollback()
         raise HTTPException(status_code=409, detail="Active game already exists")
     user.preferred_language = payload.language
-    run = create_game(db, user_id=user.id, language=payload.language)
+    run = create_game(db, user_id=user.id, language=payload.language,
+                      mode=payload.mode)
     return _game_info(db, run)
 
 
@@ -476,7 +489,7 @@ def replay_game(run_id: UUID, payload: NewGame, request: Request,
         _abandon_unpaid_legacy_runs(db, user_id=user.id)
         successor = GameRun(
             id=successor_id, user_id=user.id,
-            language=payload.language, status="main",
+            language=payload.language, mode=payload.mode, status="main",
         )
         user.preferred_language = payload.language
         db.add(successor)
@@ -543,7 +556,7 @@ def replace_game(run_id: UUID, payload: NewGame, request: Request,
         db.flush()  # UPDATE inactive before inserting the only new active run.
         successor = GameRun(
             id=successor_id, user_id=user.id,
-            language=payload.language, status="main",
+            language=payload.language, mode=payload.mode, status="main",
         )
         user.preferred_language = payload.language
         db.add(successor)
@@ -564,6 +577,37 @@ def game_info(run_id: UUID, user: User = Depends(authenticated_user),
               db: Session = Depends(get_db)):
     run = _lookup(db, run_id, user.id)
     return _game_info(db, run)
+
+
+@router.patch("/{run_id}/mode", response_model=GameInfo)
+def change_pregame_mode(run_id: UUID, payload: ModeChange, request: Request,
+                        user: User = Depends(authenticated_user),
+                        db: Session = Depends(get_db)):
+    """Only an unissued, non-generating round may change mode.
+
+    A player can choose Easy after buying a helper before Q1, but cannot
+    alter the difficulty curve or stakes of an already issued question.
+    """
+    validate_origin(request)
+    try:
+        run = owned_game(db, run_id=run_id, user_id=user.id, for_update=True)
+        lease_until = run.question_generation_until
+        if lease_until is not None and lease_until.tzinfo is None:
+            lease_until = lease_until.replace(tzinfo=timezone.utc)
+        if (run.question_generation_token and lease_until is not None
+                and lease_until > datetime.now(timezone.utc)):
+            raise HTTPException(status_code=409, detail={"code": "question_generating"})
+        issued = db.scalar(select(func.count(QuestionAttempt.id)).where(
+            QuestionAttempt.run_id == run_id
+        )) or 0
+        if run.status != "main" or issued:
+            raise HTTPException(status_code=409, detail="Game mode is locked after Q1")
+        run.mode = payload.mode
+        db.commit()
+        return _game_info(db, run)
+    except GameNotFound:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Game not found") from None
 
 
 @router.patch("/{run_id}/language", response_model=GameInfo)

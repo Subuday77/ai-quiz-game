@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from persistence.appeal_policy import (
     ALL_REASONS, BONUS_APPEAL_DEPOSIT_TIER, BONUS_WAGER_TIER,
     MAX_IMMEDIATE_JUDGE_ATTEMPTS, appeal_deposit_tier, appeal_fee_bronze,
-    bonus_wager_refund, compensation_tier, loss_compensation_allowed,
+    bonus_wager_refund, compensable_loss, compensation_tier, loss_compensation_allowed,
     month_bounds, must_close_technical, permanent_block_reason,
     refund_deposit, should_auto_uphold, validate_complaint,
 )
@@ -71,6 +71,32 @@ class AppealPolicyTests(unittest.TestCase):
         self.assertEqual(compensation_tier(16), "platinum")
         with self.assertRaises(ValueError):
             appeal_deposit_tier(17)
+
+    def test_easy_bonus_compensation_is_gold_not_platinum(self):
+        self.assertEqual(compensation_tier(16, mode="easy"), "gold")
+        self.assertEqual(compensation_tier(16, mode="classic"), "platinum")
+        self.assertEqual(compensation_tier(10, mode="easy"), "bronze")
+        self.assertEqual(compensation_tier(11, mode="easy"), "silver")
+        self.assertEqual(compensation_tier(15, mode="easy"), "silver")
+        for number, tier in ((1, "bronze"), (5, "bronze"), (10, "bronze"),
+                             (11, "silver"), (15, "silver"), (16, "silver")):
+            self.assertEqual(appeal_deposit_tier(number, mode="easy"), tier)
+        with self.assertRaises(ValueError):
+            appeal_deposit_tier(5, mode="unknown")
+
+    def test_failed_bonus_is_compensable_but_completed_wins_are_not(self):
+        args = dict(question_number=16, before_answer=False,
+                    answered_wrong=True, run_status="completed",
+                    bonus_correct=False, lost_question_id="q16",
+                    appealed_question_id="q16")
+        self.assertTrue(compensable_loss(**args))
+        self.assertFalse(compensable_loss(**{**args, "answered_wrong": False}))
+        self.assertFalse(compensable_loss(**{**args, "before_answer": True}))
+        self.assertFalse(compensable_loss(**{**args, "bonus_correct": True}))
+        self.assertFalse(compensable_loss(**{**args, "appealed_question_id": "other"}))
+        self.assertFalse(compensable_loss(**{**args, "run_status": "main"}))
+        self.assertTrue(compensable_loss(**{**args, "question_number": 12,
+                                            "run_status": "lost", "bonus_correct": None}))
 
     def test_only_five_checkboxes_remain(self):
         self.assertEqual(ALL_REASONS, {

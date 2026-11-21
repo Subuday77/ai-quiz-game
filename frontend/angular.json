@@ -13,6 +13,7 @@
           "builder": "@angular-devkit/build-angular:application",
           "options": {
             "outputPath": "dist/ai-quiz-frontend",
+            "outputHashing": "all",
             "index": "src/index.html",
             "browser": "src/main.ts",
             "polyfills": [
@@ -24,6 +25,7 @@
               "src/styles.css"
             ],
             "assets": [
+              { "glob": "**/*", "input": "src/site-pages", "output": "/" },
               "src/favicon.svg",
               "src/robots.txt",
               "src/sitemap.xml"

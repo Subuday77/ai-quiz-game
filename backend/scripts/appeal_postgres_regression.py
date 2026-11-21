@@ -28,8 +28,9 @@ def fixture(db: Session, *, number: int, losing: bool = False,
     db.add_all([user, topic])
     db.flush()
     run = GameRun(user_id=user.id, language="English",
-                  status="lost" if losing else "main",
-                  bonus_wager_accepted=wager)
+                  status=("completed" if number == 16 else "lost") if losing else "main",
+                  bonus_wager_accepted=wager,
+                  bonus_correct=False if losing and number == 16 else None)
     db.add(run)
     db.flush()
     question = Question(
@@ -128,7 +129,7 @@ def run():
             request_id=uuid4(), reasons=["incorrect_key"],
             comment="incorrect answer", source_links=[],
             confirm_nonrefundable_fee=False, expected_fee_bronze=0)
-        assert db.get(GameRun, run_id).status == "lost"
+        assert db.get(GameRun, run_id).status == "completed"
         assert db.get(QuestionAttempt, appeal.attempt_id).superseded_at is None
         settle_appeal(db, appeal=appeal, decision="upheld",
                       verdict_en="Wrong key", verdict_localized="Wrong key")
@@ -136,7 +137,7 @@ def run():
         assert ledger_count(db, appeal.id, "appeal-compensation") == 1
         assert ledger_count(db, appeal.id, "appeal-bonus-wager-refund") == 1
         assert ledger_count(db, appeal.id, "appeal-deposit-refund") == 1
-        assert db.get(GameRun, run_id).status == "lost"
+        assert db.get(GameRun, run_id).status == "completed"
         resolved_appeal_id = appeal.id
         resolved_question_id = qid
         resolved_username = db.get(User, uid).username

@@ -274,6 +274,8 @@ class GameRun(Base):
     id = id_column()
     user_id = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     language: Mapped[str] = mapped_column(String(25), nullable=False)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False, default="classic",
+                                     server_default="classic")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="main")
     correct_main_answers: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     round_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -301,6 +303,7 @@ class GameRun(Base):
     active_duration_ms: Mapped[int | None] = mapped_column(Integer)
     __table_args__ = (
         CheckConstraint("status IN ('main','bonus','completed','lost','abandoned')", name="ck_run_status"),
+        CheckConstraint("mode IN ('classic','easy')", name="ck_run_mode"),
         CheckConstraint("correct_main_answers BETWEEN 0 AND 15", name="ck_run_progress"),
         CheckConstraint("round_score >= 0 AND hints_used >= 0", name="ck_run_score_hints"),
         CheckConstraint("active_duration_ms IS NULL OR active_duration_ms >= 0", name="ck_run_active_time"),

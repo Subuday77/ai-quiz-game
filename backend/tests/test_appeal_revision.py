@@ -43,7 +43,7 @@ class AppealRevisionTests(unittest.TestCase):
              "2027-01-01T00:00:00+00:00"),
         ):
             with (self.subTest(moment=moment),
-                  patch("persistence.appeal_service.owned_game", return_value=object()),
+                  patch("persistence.appeal_service.owned_game", return_value=SimpleNamespace(mode="classic")),
                   patch("persistence.appeal_service._eligible_attempt",
                         return_value=(SimpleNamespace(number=1), None, True)),
                   patch("persistence.appeal_service._filings_this_month",

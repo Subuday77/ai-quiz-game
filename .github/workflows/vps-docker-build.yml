@@ -45,3 +45,43 @@ jobs:
         run: docker build -f backend/Dockerfile -t quiz-backend:ci .
       - name: Build Angular static-web image
         run: docker build -f frontend/Dockerfile -t quiz-web:ci frontend
+      - name: Validate nginx and versioned Angular assets
+        run: |
+          docker run --rm --add-host backend:127.0.0.1 quiz-web:ci nginx -t
+          docker run --rm --entrypoint sh quiz-web:ci -ec '
+            cd /usr/share/nginx/html
+            ls main-*.js styles-*.css polyfills-*.js >/dev/null
+            ls about.html contact.html site-pages.css site-pages.js site-pages-preload.js >/dev/null
+            grep -q "About AI Quiz Game" about.html
+            grep -q "/api/contact" contact.html
+            grep -q "site-pages-preload.js" about.html
+            grep -q "site-pages-preload.js" contact.html
+            grep -Eq "main-[A-Za-z0-9_-]+[.]js" index.html
+            grep -Eq "styles-[A-Za-z0-9_-]+[.]css" index.html
+          '
+      - name: Serve public pages without Angular login or API
+        run: |
+          docker run --rm -d --name quiz-public-pages --add-host backend:127.0.0.1 -p 127.0.0.1:18098:80 quiz-web:ci
+          trap 'docker rm -f quiz-public-pages >/dev/null 2>&1 || true' EXIT
+          ready=0
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:18098/about >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if test "$ready" != 1; then
+            docker logs quiz-public-pages
+            exit 1
+          fi
+          for p in about contact; do
+            curl -fsS "http://127.0.0.1:18098/$p" > "/tmp/$p.html"
+            grep -q "<main " "/tmp/$p.html"
+            grep -q "AI Quiz Game" "/tmp/$p.html"
+            curl -fsSI "http://127.0.0.1:18098/$p" | grep -iq "content-type: text/html"
+            curl -fsSI "http://127.0.0.1:18098/$p" | grep -iq "cache-control: no-store"
+          done
+          curl -fsS http://127.0.0.1:18098/site-pages.js >/dev/null
+          curl -fsS http://127.0.0.1:18098/site-pages-preload.js >/dev/null
+          curl -fsS http://127.0.0.1:18098/site-pages.css >/dev/null

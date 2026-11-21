@@ -35,8 +35,9 @@ class BonusWagerTests(unittest.TestCase):
         topic = Topic(slug="bonus-test", labels={"en": "History"})
         self.db.add(topic)
         self.db.flush()
+        difficulty = 9 if self.run.mode == "easy" else 15
         question = Question(
-            topic_id=topic.id, language="Russian", requested_difficulty=15,
+            topic_id=topic.id, language="Russian", requested_difficulty=difficulty,
             text="Bonus?", choices={"A":"1","B":"2","C":"3","D":"4"},
             correct_key="C", fingerprint="d" * 64, status="approved",
             generator_provider="test", generator_model="test",
@@ -45,7 +46,7 @@ class BonusWagerTests(unittest.TestCase):
         self.db.add(question)
         self.db.flush()
         self.db.add(QuestionAttempt(run_id=self.run.id, question_id=question.id,
-                                    number=16, requested_difficulty=15))
+                                    number=16, requested_difficulty=difficulty))
         self.db.commit()
         return question
 
@@ -64,6 +65,40 @@ class BonusWagerTests(unittest.TestCase):
         self.assertEqual(result.achievement, "platinum")
         self.assertEqual(star_balance(self.db, self.user.id, "gold"), 1)
         self.assertEqual(star_balance(self.db, self.user.id, "platinum"), 1)
+
+    def test_easy_stakes_silver_and_q16_win_returns_silver_plus_gold(self):
+        self.run.mode = "easy"
+        self.db.query(StarAward).filter_by(tier="gold").delete()
+        self.db.add(StarAward(user_id=self.user.id, run_id=self.run.id, tier="silver"))
+        self.db.commit()
+        self.assertEqual(star_balance(self.db, self.user.id, "silver"), 1)
+        accept_bonus(self.db, user_id=self.user.id, run_id=self.run.id)
+        self.assertEqual(star_balance(self.db, self.user.id, "silver"), 0)
+        self.assertEqual(star_balance(self.db, self.user.id, "gold"), 0)
+        question = self.issue_q16()
+        result, _ = record_answer(
+            self.db, run_id=self.run.id, user_id=self.user.id,
+            question_id=question.id, selected="C",
+        )
+        self.assertEqual(result.achievement, "gold")
+        self.assertEqual(star_balance(self.db, self.user.id, "silver"), 1)
+        self.assertEqual(star_balance(self.db, self.user.id, "gold"), 1)
+        self.assertEqual(star_balance(self.db, self.user.id, "platinum"), 0)
+
+    def test_easy_q16_loss_forfeits_only_silver(self):
+        self.run.mode = "easy"
+        self.db.query(StarAward).filter_by(tier="gold").delete()
+        self.db.add(StarAward(user_id=self.user.id, run_id=self.run.id, tier="silver"))
+        self.db.commit()
+        accept_bonus(self.db, user_id=self.user.id, run_id=self.run.id)
+        question = self.issue_q16()
+        result, _ = record_answer(
+            self.db, run_id=self.run.id, user_id=self.user.id,
+            question_id=question.id, selected="A",
+        )
+        self.assertFalse(result.correct)
+        self.assertEqual(star_balance(self.db, self.user.id, "silver"), 0)
+        self.assertEqual(star_balance(self.db, self.user.id, "gold"), 0)
 
     def test_loss_forfeits_gold_but_not_its_earned_award(self):
         accept_bonus(self.db, user_id=self.user.id, run_id=self.run.id)

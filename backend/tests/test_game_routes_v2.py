@@ -80,6 +80,54 @@ class PersistentGameAPITests(unittest.TestCase):
         return response.json()["game_id"]
 
 
+    def test_game_mode_is_persisted_and_locked_after_q1(self):
+        self.register("EasyModeTester")
+        created = self.client.post("/api/v2/games", json={
+            "language": "Russian", "mode": "easy",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        game_id = created.json()["game_id"]
+        self.assertEqual(created.json()["mode"], "easy")
+        self.assertEqual(self.client.get("/api/v2/games/active").json()["mode"], "easy")
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, UUID(game_id)).mode, "easy")
+
+        changed = self.client.patch(f"/api/v2/games/{game_id}/mode",
+                                    json={"mode": "classic"})
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["mode"], "classic")
+        invalid = self.client.patch(f"/api/v2/games/{game_id}/mode",
+                                    json={"mode": "expert"})
+        self.assertEqual(invalid.status_code, 422)
+        changed_back = self.client.patch(f"/api/v2/games/{game_id}/mode",
+                                         json={"mode": "easy"})
+        self.assertEqual(changed_back.status_code, 200, changed_back.text)
+
+        with patch("api.create_question", return_value={
+            **QUESTION, "difficulty": 1, "question": "A fresh easy Q1?"
+        }):
+            q1 = self.client.get(f"/api/v2/games/{game_id}/question")
+        self.assertEqual(q1.status_code, 200, q1.text)
+        self.assertEqual(q1.json()["difficulty"], 1)
+        refused = self.client.patch(f"/api/v2/games/{game_id}/mode",
+                                    json={"mode": "classic"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(self.client.get(f"/api/v2/games/{game_id}").json()["mode"], "easy")
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, UUID(game_id)).mode, "easy")
+
+    def test_replacement_mode_is_explicit_and_old_round_retains_its_mode(self):
+        self.register("EasyReplaceTester")
+        original = self.start()
+        replacement = self.client.post(f"/api/v2/games/{original}/replace",
+                                       json={"language": "English", "mode": "easy"})
+        self.assertEqual(replacement.status_code, 201, replacement.text)
+        self.assertEqual(replacement.json()["mode"], "easy")
+        self.assertEqual(self.client.get("/api/v2/games/active").json()["mode"], "easy")
+        with Session(self.engine) as db:
+            self.assertEqual(db.get(GameRun, UUID(original)).mode, "classic")
+            self.assertEqual(db.get(GameRun, UUID(replacement.json()["game_id"])).mode, "easy")
+
     def test_question_language_preference_persists_independently_of_ui(self):
         user_id = UUID(self.register("LanguageTester"))
         initial = self.client.get("/api/auth/me").json()

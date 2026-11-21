@@ -9,6 +9,7 @@ import { ABOUT_SECTIONS } from './localization/about-copy';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type Screen = 'setup' | 'question' | 'feedback' | 'done';
+type GameMode = 'classic' | 'easy';
 type StarTier = 'bronze' | 'silver' | 'gold' | 'platinum';
 type ConvertibleTier = Exclude<StarTier, 'platinum'>;
 type StarCounts = Record<StarTier, number>;
@@ -61,7 +62,9 @@ interface ProfileStats {
 interface GameInfo {
   game_id: string;
   language: string;
+  mode?: GameMode; // Older cached/test fixtures default to classic.
   phase: string;
+  bonus_correct?: boolean | null;
   correct_main_answers: number;
   round_stars: StarCounts;
   main_question_index?: number;
@@ -130,6 +133,7 @@ interface AppealQuote {
   hint_refund_bronze_if_upheld: number;
   loss_compensation_tier_if_upheld: StarTier | null;
   bonus_wager_refund_if_upheld: boolean;
+  bonus_wager_tier?: StarTier;
   question_snapshot: {
     question_id: string; question: string;
     answers: Record<Choice, string>; hidden_keys: Choice[];
@@ -287,7 +291,8 @@ interface AnswerFeedback {
 
 @Component({
   selector: 'app-root',
-  host: { '[class.loss-mode]': 'lossModeActive' },
+  host: { '[class.loss-mode]': 'lossModeActive',
+          '[class.easy-mode]': 'easyModeActive' },
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './app.component.html',
@@ -376,6 +381,10 @@ export class AppComponent implements OnInit, OnDestroy {
   get lossModeActive(): boolean {
     return this.finishedPhase === 'lost' && (this.screen === 'feedback' || this.screen === 'done');
   }
+  get easyModeActive(): boolean { return this.selectedMode === 'easy'; }
+  get bonusStakeTier(): 'silver' | 'gold' {
+    return this.selectedMode === 'easy' ? 'silver' : 'gold';
+  }
   pendingResults: GameInfo | null = null;
   statsLoading = false;
   statsError = '';
@@ -383,8 +392,11 @@ export class AppComponent implements OnInit, OnDestroy {
   correctAnswers = 0;
 
   selectedLanguage = 'English';
+  selectedMode: GameMode = 'classic';
   private gameLanguage = '';
+  private gameMode: GameMode = 'classic';
   languageSaving = false;
+  modeSaving = false;
   screen: Screen = 'setup';
   gameId = '';
   resumeAvailable = false;
@@ -460,6 +472,60 @@ export class AppComponent implements OnInit, OnDestroy {
       !this.resumeCandidate && (!this.gameId || !this.gameQuestionIssued);
   }
 
+  get canEditPregameMode(): boolean {
+    return this.canEditPregameLanguage;
+  }
+
+  /** Mode remains editable before Q1 (including purchased pregame setup),
+   *  and is locked once the round issues a question or starts generating.
+   *  A saved resumable round never exposes this selector.
+   */
+  changeGameMode(mode: GameMode): void {
+    if (mode !== 'classic' && mode !== 'easy') return;
+    if (this.resumeAvailable || this.resumeCandidate) {
+      this.selectedMode = this.resumeCandidate?.mode ?? this.gameMode;
+      return;
+    }
+    if (!this.gameId) {
+      this.selectedMode = mode;
+      return;
+    }
+    if (!this.canEditPregameMode || !this.account || this.loading ||
+        this.modeSaving || this.languageSaving || this.perksBusy || this.categoryLoading ||
+        this.helperBusy) {
+      this.selectedMode = this.gameMode;
+      return;
+    }
+    if (mode === this.gameMode) {
+      this.selectedMode = mode;
+      return;
+    }
+    const gameId = this.gameId;
+    const accountId = this.account.id;
+    this.selectedMode = mode;
+    this.modeSaving = true;
+    this.error = '';
+    this.subscriptions.add(this.http.patch<GameInfo>(
+      GAME_API + '/' + gameId + '/mode', { mode },
+    ).pipe(timeout(10000), finalize(() => {
+      if (this.gameId === gameId) this.modeSaving = false;
+    })).subscribe({
+      next: game => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
+      },
+      error: err => {
+        if (this.gameId !== gameId || this.account?.id !== accountId) return;
+        if (this.isUnauthorized(err)) this.sessionExpired();
+        else {
+          this.selectedMode = this.gameMode;
+          this.error = 'game.modeUpdateFailed';
+        }
+      },
+    }));
+  }
+
   // An excluded-category payment already allocated a game. Update its
   // language in PostgreSQL, not just the dropdown, before Q1 is offered.
   changeQuestionLanguage(language: string): void {
@@ -531,6 +597,8 @@ export class AppComponent implements OnInit, OnDestroy {
         if (this.gameId !== gameId || this.account?.id !== accountId) return;
         this.gameLanguage = game.language;
         this.selectedLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         if (this.account) this.account.preferred_language = game.language;
       },
       error: (err: unknown) => {
@@ -645,9 +713,6 @@ export class AppComponent implements OnInit, OnDestroy {
 
   get rtl(): boolean { return this.locale.rtl; }
   get questionRtl(): boolean { return this.selectedLanguage === 'Hebrew'; }
-  get starNames(): string {
-    return this.stars.map(key => this.locale.t('stars.' + key)).join(' · ');
-  }
 
   setUiLanguage(code: string): void {
     if (!this.uiLanguages.some(item => item.code === code) || this.locale.loading) return;
@@ -763,7 +828,7 @@ export class AppComponent implements OnInit, OnDestroy {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[char]);
   }
 
-  private restoreLostQuestionForAppeal(runId: string): void {
+  private restoreFailedQuestionForAppeal(runId: string): void {
     if (!this.account || !runId) return;
     const accountId = this.account.id;
     this.subscriptions.add(this.http.get<PublicQuestion>(
@@ -771,7 +836,8 @@ export class AppComponent implements OnInit, OnDestroy {
     ).pipe(timeout(10000)).subscribe({
       next: question => {
         if (this.account?.id === accountId && this.gameId === runId &&
-            this.finishedPhase === 'lost' && this.screen === 'done') this.current = question;
+            (this.finishedPhase === 'lost' || this.finishedPhase === 'completed') &&
+            this.screen === 'done') this.current = question;
       },
       error: () => { /* Already appealed or not eligible; keep the result unchanged. */ },
     }));
@@ -781,7 +847,8 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!this.account || !this.gameId || !this.current || this.appealBusy ||
         this.loading || this.perksBusy ||
         !(this.screen === 'question' ||
-          (this.screen === 'feedback' && !!this.feedback)) ||
+          (this.screen === 'feedback' && !!this.feedback) ||
+          (this.screen === 'done' && !!this.finishedPhase)) ||
         this.appealedQuestionIds.has(this.current.question_id)) return;
 
     this.appealBusy = true;
@@ -831,7 +898,8 @@ export class AppComponent implements OnInit, OnDestroy {
           ? this.locale.t('appeals.compensation') + ': ' +
             star(quote.loss_compensation_tier_if_upheld, 1) : '',
         quote.bonus_wager_refund_if_upheld
-          ? this.locale.t('appeals.wagerRefunded') + ': ' + star('gold', 1) : '',
+          ? this.locale.t('appeals.wagerRefunded') + ': ' +
+            star(quote.bonus_wager_tier || this.bonusStakeTier, 1) : '',
       ].filter(Boolean).map(row => '<p>' + safe(row) + '</p>').join('');
       const costHtml =
         '<section class="appeal-cost"><h3>' + safe(this.locale.t('appeals.costTitle')) +
@@ -844,17 +912,23 @@ export class AppComponent implements OnInit, OnDestroy {
          safe(this.locale.t('appeals.feeNeverReturned')) + '</p>' : '') +
         '</section>';
       const wagerNotice = question.number === 16
-        ? '<p>' + safe(this.locale.t('appeals.bonusSeparate')) + '</p>' : '';
+        ? '<p>' + safe(this.locale.t(
+            (quote.bonus_wager_tier || this.bonusStakeTier) === 'silver'
+              ? 'appeals.bonusSeparateEasy' : 'appeals.bonusSeparate')) + '</p>' : '';
       const hintNotice = question.hidden_count
         ? '<p>' + safe(this.locale.t('appeals.hintsLater')) + '</p>' : '';
       let draft: { reasons: string[]; comment: string; source_links: string[] } = {
         reasons: [], comment: '', source_links: [],
       };
       let confirmed = false;
+      // Only the filing and cost-confirmation dialogs adopt the game palette.
+      // Appeal history, rules and verdicts retain their shared blue design.
+      const filingPopupClass = this.selectedMode === 'easy'
+        ? 'quiz-appeal-popup quiz-easy-appeal-popup' : 'quiz-appeal-popup';
       while (!confirmed) {
         const result = await Swal.fire({
           titleText: this.locale.t('appeals.title'), width: '850px', showCancelButton: true,
-          customClass: { popup: 'quiz-appeal-popup' },
+          customClass: { popup: filingPopupClass },
           confirmButtonText: this.locale.t('appeals.submit'),
           cancelButtonText: this.locale.t('helper.close'),
           html: '<p class="appeal-quota-header">' + safe(quotaText) + '</p>' +
@@ -909,7 +983,7 @@ export class AppComponent implements OnInit, OnDestroy {
         const confirmedResult = await Swal.fire({
           titleText: this.locale.t('appeals.confirmTitle'),
           width: '650px', showCancelButton: true, reverseButtons: true,
-          customClass: { popup: 'quiz-appeal-popup quiz-appeal-confirm-popup' },
+          customClass: { popup: filingPopupClass + ' quiz-appeal-confirm-popup' },
           confirmButtonText: this.locale.t('appeals.confirmAndSend'),
           cancelButtonText: this.locale.t('appeals.back'),
           html: '<div class="appeal-confirm-cost"><p>' +
@@ -1866,7 +1940,7 @@ export class AppComponent implements OnInit, OnDestroy {
   startGame(): void {
     if (this.loading || this.perksBusy || this.helperBusy || this.configLoading || this.authLoading ||
         this.authBusy || this.restoringGame || this.categoryLoading ||
-        this.languageSaving || this.categoriesToExclude.length > 0 ||
+        this.languageSaving || this.modeSaving || this.categoriesToExclude.length > 0 ||
         this.error === 'game.restoreFailed') return;
     if (!this.account) {
       void this.openAuthDialog('login');
@@ -1885,16 +1959,21 @@ export class AppComponent implements OnInit, OnDestroy {
       this.bonusDecisionAvailable = run.bonus_decision_available === true;
       this.gameLanguage = run.language;
       this.selectedLanguage = run.language;
+      this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+      this.selectedMode = this.gameMode;
       this.progress = run.main_question_index ?? run.correct_main_answers;
       this.gameCorrectAnswers = run.correct_main_answers;
       this.skippedQuestions = run.skipped_questions ?? 0;
       // The database owns earned stars, including Q16 and returned deposits.
-      this.currentStars = run.round_stars ? { ...run.round_stars } : {
-        bronze: run.correct_main_answers >= 5 ? 1 : 0,
-        silver: run.correct_main_answers >= 10 ? 1 : 0,
-        gold: run.correct_main_answers >= 15 ? 1 : 0,
-        platinum: 0,
-      };
+      this.currentStars = run.round_stars ? { ...run.round_stars } :
+        this.selectedMode === 'easy'
+          ? { bronze: run.correct_main_answers >= 10 ? 1 : 0,
+              silver: run.correct_main_answers >= 15 ? 1 : 0,
+              gold: 0, platinum: 0 }
+          : { bronze: run.correct_main_answers >= 5 ? 1 : 0,
+              silver: run.correct_main_answers >= 10 ? 1 : 0,
+              gold: run.correct_main_answers >= 15 ? 1 : 0,
+              platinum: 0 };
       this.stars = this.starTiers.filter(tier => this.currentStars[tier.key] > 0)
         .map(tier => tier.key);
       if (this.bonusDecisionAvailable) {
@@ -1948,11 +2027,12 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!oldId) return;
     const accountId = this.account.id;
     const language = this.selectedLanguage;
+    const mode = this.selectedMode;
     this.showAbandonConfirm = false;
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
-      GAME_API + '/' + oldId + '/replace', { language },
+      GAME_API + '/' + oldId + '/replace', { language, mode },
     ).pipe(timeout(this.requestTimeoutMs), finalize(() => { this.loading = false; }))
       .subscribe({
         next: (game) => {
@@ -1961,6 +2041,8 @@ export class AppComponent implements OnInit, OnDestroy {
           this.gameId = game.game_id;
           this.gameLanguage = game.language;
           this.selectedLanguage = game.language;
+          this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+          this.selectedMode = this.gameMode;
           this.rememberActiveGame(game.game_id);
           this.loadCategoryInfo();
           this.refreshSpendableStars();
@@ -1997,13 +2079,15 @@ export class AppComponent implements OnInit, OnDestroy {
     this.loading = true;
     this.error = '';
     this.subscriptions.add(this.http.post<GameInfo>(
-      GAME_API, { language: this.selectedLanguage },
+      GAME_API, { language: this.selectedLanguage, mode: this.selectedMode },
     ).pipe(timeout(this.requestTimeoutMs)).subscribe({
       next: (game) => {
         this.gameId = game.game_id;
         this.clearPendingResults();
         this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.resumeRunLanguage = '';
@@ -2346,8 +2430,9 @@ export class AppComponent implements OnInit, OnDestroy {
         this.feedback = result;
         this.bonusDecisionAvailable = result.phase === 'bonus';
         if (this.current?.bonus && !result.correct) {
-          this.currentStars.gold = Math.max(0, this.currentStars.gold - 1);
-          this.stars = this.stars.filter(tier => tier !== 'gold');
+          const tier = this.bonusStakeTier;
+          this.currentStars[tier] = Math.max(0, this.currentStars[tier] - 1);
+          this.stars = this.stars.filter(star => star !== tier);
         }
         this.finishedPhase = result.phase === 'lost' || result.phase === 'completed' ? result.phase : null;
         this.progress = Math.min(15, this.current?.number ?? result.correct_main_answers);
@@ -2387,7 +2472,9 @@ export class AppComponent implements OnInit, OnDestroy {
     // while the Retry action is visible.
     if (this.loading || this.canRetryQuestion || this.bonusDecisionAvailable) return;
     if (this.gameEnded) {
-      this.clearPendingResults();
+      // Keep the F5 bookmark for failed main questions and bonus wagers.
+      const failedBonus = this.current?.bonus === true && this.feedback?.correct === false;
+      if (this.finishedPhase !== 'lost' && !failedBonus) this.clearPendingResults();
       this.screen = 'done';
     } else {
       this.generatingNextQuestion = true;
@@ -2405,7 +2492,7 @@ export class AppComponent implements OnInit, OnDestroy {
     // Play Again is an explicit request for a FRESH empty round. The server
     // makes it idempotent and never discards another run's paid perks silently.
     this.subscriptions.add(this.http.post<GameInfo>(
-      GAME_API + '/' + terminalRun + '/replay', { language },
+      GAME_API + '/' + terminalRun + '/replay', { language, mode: this.selectedMode },
     ).pipe(timeout(this.requestTimeoutMs), finalize(() => {
       if (this.account?.id === accountId) this.loading = false;
     })).subscribe({
@@ -2415,6 +2502,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.gameId = game.game_id;
         this.gameLanguage = game.language;
         this.selectedLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.rememberActiveGame(game.game_id);
         this.loadCategoryInfo();
         this.refreshSpendableStars();
@@ -2457,11 +2546,13 @@ export class AppComponent implements OnInit, OnDestroy {
     try {
       if (!this.gameId) {
         const game = await firstValueFrom(this.http.post<GameInfo>(
-          GAME_API, { language: this.selectedLanguage },
+          GAME_API, { language: this.selectedLanguage, mode: this.selectedMode },
         ).pipe(timeout(this.requestTimeoutMs)));
         this.gameId = game.game_id;
         this.gameQuestionIssued = false;
         this.gameLanguage = game.language;
+        this.gameMode = game.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.rememberActiveGame(game.game_id);
         this.resumeCandidate = null;
         this.categoryInfo = null;
@@ -2605,6 +2696,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.restoreVersion++;
     this.restoringGame = false;
     this.account = null;
+    this.selectedMode = 'classic';
+    this.gameMode = 'classic';
     this.aboutOpen = false;
     this.aboutClaimed = false;
     this.aboutStatusLoading = false;
@@ -2679,6 +2772,10 @@ export class AppComponent implements OnInit, OnDestroy {
         this.exclusionCost > this.spendableStars.silver ||
         info.allowed.length - this.categoriesToExclude.length < 16) return;
     const { default: Swal } = await import('sweetalert2');
+    const style = this.selectedMode === 'easy'
+      ? { background: '#18392d', color: '#edfff4', confirmButtonColor: '#287852',
+          customClass: { popup: 'quiz-easy-perk-popup' } }
+      : { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
     const decision = await Swal.fire({
       titleText: this.locale.t('perks.excludeTitle'),
       text: this.locale.format('perks.excludeConfirm', {
@@ -2687,8 +2784,7 @@ export class AppComponent implements OnInit, OnDestroy {
       showCancelButton: true,
       confirmButtonText: this.locale.t('perks.confirm'),
       cancelButtonText: this.locale.t('auth.cancel'),
-      background: '#1b1e3e', color: '#f1f3ff',
-      confirmButtonColor: '#8170d8',
+      ...style,
     });
     if (!decision.isConfirmed || this.perksBusy || !this.gameId) return;
     this.perksBusy = true;
@@ -2718,7 +2814,10 @@ export class AppComponent implements OnInit, OnDestroy {
     if (!state?.can_change || !this.current || this.current.bonus || this.screen !== 'question' ||
         this.loading || this.perksBusy || this.spendableStars.silver < 1) return;
     const { default: Swal } = await import('sweetalert2');
-    const style = { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
+    const style = this.selectedMode === 'easy'
+      ? { background: '#18392d', color: '#edfff4', confirmButtonColor: '#287852',
+          customClass: { popup: 'quiz-easy-perk-popup' } }
+      : { background: '#1b1e3e', color: '#f1f3ff', confirmButtonColor: '#8170d8' };
     while (this.current && !this.loading && !this.perksBusy) {
       const choice = await Swal.fire({
         titleText: this.locale.t('perks.changeCategory'),
@@ -3076,6 +3175,8 @@ export class AppComponent implements OnInit, OnDestroy {
           this.gameId = run.game_id;
           this.gameLanguage = run.language;
           this.selectedLanguage = run.language;
+          this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+          this.selectedMode = this.gameMode;
           this.gameQuestionIssued = false;
           this.helperCard = run.helper ?? null;
           this.loadCategoryInfo();
@@ -3089,6 +3190,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.resumeRunLanguage = run.language;
         this.gameLanguage = run.language;
         this.selectedLanguage = run.language;
+        this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.resumeAvailable = true;
         this.screen = 'setup';
       },
@@ -3150,6 +3253,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.questionLoading = false;
     this.gameLanguage = run.language;
     this.selectedLanguage = run.language;
+    this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+    this.selectedMode = this.gameMode;
     this.progress = run.main_question_index ?? run.correct_main_answers;
     this.gameCorrectAnswers = run.correct_main_answers;
     this.skippedQuestions = run.skipped_questions ?? 0;
@@ -3167,7 +3272,9 @@ export class AppComponent implements OnInit, OnDestroy {
       this.screen = 'done';
       this.forgetActiveGame();
       this.rememberPendingResults(run.game_id);
-      if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+      if (run.phase === 'lost' ||
+          (run.phase === 'completed' && run.bonus_correct === false))
+        this.restoreFailedQuestionForAppeal(run.game_id);
     } else if (run.phase === 'main' || run.phase === 'bonus') {
       this.rememberActiveGame(run.game_id);
       if (run.question_issued) {
@@ -3195,6 +3302,8 @@ export class AppComponent implements OnInit, OnDestroy {
       next: (run) => {
         this.loading = false;
         this.canRetryQuestion = false;
+        this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+        this.selectedMode = this.gameMode;
         this.progress = run.main_question_index ?? run.correct_main_answers;
         this.bonusDecisionAvailable = run.bonus_decision_available === true;
         this.gameQuestionIssued = run.question_issued === true;
@@ -3209,6 +3318,10 @@ export class AppComponent implements OnInit, OnDestroy {
             .map(t => t.key);
           this.current = null;
           this.screen = 'done';
+          this.rememberPendingResults(run.game_id);
+          if (run.phase === 'lost' ||
+              (run.phase === 'completed' && run.bonus_correct === false))
+            this.restoreFailedQuestionForAppeal(run.game_id);
           this.refreshStats();
         } else {
           this.current = null;
@@ -3234,7 +3347,9 @@ export class AppComponent implements OnInit, OnDestroy {
     this.longWait = false;
     this.gameId = '';
     this.gameLanguage = '';
+    this.gameMode = this.selectedMode;
     this.languageSaving = false;
+    this.modeSaving = false;
     this.resumeAvailable = false;
     this.resumeCandidate = null;
     this.resumeRunLanguage = '';
@@ -3318,6 +3433,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.gameId = run.game_id;
     this.gameLanguage = run.language;
     this.selectedLanguage = run.language;
+    this.gameMode = run.mode === 'easy' ? 'easy' : 'classic';
+    this.selectedMode = this.gameMode;
     this.progress = run.main_question_index ?? run.correct_main_answers;
     this.gameCorrectAnswers = run.correct_main_answers;
     this.skippedQuestions = run.skipped_questions ?? 0;
@@ -3329,11 +3446,14 @@ export class AppComponent implements OnInit, OnDestroy {
       .map(t => t.key);
     this.helperCard = run.helper ?? null;
     this.screen = 'done';
-    if (run.phase === 'lost') this.restoreLostQuestionForAppeal(run.game_id);
+    if (run.phase === 'lost' ||
+        (run.phase === 'completed' && run.bonus_correct === false))
+      this.restoreFailedQuestionForAppeal(run.game_id);
     if (run.phase === 'completed' && run.round_stars.platinum > 0)
       this.openPlatinumCelebration(run.game_id);
     // Preserve the bookmark so an F5 does not erase the losing-card appeal path.
-    if (run.phase !== 'lost') this.clearPendingResults();
+    if (run.phase !== 'lost' && run.bonus_correct !== false)
+      this.clearPendingResults();
   }
 
   private rememberActiveGame(id: string): void {

@@ -24,11 +24,17 @@ test('robots.txt permits public pages but keeps API out of search indexes', () =
   assert.doesNotMatch(robots, /<html/i);
 });
 
-test('sitemap contains only public canonical homepage, not API or private URLs', () => {
+test('sitemap contains only the homepage and two public canonical pages, not API or private URLs', () => {
   assert.match(sitemap, /<urlset\b[^>]*xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9"/);
-  assert.match(sitemap, /<loc>https:\/\/squizthebot\.com\/<\/loc>/);
+  for (const url of [
+    'https://squizthebot.com/',
+    'https://squizthebot.com/about',
+    'https://squizthebot.com/contact',
+  ]) {
+    assert.ok(sitemap.includes('<loc>' + url + '</loc>'), url);
+  }
   assert.doesNotMatch(sitemap, /<loc>[^<]*\/api\//i);
-  assert.equal((sitemap.match(/<loc>/g) || []).length, 1);
+  assert.equal((sitemap.match(/<loc>/g) || []).length, 3);
   assert.match(index, /<link rel="canonical" href="https:\/\/squizthebot\.com\/"\s*\/>/);
 });
 
