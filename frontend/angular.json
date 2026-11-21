@@ -25,6 +25,7 @@
               "src/styles.css"
             ],
             "assets": [
+              { "glob": "**/*", "input": "src/site-pages", "output": "/" },
               "src/favicon.svg",
               "src/robots.txt",
               "src/sitemap.xml"
