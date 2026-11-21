@@ -158,6 +158,15 @@ select { padding: 13px 14px; border-radius: 10px; color: #f4f5ff; background: #2
 footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; }
 @media (max-width: 640px) { .brand { margin-bottom: 35px; } .answers { grid-template-columns: 1fr; } .card { min-height: auto; } }
 
+/* Informational pages remain available during gameplay and before sign-in. */
+.site-footer { display: flex; flex-direction: column; gap: 9px; align-items: center; }
+.site-footer-links { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.site-footer-links a {
+  color: #cbd7ee; text-decoration: underline; text-underline-offset: 3px;
+  font-size: 13px; font-weight: 650;
+}
+.site-footer-links a:hover, .site-footer-links a:focus-visible { color: #a7edfc; }
+
 /* Two always-visible star counters. Prototype all-time totals live in this browser only. */
 .star-dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
 .star-panel { padding: 16px 18px; background: #181a37d9; border: 1px solid #ffffff20; border-radius: 15px; min-width: 0; }
