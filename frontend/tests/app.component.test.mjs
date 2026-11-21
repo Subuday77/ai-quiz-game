@@ -3707,3 +3707,37 @@ test('bonus Q16 choice buttons have equal height in both modes and stack on mobi
   assert.match(css, /@media \(max-width: 680px\) \{[\s\S]*?\.bonus-decision > button \{ flex: 1 1 100%; width: 100%; \}/);
   assert.match(css, /\.question-actions\.resume-actions > button \{[\s\S]*?min-height: 52px/);
 });
+
+
+test('AdSense pages are crawlable, independent of login and localized through the canonical dictionary', () => {
+  const angular = JSON.parse(readFileSync(join(root, 'angular.json'), 'utf8'));
+  const assets = angular.projects['ai-quiz-frontend'].architect.build.options.assets;
+  assert.ok(assets.some(a => a.input === 'src/site-pages' && a.output === '/'));
+  const nginx = readFileSync(join(root, 'nginx.conf'), 'utf8');
+  for (const name of ['about', 'contact']) {
+    const html = readFileSync(join(root, 'src/site-pages/' + name + '.html'), 'utf8');
+    assert.match(html, new RegExp('<title>.+\\| AI Quiz Game<\\/title>'));
+    assert.match(html, new RegExp('rel="canonical" href="https://squizthebot\\.com/' + name + '"'));
+    assert.match(html, /<h1 data-i18n="site\./);
+    assert.match(html, /<main /);
+    assert.match(html, /<footer /);
+    assert.match(nginx, new RegExp('location = \\/' + name + ' \\{'));
+    for (const match of html.matchAll(/data-i18n="([^"]+)"/g)) {
+      assert.ok(english[match[1]], 'missing dictionary key: ' + match[1]);
+    }
+  }
+  const pageScript = readFileSync(join(root, 'src/site-pages/site-pages.js'), 'utf8');
+  assert.match(pageScript, /\/api\/localization\/dictionary\//);
+  assert.match(pageScript, /data\.fallback \|\| data\.missing_count/);
+  const contact = readFileSync(join(root, 'src/site-pages/contact.html'), 'utf8');
+  assert.match(contact, /action="\/api\/contact"/);
+  assert.match(contact, /name="website"/);
+  assert.match(pageScript, /method: 'POST'/);
+  assert.match(pageScript, /response\.status === 429/);
+  const sitemap = readFileSync(join(root, 'src/sitemap.xml'), 'utf8');
+  assert.match(sitemap, /https:\/\/squizthebot\.com\/about/);
+  assert.match(sitemap, /https:\/\/squizthebot\.com\/contact/);
+  const template = readFileSync(join(root, 'src/app/app.component.html'), 'utf8');
+  assert.match(template, /'\/about\?lang=' \+ locale\.code/);
+  assert.match(template, /'\/contact\?lang=' \+ locale\.code/);
+});
