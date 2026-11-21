@@ -50,6 +50,21 @@ p { margin: 0; color: #c6d1e8; line-height: 1.8; max-width: 760px; }
 }
 .info-button:hover:not(:disabled) { filter: brightness(1.08); }
 .info-button:disabled { opacity: .6; cursor: not-allowed; }
+.info-bottom-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid #a4b7d329;
+}
+.info-button-secondary {
+  min-width: 170px;
+  color: #e9efff;
+  border: 1px solid #a9a3d673;
+  background: #ffffff0b;
+  box-shadow: none;
+}
+.info-button-secondary:hover { background: #ffffff1a; }
 :focus-visible { outline: 2px solid #9aeafb; outline-offset: 3px; }
 .info-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 22px 2px; flex-wrap: wrap; color: #a5b6d0; font-size: 13px; }
 .info-footer nav { display: flex; flex-wrap: wrap; }
