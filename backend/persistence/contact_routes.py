@@ -89,5 +89,9 @@ def contact(payload: ContactMessage, request: Request,
     # Ignore suspicious automated forms without sending anything.
     if payload.website.strip():
         return {"sent": True}
+    if (not _plain_address(payload.email)
+            or not payload.name.strip() or not payload.message.strip()
+            or any(ord(c) < 32 for c in payload.name)):
+        raise HTTPException(status_code=422, detail="Invalid contact message")
     send_contact_email(payload)
     return {"sent": True}
