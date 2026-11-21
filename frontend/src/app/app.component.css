@@ -941,17 +941,8 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .email-verification-gate { padding: 20px 16px; }
 }
 
-/* Loss mode uses a fixed, click-through visual layer rather than filtering the
-   app root. This preserves the layout/positioning of fixed dialogs and controls. */
-:host(.loss-mode)::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 2147483646;
-  pointer-events: none;
-  -webkit-backdrop-filter: grayscale(97%);
-  backdrop-filter: grayscale(97%);
-}
+/* Loss mode is desaturated selectively below. A full-screen grayscale
+   backdrop would also turn earned bronze/silver/gold/platinum awards grey. */
 
 /* Horizontal desktop game — atmospheric, but readable and fully CSS-rendered.
    Keep the rail physically on the right even when the UI locale is RTL. */
@@ -1705,6 +1696,34 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   text-align: center;
 }
 
+/* Reset .primary's global top margin for every setup action, including
+   pending-results + start-game, and give adjacent buttons one equal height. */
+.game-stage .card .setup > .question-actions {
+  align-items: stretch;
+  gap: 12px;
+}
+.game-stage .card .setup > .question-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  margin-top: 0;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+@media (max-width: 580px) {
+  .game-stage .card .setup > .question-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .game-stage .card .setup > .question-actions > button,
+  .game-stage .card .setup > .question-actions.resume-actions > button {
+    width: 100%;
+  }
+}
+
 /* Q16: same baseline and row height regardless of which button's label wraps. */
 .bonus-decision > button {
   display: inline-flex;
@@ -1868,4 +1887,35 @@ footer { text-align: center; font-size: 12px; color: #8a8faa; margin-top: 32px; 
   .game-sidebar .sidebar-section, .game-sidebar .star-panel,
   .game-sidebar .account-button, .game-sidebar .ui-language-control select,
   .game-sidebar .exchange-arrow { transition: none !important; }
+}
+
+
+/* Keep the muted defeat look WITHOUT desaturating the collected star awards.
+   Apply grayscale only to non-reward surfaces, never to a shared ancestor
+   of .star-list; otherwise the metallic tier colors cannot show through. */
+:host(.loss-mode) {
+  background: radial-gradient(ellipse at 68% 13%, #3a3d41, transparent 58%),
+              linear-gradient(155deg, #282b2d, #171a1c);
+}
+:host(.loss-mode) .shell::before { opacity: 0; }
+:host(.loss-mode) .game-sidebar,
+:host(.loss-mode) .game-stage .brand { filter: grayscale(1); }
+:host(.loss-mode) .game-stage .card {
+  background: radial-gradient(ellipse at 78% 4%, #47494b77, transparent 53%),
+              linear-gradient(150deg, #36383a, #222426);
+  border-color: #81858a;
+  box-shadow: 0 26px 72px #111213a8, inset 0 1px #ffffff23;
+}
+:host(.loss-mode.easy-mode) .game-stage .card .card-easy-backdrop { opacity: 0; }
+:host(.loss-mode) .game-stage .card::before { filter: grayscale(1); opacity: .35; }
+:host(.loss-mode) .game-stage .card::after { color: #babdc315; }
+:host(.loss-mode) .game-stage .card > :not(.results):not(.card-easy-backdrop) {
+  filter: grayscale(1);
+}
+:host(.loss-mode) .game-stage .card .results > :not(.star-list) {
+  filter: grayscale(1);
+}
+:host(.loss-mode) .game-stage .card .results .star-list,
+:host(.loss-mode) .game-stage .card .results .star-award {
+  filter: none;
 }
