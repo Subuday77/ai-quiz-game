@@ -238,14 +238,15 @@ test('guest cannot create an unprotected v2 game', () => {
   assert.equal(posts.length, 0);
 });
 
-test('loss grayscale starts on losing feedback, survives results, and clears for a new game', () => {
+test('selective loss styling starts on losing feedback, survives results, and clears for a new game', () => {
   const { app } = setup();
   assert.match(source, /'\[class\.loss-mode\]': 'lossModeActive'/);
   assert.match(source, /'\[class\.easy-mode\]': 'easyModeActive'/);
   const css = readFileSync(join(root, 'src/app/app.component.css'), 'utf8');
-  assert.match(css, /:host\(\.loss-mode\)::after/);
-  assert.match(css, /backdrop-filter: grayscale\(97%\)/);
-  assert.match(css, /pointer-events: none/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \{/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-sidebar,/);
+  assert.match(css, /:host\(\.loss-mode\) \.game-stage \.card \.results \.star-list,/);
+  assert.doesNotMatch(css, /:host\(\.loss-mode\)::after/);
 
   app.screen = 'question';
   app.finishedPhase = 'lost';
